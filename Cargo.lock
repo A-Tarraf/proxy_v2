@@ -787,6 +787,7 @@ dependencies = [
  "reqwest",
  "rouille",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

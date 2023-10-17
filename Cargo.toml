@@ -9,3 +9,14 @@ prometheus-scrape = "0.1.1"
 reqwest = "0.11.22"
 rouille = "3.6.2"
 serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.107"
+
+[lib]
+name = "proxyclient"
+path = "src/lib.rs"
+crate-type = ["cdylib"]      # Creates dynamic lib
+# crate-type = ["staticlib"] # Creates static lib
+
+[[bin]]
+name = "proxy_v2"
+path = "src/main.rs"

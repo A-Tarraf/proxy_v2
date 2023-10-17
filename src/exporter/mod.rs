@@ -5,7 +5,7 @@ use super::proxy_common::ProxyErr;
 /***********************
  * PROMETHEUS EXPORTER *
  ***********************/
- struct ExporterCounter {
+ struct ExporterEntry {
 	name: String,
 	value: Arc<
 				RwLock<
@@ -14,11 +14,11 @@ use super::proxy_common::ProxyErr;
 				>
 }
 
-impl ExporterCounter
+impl ExporterEntry
 {
-	fn new(name : String, value : f64) -> ExporterCounter
+	fn new(name : String, value : f64) -> ExporterEntry
 	{
-		ExporterCounter{
+		ExporterEntry{
 			name,
 			value : Arc::new(RwLock::new(value))
 		}
@@ -26,19 +26,19 @@ impl ExporterCounter
 }
 
 
-struct ExporterCounterGroup {
+struct ExporterEntryGroup {
 	basename : String,
 	doc: String,
 	ht: RwLock<
-					HashMap<String, ExporterCounter>
+					HashMap<String, ExporterEntry>
 				>
 }
 
-impl ExporterCounterGroup
+impl ExporterEntryGroup
 {
-	fn new(basename : String, doc : String) -> ExporterCounterGroup
+	fn new(basename : String, doc : String) -> ExporterEntryGroup
 	{
-		ExporterCounterGroup{
+		ExporterEntryGroup{
 			basename,
 			doc,
 			ht : RwLock::new(HashMap::new())
@@ -66,7 +66,7 @@ impl ExporterCounterGroup
 		}
 	}
 
-	fn inc(& self, name : &str, value : f64) -> Result<(), ProxyErr>
+	fn accumulate(& self, name : &str, value : f64) -> Result<(), ProxyErr>
 	{
 		match self.ht.write().unwrap().get_mut(name)
 		{
@@ -81,11 +81,11 @@ impl ExporterCounterGroup
 		}
 	}
 
-	fn push(& self, name : &str, value : f64) -> Result<(), ProxyErr>
+	fn push(& self, name : &str) -> Result<(), ProxyErr>
 	{
 		if self.ht.read().unwrap().contains_key(name)
 		{
-			return self.inc(name, value);
+			return Ok(());
 		}
 		else
 		{
@@ -96,7 +96,7 @@ impl ExporterCounterGroup
 					return Err(ProxyErr::new(format!("Bad metric name '{}' unmatched brackets",name.to_string()).as_str()));
 				}
 			}
-			let new = ExporterCounter::new(name.to_string(), value);
+			let new = ExporterEntry::new(name.to_string(), 0.0);
 			self.ht.write().unwrap().insert(name.to_string(), new);
 		}
 
@@ -111,7 +111,7 @@ impl ExporterCounterGroup
 		ret += format!("# TYPE {} counter\n", self.basename).as_str();
 
 		for (_, exporter_counter) in self.ht.read().unwrap().iter() {
-			 // Acquire the Mutex for this specific ExporterCounter
+			 // Acquire the Mutex for this specific ExporterEntry
 			 let value = exporter_counter.value.read().unwrap();
 			 ret += format!("{} {}\n", exporter_counter.name, value).as_str();
 		}
@@ -124,7 +124,7 @@ impl ExporterCounterGroup
 
 pub(crate) struct Exporter {
 	ht: RwLock<
-					HashMap<String, ExporterCounterGroup>
+					HashMap<String, ExporterEntryGroup>
 				>
 }
 
@@ -135,12 +135,12 @@ impl Exporter {
 		 }
 	}
 
-	pub(crate) fn inc(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-		let basename = ExporterCounterGroup::basename(name.to_string());
+	pub(crate) fn accumulate(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
+		let basename = ExporterEntryGroup::basename(name.to_string());
 
 		 if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str())
 		 {
-			return exporter_counter.inc(name, value);
+			return exporter_counter.accumulate(name, value);
 		 }
 		 else
 		 {
@@ -149,7 +149,7 @@ impl Exporter {
 	}
 
 	pub(crate) fn set(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-		let basename = ExporterCounterGroup::basename(name.to_string());
+		let basename = ExporterEntryGroup::basename(name.to_string());
 		
 		if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str())
 		{
@@ -161,19 +161,19 @@ impl Exporter {
 		}
   }
 
-	pub(crate) fn push(&self, name: &str, doc: &str, value: f64) -> Result<(), ProxyErr> {
-		let basename = ExporterCounterGroup::basename(name.to_string());
+	pub(crate) fn push(&self, name: &str, doc: &str) -> Result<(), ProxyErr> {
+		let basename = ExporterEntryGroup::basename(name.to_string());
 
 		let mut ht = self.ht.write().unwrap();
 	
-		if let Some(exporter_counter) = ht.get(basename.as_str())
+		if let Some(_) = ht.get(basename.as_str())
 		{
-			return exporter_counter.push(name, value);
+			return Ok(());
 		}
 		else
 		{
-			let ncnt = ExporterCounterGroup::new(basename.to_owned(), doc.to_string());
-			ncnt.push(name, value)?;
+			let ncnt = ExporterEntryGroup::new(basename.to_owned(), doc.to_string());
+			ncnt.push(name)?;
 			ht.insert(basename, ncnt);
 		 }
 

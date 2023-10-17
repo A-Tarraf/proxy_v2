@@ -191,7 +191,7 @@ impl Web
 
 	}
 
-	fn handle_inc(&self, req : &Request) -> WebResponse
+	fn handle_accumulate(&self, req : &Request) -> WebResponse
 	{
 		let key : Option<String>;
 		let error : Option<String>;
@@ -208,7 +208,7 @@ impl Web
 		let key = key.unwrap();
 		let value = value.unwrap();
 
-		match self.exporter.inc(key.as_str(), value)
+		match self.exporter.accumulate(key.as_str(), value)
 		{
 			Ok(_) => {
 				WebResponse::Success("inc".to_string())
@@ -223,10 +223,9 @@ impl Web
 	{
 		let key : Option<String>;
 		let error : Option<String>;
-		let value : Option<f64>;
 		let doc : String;
 
-		(key, value, doc, error) = Web::parse_key_value(req);
+		(key, _, doc, error) = Web::parse_key_value(req);
 
 		if error.is_some()
 		{
@@ -234,9 +233,8 @@ impl Web
 		}
 
 		let key = key.unwrap();
-		let value = value.unwrap();
 
-		match self.exporter.push(key.as_str(), doc.as_str(), value)
+		match self.exporter.push(key.as_str(), doc.as_str())
 		{
 			Ok(_) => {
 				WebResponse::Success("push".to_string())
@@ -274,8 +272,8 @@ impl Web
 				"/set" => {
 					resp = self.handle_set(&request);
 				},
-				"/inc" => {
-					resp = self.handle_inc(&request);
+				"/accumulate" => {
+					resp = self.handle_accumulate(&request);
 				},
 				"/push" => {
 					resp = self.handle_push(&request);
