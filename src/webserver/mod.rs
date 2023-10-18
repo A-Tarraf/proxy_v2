@@ -234,7 +234,7 @@ impl Web
 
 		let key = key.unwrap();
 
-		match self.exporter.push(key.as_str(), doc.as_str())
+		match self.exporter.push(key.as_str(), doc.as_str(), super::proxywireprotocol::CounterType::COUNTER)
 		{
 			Ok(_) => {
 				WebResponse::Success("push".to_string())

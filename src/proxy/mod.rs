@@ -33,7 +33,7 @@ impl UnixProxy
 		match command
 		{
 			ProxyCommand::Desc(desc) => {
-				exporter.push(desc.name.as_str(), desc.doc.as_str())?;
+				exporter.push(desc.name.as_str(), desc.doc.as_str(), desc.ctype)?;
 			},
 			ProxyCommand::Value(value) => {
 				exporter.accumulate(value.name.as_str(), value.value)?;

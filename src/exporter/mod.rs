@@ -2,11 +2,14 @@ use std::collections::HashMap;
 use std::sync::{RwLock, Arc};
 use super::proxy_common::ProxyErr;
 
+use super::proxywireprotocol::CounterType;
+
 /***********************
  * PROMETHEUS EXPORTER *
  ***********************/
  struct ExporterEntry {
 	name: String,
+	ctype: CounterType,
 	value: Arc<
 				RwLock<
 						f64
@@ -16,11 +19,12 @@ use super::proxy_common::ProxyErr;
 
 impl ExporterEntry
 {
-	fn new(name : String, value : f64) -> ExporterEntry
+	fn new(name : String, ctype : CounterType) -> ExporterEntry
 	{
 		ExporterEntry{
 			name,
-			value : Arc::new(RwLock::new(value))
+			value : Arc::new(RwLock::new(0.0)),
+			ctype
 		}
 	}
 }
@@ -72,7 +76,15 @@ impl ExporterEntryGroup
 		{
 			Some(v) => {
 				let mut val = v.value.write().unwrap();
-				*val += value;
+				match v.ctype
+				{
+					CounterType::COUNTER => {
+						*val += value;
+					},
+					CounterType::GAUGE => {
+						*val = value;
+					}
+				}
 				return Ok(());
 			}
 			None => {
@@ -81,7 +93,7 @@ impl ExporterEntryGroup
 		}
 	}
 
-	fn push(& self, name : &str) -> Result<(), ProxyErr>
+	fn push(& self, name : &str, ctype : CounterType) -> Result<(), ProxyErr>
 	{
 		if self.ht.read().unwrap().contains_key(name)
 		{
@@ -96,7 +108,7 @@ impl ExporterEntryGroup
 					return Err(ProxyErr::new(format!("Bad metric name '{}' unmatched brackets",name.to_string()).as_str()));
 				}
 			}
-			let new = ExporterEntry::new(name.to_string(), 0.0);
+			let new = ExporterEntry::new(name.to_string(), ctype);
 			self.ht.write().unwrap().insert(name.to_string(), new);
 		}
 
@@ -161,7 +173,7 @@ impl Exporter {
 		}
   }
 
-	pub(crate) fn push(&self, name: &str, doc: &str) -> Result<(), ProxyErr> {
+	pub(crate) fn push(&self, name: &str, doc: &str, ctype : CounterType) -> Result<(), ProxyErr> {
 		let basename = ExporterEntryGroup::basename(name.to_string());
 
 		let mut ht = self.ht.write().unwrap();
@@ -173,7 +185,7 @@ impl Exporter {
 		else
 		{
 			let ncnt = ExporterEntryGroup::new(basename.to_owned(), doc.to_string());
-			ncnt.push(name)?;
+			ncnt.push(name, ctype)?;
 			ht.insert(basename, ncnt);
 		 }
 

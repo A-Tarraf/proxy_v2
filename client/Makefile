@@ -2,7 +2,7 @@ CC=gcc
 
 all: test
 
-header: metric_proxy_client.h
+metric_proxy_client.h: 
 	cbindgen .. -o metric_proxy_client.h -l c --cpp-compat
 
 
