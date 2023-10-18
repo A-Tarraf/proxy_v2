@@ -11,14 +11,18 @@ use std::{env, rc};
 
 mod proxy_common;
 use proxy_common::ProxyErr;
+use proxy_common::init_log;
 
 mod proxywireprotocol;
 use proxywireprotocol::{ProxyCommand, CounterType, ValueDesc, CounterValue};
+use libc::{c_int, signal, SIGPIPE, SIG_IGN};
 
 use std::collections::HashMap;
 
-
 use std::thread;
+
+use std::sync::Once;
+
 
 pub struct MetricProxyClientCounter
 {
@@ -73,10 +77,20 @@ impl Drop for MetricProxyClient {
 	}
 }
 
+static START: Once = Once::new();
+
 impl MetricProxyClient
 {
 	fn new() -> Arc<MetricProxyClient>
 	{
+		START.call_once(||{
+			init_log();
+		});
+
+		unsafe {
+			signal(SIGPIPE, SIG_IGN);
+	  	}
+
 		let mut can_run : bool = true;
 		
 		let sock_path = env::var("PROXY_PATH").unwrap_or("/tmp/metric_proxy".to_string());
@@ -96,6 +110,11 @@ impl MetricProxyClient
 		else
 		{
 			tsock = None;
+		}
+
+		if tsock.is_none()
+		{
+			log::warn!("Not Connected to Metric Proxy");
 		}
 
 		let period: Duration = env::var("PROXY_PERIOD")
@@ -119,10 +138,13 @@ impl MetricProxyClient
 
 			while rclient.running()
 			{
-				rclient.dump_values().unwrap();
+				if let Err(_) = rclient.dump_values()
+				{
+					break;
+				}
 				thread::sleep(rclient.period);
 			}
-
+			log::info!("Polling thread leaving");
 		});
 	
 		return pclient;
@@ -163,7 +185,7 @@ impl MetricProxyClient
 			let null_byte : [u8; 1] = [0; 1];
 			stream.write_all(&null_byte)?;
 	
-			println!("{:?}", cmd);
+			log::debug!("Sending {:?}", cmd);
 		}
 		else
 		{

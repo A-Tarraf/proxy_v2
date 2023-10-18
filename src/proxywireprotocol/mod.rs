@@ -35,9 +35,24 @@ pub struct CounterValue
 	pub value : f64
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct JobDesc
+{
+	pub njobid : String,
+	pub command : String,
+	pub size : i32,
+	pub nodelist : String,
+	pub partition : String,
+	pub cluster : String,
+	pub run_dir : String,
+	pub start_time : u64,
+	pub end_time : u64
+}
+
 #[derive(Serialize,Deserialize, Debug)]
 pub enum ProxyCommand
 {
 	Desc(ValueDesc),
-	Value(CounterValue)
+	Value(CounterValue),
+	JobDesc(JobDesc)
 }

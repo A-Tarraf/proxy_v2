@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::error::Error;
 use std::thread;
 mod proxy_common;
+use proxy_common::init_log;
 
 mod exporter;
 use exporter::Exporter;
@@ -17,6 +18,8 @@ mod proxywireprotocol;
 
 fn main() -> Result<(), Box<dyn Error>>
 {
+	init_log();
+
 	// The central storage is the exporter
 	let exporter = Arc::new(Exporter::new());
 

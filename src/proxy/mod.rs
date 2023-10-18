@@ -7,12 +7,10 @@ use std::thread;
 
 use serde_json;
 
-use crate::proxywireprotocol::ValueDesc;
-
 use super::proxy_common::ProxyErr;
 use super::exporter::Exporter;
 
-use super::proxywireprotocol::{ProxyCommand, ProxyCommandType};
+use super::proxywireprotocol::ProxyCommand;
 
 /********************
  * UNIX DATA SERVER *
@@ -29,7 +27,7 @@ impl UnixProxy
 {
 	fn handle_command(exporter : Arc<Exporter>, command : ProxyCommand) ->  Result<(), Box<dyn Error>>
 	{
-		println!("{:?}", command);
+		log::debug!("{:?}", command);
 		match command
 		{
 			ProxyCommand::Desc(desc) => {
@@ -37,6 +35,9 @@ impl UnixProxy
 			},
 			ProxyCommand::Value(value) => {
 				exporter.accumulate(value.name.as_str(), value.value)?;
+			}
+			ProxyCommand::JobDesc(_d) => {
+
 			}
 		}
 		Ok(())
@@ -80,20 +81,20 @@ impl UnixProxy
 		for stream in self.listener.incoming() {
 			match stream {
 				Ok(stream) => {
-					println!("New connection");
+					log::info!("New connection");
 
 					let exporter = self.exporter.clone();
 
 					// Handle the connection in a new thread.
 					thread::spawn(move || {
 						match UnixProxy::handle_client(exporter, stream) {
-							Ok(_) => {println!("Client left");}
-							Err(e) => {println!("Proxy server closing on client : {}", e.to_string());}
+							Ok(_) => {log::info!("Client left");}
+							Err(e) => {log::error!("Proxy server closing on client : {}", e.to_string());}
 						}
 					});
 				}
 				Err(err) => {
-					eprintln!("Error accepting connection: {:?}", err);
+					log::error!("Error accepting connection: {:?}", err);
 				}
 			}
 		}

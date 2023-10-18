@@ -1,4 +1,7 @@
 use std::error::Error;
+use env_logger;
+use log::LevelFilter;
+use std::env;
 
 /*******************
  * IMPLEMENT ERROR *
@@ -26,4 +29,11 @@ use std::error::Error;
 	 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		  write!(f, "{}", self.message)
 	 }
+ }
+
+ pub fn init_log()
+ {
+	let env = env_logger::Env::new()
+							.default_filter_or("info");
+	env_logger::init_from_env(env);
  }
