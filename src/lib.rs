@@ -7,15 +7,15 @@ use std::path::Path;
 
 use serde_json;
 
-use std::{env, rc};
+use std::env;
 
 mod proxy_common;
 use proxy_common::ProxyErr;
 use proxy_common::init_log;
 
 mod proxywireprotocol;
-use proxywireprotocol::{ProxyCommand, CounterType, ValueDesc, CounterValue};
-use libc::{c_int, signal, SIGPIPE, SIG_IGN};
+use proxywireprotocol::{ProxyCommand, CounterType, ValueDesc, CounterValue, JobDesc};
+use libc::{signal, SIGPIPE, SIG_IGN};
 
 use std::collections::HashMap;
 
@@ -96,24 +96,21 @@ impl MetricProxyClient
 		let sock_path = env::var("PROXY_PATH").unwrap_or("/tmp/metric_proxy".to_string());
 		let path = Path::new(&sock_path);
 
-		if !path.exists()
-		{
-			can_run = false;
-		}
 
 		let tsock : Option<UnixStream>;
 
-		if can_run
+		if !path.exists()
 		{
-			tsock = UnixStream::connect(path).ok();
+			tsock = None;
 		}
 		else
 		{
-			tsock = None;
+			tsock = UnixStream::connect(path).ok();
 		}
 
 		if tsock.is_none()
 		{
+			can_run = false;
 			log::warn!("Not Connected to Metric Proxy");
 		}
 
@@ -134,18 +131,24 @@ impl MetricProxyClient
 		let pclient = Arc::new(client);
 		let rclient = pclient.clone();	
 
-		thread::spawn(move || {
+		/* No need to start the thread if we do not run */
+		if pclient.running()
+		{
+			/* Send initial jobdesc  */
+			pclient.send_jobdesc().ok();
+			thread::spawn(move || {
 
-			while rclient.running()
-			{
-				if let Err(_) = rclient.dump_values()
+				while rclient.running()
 				{
-					break;
+					if let Err(_) = rclient.dump_values()
+					{
+						break;
+					}
+					thread::sleep(rclient.period);
 				}
-				thread::sleep(rclient.period);
-			}
-			log::info!("Polling thread leaving");
-		});
+				log::info!("Polling thread leaving");
+			});
+		}
 	
 		return pclient;
 	}
@@ -190,10 +193,16 @@ impl MetricProxyClient
 		else
 		{
 			*self.running.lock().unwrap() = false;
-			return Err(Box::new(ProxyErr::new("Not connected to UNIX socket")));
+			return Err(ProxyErr::newboxed("Not connected to UNIX socket"));
 		}
 
 		Ok(())
+	}
+
+	fn send_jobdesc(&self) -> Result<(), Box<dyn Error>>
+	{
+		let desc = ProxyCommand::JobDesc(JobDesc::new());
+		return self.send(&desc);
 	}
 
 	fn new_counter(&mut self, name : String, doc : String) -> Result<Arc<MetricProxyClientCounter>, Box<dyn Error>>
