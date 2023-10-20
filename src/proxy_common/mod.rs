@@ -1,6 +1,8 @@
-use std::error::Error;
+use std::ffi::OsStr;
+use std::{error::Error, path::PathBuf};
 use env_logger;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::fs;
 
 /*******************
  * IMPLEMENT ERROR *
@@ -57,4 +59,32 @@ pub fn unix_ts_us() -> u128
 {
 	let current_time = SystemTime::now();
 	current_time.duration_since(UNIX_EPOCH).expect("Time went backwards").as_micros()
+}
+
+#[allow(unused)]
+pub(crate) fn list_files_with_ext_in(path : &PathBuf, ext : &str) -> Result<Vec<String>, Box<dyn Error>>
+{
+	if ! path.is_dir()
+	{
+		return Err(ProxyErr::newboxed("Aggregator path is not a directory"));
+	}
+
+	let mut ret : Vec<String> = Vec::new();
+
+	for entry in fs::read_dir(path)?
+	{
+		let entry = entry?;
+		let fname = PathBuf::from(entry.file_name());
+
+		let mut full_path = path.clone();
+		full_path.push(fname);
+
+		if full_path.extension().unwrap_or(OsStr::new("")) == "partialprofile"
+		{
+			ret.push(full_path.to_string_lossy().to_string());
+		}
+
+	}
+
+	Ok(ret)
 }

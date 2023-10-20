@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>>
 	});
 
 	// Start the webserver part with a reference to the exporter
-	let web = Web::new(1337, factory.get_main());
+	let web = Web::new(1337, factory.clone());
 	web.run_blocking();
 
 	Ok(())

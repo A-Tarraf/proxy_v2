@@ -118,7 +118,7 @@ impl MetricProxyClient
 		.ok()
 		.and_then(|s| s.parse::<u64>().ok())
 		.map(Duration::from_millis)
-		.unwrap_or(Duration::from_millis(5000));
+		.unwrap_or(Duration::from_millis(1000));
 
 
 		let client = MetricProxyClient{

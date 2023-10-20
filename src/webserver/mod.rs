@@ -1,9 +1,13 @@
 use rouille::{Response, Request};
 use serde::{Serialize, Deserialize};
+use std::path::Path;
 use std::sync::Arc;
 use std::collections::HashMap;
 use static_files::Resource;
-use super::exporter::Exporter;
+use colored::Colorize;
+
+use crate::exporter::{ExporterFactory, Exporter};
+
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -14,7 +18,7 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 pub(crate) struct Web
 {
 	port : u32,
-	exporter : Arc<Exporter>,
+	factory : Arc<ExporterFactory>,
 	static_files : HashMap<String, Resource>
 }
 
@@ -33,6 +37,7 @@ enum WebResponse {
 	BadReq(String),
 	Success(String),
 	Redirect302(String),
+	Native(Response),
 	NoSuchDoc()
 }
 
@@ -48,7 +53,7 @@ impl WebResponse
 			}
 			WebResponse::StaticHtml(name, mime, data) => 
 			{
-				log::info!("serving static resource {} as {}", name, mime);
+				log::debug!("{} {} as {}","STATIC".yellow(), name, mime);
 				Response::from_data(mime, data)
 			}
 			WebResponse::Text(s) => 
@@ -79,6 +84,10 @@ impl WebResponse
 			{
 				Response::redirect_302(url)
 			}
+			WebResponse::Native(response) =>
+			{
+				response
+			}
 		}
 	}
 }
@@ -87,12 +96,12 @@ impl WebResponse
 
 impl Web
 {
-	pub(crate) fn new(port : u32, exporter : Arc<Exporter>) -> Web
+	pub(crate) fn new(port : u32, factory : Arc<ExporterFactory>) -> Web
 	{
 		Web 
 		{
-			port: port,
-			exporter : exporter,
+			port,
+			factory,
 			static_files: generate()
 			.into_iter()
 			.map(|(k, v)| (k.to_string(), v))
@@ -197,7 +206,7 @@ impl Web
 		let key = key.unwrap();
 		let value = value.unwrap();
 
-		match self.exporter.set(key.as_str(), value)
+		match self.factory.get_main().set(key.as_str(), value)
 		{
 			Ok(_) => {
 				WebResponse::Success("set".to_string())
@@ -226,7 +235,7 @@ impl Web
 		let key = key.unwrap();
 		let value = value.unwrap();
 
-		match self.exporter.accumulate(key.as_str(), value)
+		match self.factory.get_main().accumulate(key.as_str(), value)
 		{
 			Ok(_) => {
 				WebResponse::Success("inc".to_string())
@@ -252,7 +261,7 @@ impl Web
 
 		let key = key.unwrap();
 
-		match self.exporter.push(key.as_str(), doc.as_str(), super::proxywireprotocol::CounterType::COUNTER)
+		match self.factory.get_main().push(key.as_str(), doc.as_str(), super::proxywireprotocol::CounterType::COUNTER)
 		{
 			Ok(_) => {
 				WebResponse::Success("push".to_string())
@@ -263,9 +272,10 @@ impl Web
 		}
 	}
 
-	fn handle_metrics(&self, _req : &Request) -> WebResponse
+
+	fn serialize_exporter(exporter : & Arc<Exporter>) -> WebResponse
 	{
-		match self.exporter.serialize()
+		match exporter.serialize()
 		{
 			Ok(v) => {
 				WebResponse::Text(v)
@@ -276,10 +286,69 @@ impl Web
 		}
 	}
 
+	fn handle_metrics(&self, req : &Request) -> WebResponse
+	{
+		if let Some(jobid) = req.get_param("job")
+		{
+			if let Some(exporter) = self.factory.resolve_by_id(&jobid)
+			{
+				Web::serialize_exporter(&exporter)
+			}
+			else
+			{
+				WebResponse::BadReq(format!("No such jobid {}", jobid))
+			}
+		}
+		else
+		{
+			Web::serialize_exporter(&self.factory.get_main())
+		}
+	}
 
-	fn serve_statc_file(&self, url : & str) -> WebResponse
+	fn handle_job(&self, req : & Request) -> WebResponse
+	{
+		if let Some(jobid) = req.get_param("job")
+		{
+
+			match self.factory.profile_of(&jobid)
+			{
+				Ok(p) => {
+					WebResponse::Native(Response::json(&p))
+				}
+				Err(e) => 
+				{
+					WebResponse::BadReq(e.to_string())
+				}
+			}
+
+
+		}
+		else
+		{
+			let all = self.factory.profiles();
+			WebResponse::Native(Response::json(&all))
+		}
+	}
+
+	fn handle_joblist(&self, _req : &Request) -> WebResponse
+	{
+		let jobs = self.factory.list_jobs();
+
+		match serde_json::to_vec(&jobs)
+		{
+			Ok(v) => {
+				return WebResponse::Native(Response::json(&jobs))
+			}
+			Err(e) => {
+				return WebResponse::BadReq(e.to_string());
+			}
+		}
+	}
+
+	fn serve_static_file(&self, url : & str) -> WebResponse
 	{
 		/* remove slash before */
+		assert!(url.starts_with("/"));
 		let url = url[1..].to_string();
 		if let Some(file) = self.static_files.get(&url)
 		{
@@ -287,10 +356,38 @@ impl Web
 		}
 		else
 		{
-			log::warn!("No such file {}", url);
+			log::warn!("{} {}", "No such file".red(), url);
 			return WebResponse::NoSuchDoc();
 		}
 	}
+
+	fn parse_url(surl : &String) -> (String, String)
+	{
+		let url = surl[1..].to_string();
+
+		assert!(surl.starts_with("/"));
+
+		let path = Path::new(&url);
+
+		let segments: Vec<String> = path.iter().map(|v| v.to_string_lossy().to_string()).collect();
+
+		if segments.len() == 1
+		{
+			/* Only a single entry /metric/ */
+			return (segments[0].to_string(), "".to_string());
+		}
+		else if segments.len() == 0
+		{
+			/* Only / */
+			return ("/".to_string(), "".to_string());
+		}
+
+		let prefix = segments.iter().take(segments.len()-1).map(|v| v.to_string()).collect::<Vec<_>>().join("/");
+		let resource = segments.last().take().unwrap().to_string();
+
+		(prefix , resource)
+	}
+
 
 	pub(crate) fn run_blocking(self)
 	{
@@ -298,25 +395,39 @@ impl Web
 
 			let resp : WebResponse;
 
-			match request.url().as_str()
+
+			let url = request.url();
+
+			let (prefix, resource) = Web::parse_url(&url);
+
+
+			log::debug!("GET {} mapped to ({} , {})", request.raw_url(), prefix.red(), resource.yellow());
+
+			match prefix.as_str()
 			{
 				"/" => {
-					resp = self.serve_statc_file("/index.html");
+					resp = self.serve_static_file("/index.html");
 				}
-				"/set" => {
+				"set" => {
 					resp = self.handle_set(&request);
 				},
-				"/accumulate" => {
+				"accumulate" => {
 					resp = self.handle_accumulate(&request);
 				},
-				"/push" => {
+				"push" => {
 					resp = self.handle_push(&request);
 				},
-				"/metrics" => {
+				"metrics" => {
 					resp = self.handle_metrics(&request);
 				},
+				"joblist" => {
+					resp = self.handle_joblist(&request);
+				}
+				"job" => {
+					resp = self.handle_job(&request);
+				},
 				_ => {
-					resp = self.serve_statc_file(request.url().as_str());
+					resp = self.serve_static_file(url.as_str());
 				}
 			}
 

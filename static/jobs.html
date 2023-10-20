@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Metric Proxy</title>
+    <link rel="stylesheet" type="text/css" href="styles.css">
+</head>
+<body>
+	<header>
+		<h1>Metric Proxy</h1>
+  </header>
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/jobs.html">Jobs</a></li>
+        </ul>
+    </nav>
+    <main>
+        <section>
+            <h2>Running Jobs</h2>
+				<table id="jobTable">
+					<thead>
+						 <tr>
+							  <th>Job ID</th>
+							  <th>Command</th>
+							  <th>Size</th>
+							  <th>Node List</th>
+							  <th>Partition</th>
+							  <th>Cluster</th>
+							  <th>Run Directory</th>
+							  <th>Start Time</th>
+						 </tr>
+					</thead>
+					<tbody>
+					</tbody>
+			  </table>
+		 
+			  <script>
+					// Fetch JSON data from the endpoint
+					function fetchAndDisplay()
+					{
+						fetch("/joblist")
+						.then(response => {
+									if (!response.ok) {
+										throw new Error(`Failed to fetch job information (status: ${response.status})`);
+									}
+									return response.json();
+								})		
+							.then(data => {
+								clearTable("jobTable");
+
+								const jobTable = document.getElementById("jobTable").getElementsByTagName('tbody')[0];
+			
+								// Iterate over the JSON array and populate the table
+								data.forEach(job => {
+										const row = jobTable.insertRow(-1);
+										row.insertCell(0).innerHTML = "<a href='/job_view.html?job=" + job.jobid + "'>" + job.jobid + "</a> (<a href='/metrics/?job=" + job.jobid + "'>Prometheus</a> ; <a href='/job/?job=" + job.jobid + "'>Data</a>)";
+										row.insertCell(1).textContent = job.command;
+										row.insertCell(2).textContent = job.size;
+										row.insertCell(3).textContent = job.nodelist;
+										row.insertCell(4).textContent = job.partition;
+										row.insertCell(5).textContent = job.cluster;
+										row.insertCell(6).textContent = job.run_dir;
+										row.insertCell(7).textContent = new Date(job.start_time * 1000); // Convert Unix timestamp to a readable date
+								});
+							})
+							.catch(error => {
+								console.error("Error fetching data:", error);
+							});
+						}
+
+						// Function to clear a table
+						function clearTable(tableId) {
+							const table = document.getElementById(tableId);
+							while (table.rows.length > 1) {
+								table.deleteRow(1);
+							}
+						}
+			
+						fetchAndDisplay();
+	 
+						// Refresh data every 5 seconds
+						setInterval(function () {
+							fetchAndDisplay();
+						}, 1000);
+
+			  </script>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Metric Proxy</p>
+    </footer>
+</body>
+</html>

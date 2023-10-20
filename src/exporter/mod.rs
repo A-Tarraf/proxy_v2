@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::process::exit;
 use std::sync::{RwLock, Arc, Mutex};
 use std::error::Error;
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::proxywireprotocol::{JobProfile, JobDesc, CounterSnapshot};
 
-use super::proxy_common::{ProxyErr, unix_ts_us};
+use super::proxy_common::{ProxyErr, unix_ts_us, list_files_with_ext_in};
 
 use super::proxywireprotocol::CounterType;
 
@@ -237,7 +239,8 @@ impl Exporter {
 		 Ok(ret)
 	}
 
-	fn profile( &self, desc : &JobDesc) -> Result<JobProfile, ProxyErr>
+
+	pub(crate) fn profile( &self, desc : &JobDesc) -> Result<JobProfile, ProxyErr>
 	{
 		let mut ret = JobProfile{
 			desc : desc.clone(),
@@ -257,7 +260,7 @@ impl Exporter {
 
 struct PerJobRefcount
 {
-	job : String,
+	desc : JobDesc,
 	counter : i32,
 	exporter : Arc<Exporter>
 }
@@ -265,7 +268,15 @@ struct PerJobRefcount
 
 impl Drop for PerJobRefcount {
 	fn drop(&mut self) {
-		log::info!("Dropping per job exporter for {}", self.job);
+		log::info!("Dropping per job exporter for {}", self.desc.jobid);
+	}
+}
+
+impl PerJobRefcount
+{
+	fn profile(&self) -> Result<JobProfile, ProxyErr>
+	{
+		self.exporter.profile(&self.desc)
 	}
 }
 
@@ -327,13 +338,42 @@ impl ExporterFactory
 
 	}
 
+
+
+	fn aggregate_profiles(prefix : PathBuf) -> Result<(), Box<dyn Error>>
+	{
+		let mut profile_dir = prefix.clone();
+		profile_dir.push("profiles");
+
+		let mut partial_dir = prefix.clone();
+		partial_dir.push("partial");
+
+		assert!(profile_dir.is_dir());
+		assert!(partial_dir.is_dir());
+
+		loop
+		{
+			let ret = list_files_with_ext_in(&partial_dir, ".partialprofile")?;
+
+			log::error!("{:?}", ret);
+
+			sleep(Duration::from_secs(1));
+		}
+	}
+
+
+
 	pub(crate) fn new(profile_prefix : PathBuf, aggregate : bool) -> Arc<ExporterFactory>
 	{
 		ExporterFactory::check_profile_dir(&profile_prefix);
 
 		if aggregate == true
 		{
+			let thread_prefix = profile_prefix.clone();
 			// Start Aggreg thread
+			std::thread::spawn(move ||{
+				ExporterFactory::aggregate_profiles(thread_prefix).unwrap();
+			});
 		}
 
 		Arc::new(ExporterFactory{
@@ -349,29 +389,38 @@ impl ExporterFactory
 		return self.main.clone();
 	}
 
-	pub(crate) fn resolve_job(& self, jobid : & String) -> Arc<Exporter>
+	pub(crate) fn resolve_by_id(&self, jobid : &String) -> Option<Arc<Exporter>>
+	{
+		if let Some(r) = self.perjob.lock().unwrap().get(jobid)
+		{
+			return Some(r.exporter.clone());
+		}
+		None
+	}
+
+	pub(crate) fn resolve_job(& self, desc : & JobDesc) -> Arc<Exporter>
 	{
 
 		let mut ht: std::sync::MutexGuard<'_, HashMap<String, PerJobRefcount>> = self.perjob.lock().unwrap();
 
-		let v = match ht.get_mut(jobid)
+		let v = match ht.get_mut(&desc.jobid)
 		{
 			Some(e) => {
-				log::info!("Cloning existing job exporter for {}", jobid);
+				log::info!("Cloning existing job exporter for {}", &desc.jobid);
 				/* Incr Refcount */
 				e.counter += 1;
-				log::debug!("ACQUIRING Per Job exporter {} has refcount {}", jobid, e.counter);
+				log::debug!("ACQUIRING Per Job exporter {} has refcount {}", &desc.jobid, e.counter);
 				e.exporter.clone()
 			},
 			None => {
-				log::info!("Creating new job exporter for {}", jobid);
+				log::info!("Creating new job exporter for {}", &desc.jobid);
 				let new = PerJobRefcount{
-						job : jobid.to_string(),
+						desc : desc.clone(),
 						exporter : Arc::new(Exporter::new()),
 						counter : 1
 				};
 				let ret = new.exporter.clone();
-				ht.insert(jobid.to_string(), new);
+				ht.insert(desc.jobid.to_string(), new);
 				ret
 			}
 		};
@@ -401,6 +450,41 @@ impl ExporterFactory
 
 		Ok(())
 	}
+
+	pub(crate) fn list_jobs(&self) -> Vec<JobDesc>
+	{
+		self.perjob.lock().unwrap().values().map(|k| k.desc.clone()).collect()
+	}
+
+	pub(crate) fn profiles(&self) -> Vec<JobProfile>
+	{
+		let mut ret : Vec<JobProfile> = Vec::new();
+
+		if let Ok(ht) = self.perjob.lock()
+		{
+			for v in ht.values()
+			{
+				if let Ok(p) = v.profile()
+				{
+					ret.push(p);
+				}
+			}
+		}
+
+		ret
+	}
+
+
+	pub(crate) fn profile_of(&self, jobid : & String) -> Result<JobProfile, ProxyErr>
+	{
+		if let Some(elem) = self.perjob.lock().unwrap().get(jobid)
+		{
+			return elem.profile();
+		}
+
+		Err(ProxyErr::new("No such Job ID"))
+	}
+
 
 	pub(crate) fn relax_job(&self,  desc : &JobDesc) -> Result<(), Box<dyn Error>>
 	{

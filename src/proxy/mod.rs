@@ -62,7 +62,7 @@ impl UnixProxy
 					if desc.jobid != ""
 					{
 						/* No need to start the exporter if the jobid is empty */
-						per_client_state.job_exporter = Some(per_client_state.factory.resolve_job(&desc.jobid));
+						per_client_state.job_exporter = Some(per_client_state.factory.resolve_job(&desc));
 					}
 				}
 

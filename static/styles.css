@@ -1,7 +1,22 @@
-/* Reset some default styles */
-body, h1, h2, p {
-	margin: 0;
-	padding: 0;
+
+/* Style for h1 */
+h1 {
+	text-align: center;
+	font-size: 36px;
+	color: #333;
+	text-transform: uppercase;
+}
+
+/* Style for h2 */
+h2 {
+	font-size: 24px;
+	color: #0077b6; /* A nice blue color */
+}
+
+/* Style for h3 */
+h3 {
+	font-size: 18px;
+	color: #f94144; /* A nice red color */
 }
 
 body {
@@ -32,11 +47,28 @@ nav li {
 	margin-right: 20px;
 }
 
+/* Remove the default underline and change the link color */
 nav a {
 	text-decoration: none;
-	color: #fff;
+	color: #0077b6; /* Change the link color to a custom color */
+	font-weight: bold; /* Make the text bold */
+	transition: color 0.3s; /* Add a smooth color transition on hover */
+	display: inline-block; /* Make the links block-level elements for padding */
+	padding: 10px 15px; /* Add padding to the links */
 }
 
+/* Change the link color on hover for a fancier effect */
+nav a:hover {
+	color: #ff6b6b; /* Change the link color on hover to a different color */
+	background-color: #0077b6; /* Add a background color on hover */
+	border-radius: 5px; /* Add rounded corners */
+	box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); /* Add a subtle shadow on hover */
+}
+
+/* Add a smooth transition for the background color change */
+nav a {
+	transition: color 0.3s, background-color 0.3s;
+}
 /* Main content */
 main {
 	padding: 20px;
@@ -53,4 +85,19 @@ footer {
 	color: #fff;
 	text-align: center;
 	padding: 10px;
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+th, td {
+	border: 1px solid #ddd;
+	text-align: left;
+	padding: 8px;
+}
+
+th {
+	background-color: #f2f2f2;
 }
