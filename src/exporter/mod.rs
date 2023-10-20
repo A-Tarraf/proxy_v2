@@ -339,6 +339,18 @@ impl ExporterFactory
 	}
 
 
+	fn accumulate_a_profile(profile_dir : & PathBuf , target : & String) -> Result<(), Box<dyn Error>>
+	{
+		let file = fs::File::open(&target)?;
+		let content : JobProfile = serde_json::from_reader(file)?;
+		/* If we are here we managed to read the file */
+		fs::remove_file(target).ok();
+
+
+		Ok(())
+	}
+
+
 
 	fn aggregate_profiles(prefix : PathBuf) -> Result<(), Box<dyn Error>>
 	{
@@ -355,7 +367,17 @@ impl ExporterFactory
 		{
 			let ret = list_files_with_ext_in(&partial_dir, ".partialprofile")?;
 
-			log::error!("{:?}", ret);
+			for partial in ret.iter()
+			{
+				if let Err(e) = ExporterFactory::accumulate_a_profile(&profile_dir, partial)
+				{
+					log::error!("Failed to process {} : {}", partial, e.to_string());
+				}
+				else
+				{
+					log::trace!("Aggregated profile {}", partial);
+				}
+			}
 
 			sleep(Duration::from_secs(1));
 		}
