@@ -1,9 +1,11 @@
 use rouille::{Response, Request};
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
-
+use std::collections::HashMap;
+use static_files::Resource;
 use super::exporter::Exporter;
 
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 /*************
  * WEBSERVER *
@@ -12,7 +14,8 @@ use super::exporter::Exporter;
 pub(crate) struct Web
 {
 	port : u32,
-	exporter : Arc<Exporter>
+	exporter : Arc<Exporter>,
+	static_files : HashMap<String, Resource>
 }
 
 #[derive(Serialize)]
@@ -25,9 +28,11 @@ struct ApiResponse
 
 enum WebResponse {
 	HTML(String),
+	StaticHtml(String, &'static str, &'static [u8]),
 	Text(String),
 	BadReq(String),
 	Success(String),
+	Redirect302(String),
 	NoSuchDoc()
 }
 
@@ -40,6 +45,11 @@ impl WebResponse
 			WebResponse::HTML(s) => 
 			{
 				Response::html(s)
+			}
+			WebResponse::StaticHtml(name, mime, data) => 
+			{
+				log::info!("serving static resource {} as {}", name, mime);
+				Response::from_data(mime, data)
 			}
 			WebResponse::Text(s) => 
 			{
@@ -65,6 +75,10 @@ impl WebResponse
 			{
 				Response::empty_404()
 			}
+			WebResponse::Redirect302(url) => 
+			{
+				Response::redirect_302(url)
+			}
 		}
 	}
 }
@@ -78,7 +92,11 @@ impl Web
 		Web 
 		{
 			port: port,
-			exporter : exporter
+			exporter : exporter,
+			static_files: generate()
+			.into_iter()
+			.map(|(k, v)| (k.to_string(), v))
+			.collect()
 		}
 	}
 
@@ -258,6 +276,22 @@ impl Web
 		}
 	}
 
+
+	fn serve_statc_file(&self, url : & str) -> WebResponse
+	{
+		/* remove slash before */
+		let url = url[1..].to_string();
+		if let Some(file) = self.static_files.get(&url)
+		{
+			return WebResponse::StaticHtml(url, file.mime_type, file.data);
+		}
+		else
+		{
+			log::warn!("No such file {}", url);
+			return WebResponse::NoSuchDoc();
+		}
+	}
+
 	pub(crate) fn run_blocking(self)
 	{
 		rouille::start_server(format!("0.0.0.0:{}",self.port), move | request| {
@@ -267,7 +301,7 @@ impl Web
 			match request.url().as_str()
 			{
 				"/" => {
-					resp = WebResponse::HTML("<html><h1>Metric Proxy</h1></html>".to_string());
+					resp = self.serve_statc_file("/index.html");
 				}
 				"/set" => {
 					resp = self.handle_set(&request);
@@ -282,7 +316,7 @@ impl Web
 					resp = self.handle_metrics(&request);
 				},
 				_ => {
-					resp = WebResponse::NoSuchDoc();
+					resp = self.serve_statc_file(request.url().as_str());
 				}
 			}
 
