@@ -270,7 +270,7 @@ struct PerJobRefcount
 
 impl Drop for PerJobRefcount {
 	fn drop(&mut self) {
-		log::info!("Dropping per job exporter for {}", self.desc.jobid);
+		log::debug!("Dropping per job exporter for {}", self.desc.jobid);
 	}
 }
 
@@ -459,14 +459,14 @@ impl ExporterFactory
 		let v = match ht.get_mut(&desc.jobid)
 		{
 			Some(e) => {
-				log::info!("Cloning existing job exporter for {}", &desc.jobid);
+				log::debug!("Cloning existing job exporter for {}", &desc.jobid);
 				/* Incr Refcount */
 				e.counter += 1;
 				log::debug!("ACQUIRING Per Job exporter {} has refcount {}", &desc.jobid, e.counter);
 				e.exporter.clone()
 			},
 			None => {
-				log::info!("Creating new job exporter for {}", &desc.jobid);
+				log::debug!("Creating new job exporter for {}", &desc.jobid);
 				let new = PerJobRefcount{
 						desc : desc.clone(),
 						exporter : Arc::new(Exporter::new()),
@@ -495,7 +495,7 @@ impl ExporterFactory
 
 		target_dir.push(fname);
 
-		log::info!("Saving partial profile to {}", target_dir.to_str().unwrap_or(""));
+		log::debug!("Saving partial profile to {}", target_dir.to_str().unwrap_or(""));
 
 		let file = fs::File::create(target_dir)?;
 

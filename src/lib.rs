@@ -97,7 +97,7 @@ impl MetricProxyClient
 		let path = Path::new(&sock_path);
 
 
-		let tsock : Option<UnixStream>;
+		let mut tsock : Option<UnixStream>;
 
 		if !path.exists()
 		{
@@ -105,7 +105,17 @@ impl MetricProxyClient
 		}
 		else
 		{
-			tsock = UnixStream::connect(path).ok();
+			tsock = match UnixStream::connect(path)
+			{
+				Ok(v) => {
+					Some(v)
+				}
+				Err(e) => {
+					log::error!("Failed to connect : {}", e);
+					None
+				}
+			};
+
 		}
 
 		if tsock.is_none()
