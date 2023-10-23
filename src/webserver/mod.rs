@@ -391,6 +391,9 @@ impl Web
 
 	pub(crate) fn run_blocking(self)
 	{
+		let hostname = gethostname::gethostname();
+		log::info!("Proxy webserver listening on http://{}:{}", hostname.to_str().unwrap_or("127.0.0.1"), self.port);
+
 		rouille::start_server(format!("0.0.0.0:{}",self.port), move | request| {
 
 			let resp : WebResponse;

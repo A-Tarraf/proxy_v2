@@ -18,7 +18,6 @@ pub(crate)enum ProxyCommandType
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-#[repr(u8)]
 pub(crate)enum CounterType
 {
 	COUNTER = 0,
@@ -153,7 +152,7 @@ pub(crate)struct CounterSnapshot
 	pub(crate)value : f64
 }
 
-#[derive(Serialize,Deserialize, Debug)]
+#[derive(Serialize,Deserialize, Debug, Clone)]
 pub(crate)struct JobProfile
 {
 	pub(crate)desc : JobDesc,
@@ -174,6 +173,33 @@ impl JobProfile
 			if let Some(existing) = map.get_mut(&cnt.name)
 			{
 				existing.value += cnt.value;
+			}
+			else
+			{
+				map.insert(cnt.name.to_string(), cnt.clone());
+			}
+		}
+
+		self.counters = map.values().into_iter().cloned().collect();
+
+		Ok(())
+	}
+
+	pub (crate) fn substract(&mut self, previous : & JobProfile) -> Result<(), ProxyErr>
+	{
+		/* Map all counters from self */
+		let mut map : HashMap<String, CounterSnapshot> = self.counters.iter().map(|v| (v.name.to_string(), v.clone())).collect();
+
+		for cnt in previous.counters.iter()
+		{
+			if let Some(existing) = map.get_mut(&cnt.name)
+			{
+				if existing.value < cnt.value
+				{
+					log::error!("Cannot substract non-monothonic counter {}", existing.name);
+					return Err(ProxyErr::new("Non monothonic substraction attempted"));
+				}
+				existing.value -= cnt.value;
 			}
 			else
 			{

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
@@ -6,9 +6,11 @@ use std::sync::{RwLock, Arc, Mutex};
 use std::error::Error;
 use std::thread::sleep;
 use std::time::Duration;
+use reqwest::blocking::Client;
 
-use libc::__c_anonymous_ptrace_syscall_info_seccomp;
 
+use crate::exporter;
+use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{JobProfile, JobDesc, CounterSnapshot};
 
 use super::proxy_common::{ProxyErr, unix_ts_us, list_files_with_ext_in};
@@ -260,11 +262,121 @@ impl Exporter {
 }
 
 
+struct ProxyScraper
+{
+	target_url : String,
+	state : HashMap<String, JobProfile>,
+	factory : Arc<ExporterFactory>,
+	period : u64,
+	last_scrape : u64
+}
+
+
+impl ProxyScraper
+{
+	fn new(target_url : String, period : u64, factory : Arc<ExporterFactory>) -> ProxyScraper
+	{
+		ProxyScraper {
+			target_url,
+			state: HashMap::new(),
+			factory,
+			period,
+			last_scrape : 0
+		}
+	}
+
+	fn scrape(&mut self) -> Result<(), Box<dyn Error>>
+	{
+		if unix_ts() - self.last_scrape < self.period
+		{
+			/* Not to be scraped yet */
+			return Ok(());
+		}
+
+		log::debug!("Scraping {}", self.target_url);
+
+		let mut deleted : Vec<JobDesc> = Vec::new();
+
+		let client = Client::new();
+		let response = client.get(&self.target_url).send()?;
+
+		// Check if the response was successful (status code 200 OK)
+		if response.status().is_success() {
+			// Deserialize the JSON response into your data structure
+			let mut profiles : Vec<JobProfile> = response.json()?;
+			let new_keys : HashSet<String> = profiles.iter().map(|v| v.desc.jobid.clone()).collect();
+ 
+			/* First detect if a job has left */
+			for (k, v) in self.state.iter()
+			{
+				if !new_keys.contains(k)
+				{
+					/* Key has been dropped save name in list for notify */
+					deleted.push(v.desc.clone());
+					self.factory.relax_job(&v.desc)?;
+				}
+			}
+
+			/* Remove all deleted from the shadow state */
+			for k in deleted.iter()
+			{
+				self.state.remove(&k.jobid);
+			}
+
+			/* Now Update Values */
+		
+			for p in profiles.iter_mut()
+			{
+				let cur : JobProfile;
+				if let Some(previous) = self.state.get(&p.desc.jobid)
+				{
+					/* We clone previous snapshot before substracting */
+					cur = p.clone();
+					p.substract(previous)?;
+				}
+				else
+				{
+					/* New Job Register in Job List */
+					let _ = self.factory.resolve_job(&p.desc, false);
+					cur = p.to_owned();
+				}
+
+				if let Some(exporter) = self.factory.resolve_by_id(&p.desc.jobid)
+				{
+					for cnt in p.counters.iter()
+					{
+						exporter.push(&cnt.name, &cnt.doc, cnt.ctype.clone())?;
+						exporter.accumulate(&cnt.name, cnt.value)?;
+					}
+				}
+				else
+				{
+					return Err(ProxyErr::newboxed("No such JobID"));
+				}
+
+				/* Now insert the non-substracted for next call state */
+				self.state.insert(p.desc.jobid.to_string(), cur);
+
+			}
+	  }
+	  else
+	  {
+			return Err( ProxyErr::newboxed("Failed to make scraping request"));
+	  }
+
+	  self.last_scrape = unix_ts();
+
+		Ok(())
+	}
+}
+
+
 struct PerJobRefcount
 {
 	desc : JobDesc,
 	counter : i32,
-	exporter : Arc<Exporter>
+	exporter : Arc<Exporter>,
+	saveprofile : bool
 }
 
 
@@ -290,7 +402,10 @@ pub(crate) struct ExporterFactory
 						PerJobRefcount
 					>
 				>,
-	prefix : PathBuf
+	prefix : PathBuf,
+	scrapes : Mutex<
+					HashMap<String, ProxyScraper>
+				>
 }
 
 
@@ -415,7 +530,37 @@ impl ExporterFactory
 		}
 	}
 
+	fn run_scrapping(& self)
+	{
+		loop
+		{
+			let mut to_delete : Vec<String> = Vec::new();
 
+			/* Scrape all the candidates */
+			for (k, v) in self.scrapes.lock().unwrap().iter_mut()
+			{
+				if let Err(e) = v.scrape()
+				{
+					log::error!("Failed to scrape {} : {}", k, e);
+					to_delete.push(k.to_string());
+				}
+			}
+
+			/* Remove failed scrapes */
+			for k in to_delete
+			{
+				self.scrapes.lock().unwrap().remove(&k);
+			}
+
+			sleep(Duration::from_secs(1));
+		}
+	}
+
+	pub(crate) fn add_scrape( factory : Arc<ExporterFactory>, url : & String, period : u64)
+	{
+		let new = ProxyScraper::new(url.to_string() + "/job", period, factory.clone());
+		factory.scrapes.lock().unwrap().insert( new.target_url.to_string(), new);
+	}
 
 	pub(crate) fn new(profile_prefix : PathBuf, aggregate : bool) -> Arc<ExporterFactory>
 	{
@@ -430,11 +575,38 @@ impl ExporterFactory
 			});
 		}
 
-		Arc::new(ExporterFactory{
+		let ret = Arc::new(ExporterFactory{
 			main: Arc::new(Exporter::new()),
 			perjob: Mutex::new(HashMap::new()),
-			prefix : profile_prefix
-		})
+			prefix : profile_prefix,
+			scrapes: Mutex::new(HashMap::new())
+		});
+
+		let scrape_ref = ret.clone();
+		// Start Scraping thread
+		std::thread::spawn(move ||{
+			scrape_ref.run_scrapping();
+		});
+
+		/* This creates a job entry for the cumulative job */
+		let main_job = PerJobRefcount{
+			desc : JobDesc { jobid: "main".to_string(),
+								  command: "Sum of all Jobs".to_string(),
+								  size: 0,
+								  nodelist: "".to_string(),
+								  partition: "".to_string(),
+								  cluster: "".to_string(),
+								  run_dir: "".to_string(),
+								  start_time: 0,
+								  end_time: 0
+								},
+			exporter : ret.main.clone(),
+			counter : 1,
+			saveprofile : false
+		};
+		ret.perjob.lock().unwrap().insert("main".to_string(), main_job);
+
+		ret
 	}
 
 	pub(crate) fn get_main(&self) -> Arc<Exporter>
@@ -451,7 +623,7 @@ impl ExporterFactory
 		None
 	}
 
-	pub(crate) fn resolve_job(& self, desc : & JobDesc) -> Arc<Exporter>
+	pub(crate) fn resolve_job(& self, desc : & JobDesc, tobesaved : bool) -> Arc<Exporter>
 	{
 
 		let mut ht: std::sync::MutexGuard<'_, HashMap<String, PerJobRefcount>> = self.perjob.lock().unwrap();
@@ -462,6 +634,11 @@ impl ExporterFactory
 				log::debug!("Cloning existing job exporter for {}", &desc.jobid);
 				/* Incr Refcount */
 				e.counter += 1;
+				/* Make sure save flags match */
+				if tobesaved
+				{
+					e.saveprofile = true;
+				}
 				log::debug!("ACQUIRING Per Job exporter {} has refcount {}", &desc.jobid, e.counter);
 				e.exporter.clone()
 			},
@@ -470,7 +647,8 @@ impl ExporterFactory
 				let new = PerJobRefcount{
 						desc : desc.clone(),
 						exporter : Arc::new(Exporter::new()),
-						counter : 1
+						counter : 1,
+						saveprofile : tobesaved
 				};
 				let ret = new.exporter.clone();
 				ht.insert(desc.jobid.to_string(), new);
@@ -568,4 +746,28 @@ impl ExporterFactory
 	}
 
 
+	pub(crate) fn push(&self, name: &str, doc: &str, ctype : CounterType, perjob_exporter : Option<Arc<Exporter>>) -> Result<(), ProxyErr>
+	{
+		self.get_main().push(name, doc, ctype.clone())?;
+
+		if let Some(e) = perjob_exporter
+		{
+			e.push(name, doc, ctype)?;
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn accumulate(&self, name: &str, value: f64, perjob_exporter : Option<Arc<Exporter>>) -> Result<(), ProxyErr>
+	{
+
+		self.get_main().accumulate(name, value)?;
+
+		if let Some(e) = perjob_exporter
+		{
+			e.accumulate(name, value)?;
+		}
+
+		Ok(())
+	}
 }

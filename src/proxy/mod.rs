@@ -28,7 +28,6 @@ use super::proxywireprotocol::ProxyCommand;
 struct PerClientState
 {
 	factory : Arc<ExporterFactory>,
-	main_exporter : Arc<Exporter>,
 	job_exporter : Option<Arc<Exporter>>,
 	job_desc : Option<JobDesc>
 }
@@ -41,19 +40,10 @@ impl UnixProxy
 		match command
 		{
 			ProxyCommand::Desc(desc) => {
-	
-				per_client_state.main_exporter.push(desc.name.as_str(), desc.doc.as_str(), desc.ctype.clone())?;
-				if let Some(e) = per_client_state.job_exporter.clone()
-				{
-					e.push(desc.name.as_str(), desc.doc.as_str(), desc.ctype)?;
-				}
+				per_client_state.factory.push(desc.name.as_str(), desc.doc.as_str(), desc.ctype.clone(), per_client_state.job_exporter.clone())?;
 			},
 			ProxyCommand::Value(value) => {
-				per_client_state.main_exporter.accumulate(value.name.as_str(), value.value)?;
-				if let Some(e) = per_client_state.job_exporter.clone()
-				{
-					e.accumulate(value.name.as_str(), value.value)?;
-				}
+				per_client_state.factory.accumulate(value.name.as_str(), value.value, per_client_state.job_exporter.clone())?;
 			}
 			ProxyCommand::JobDesc(d) => {
 				per_client_state.job_desc = Some(d);
@@ -63,7 +53,7 @@ impl UnixProxy
 					if desc.jobid != ""
 					{
 						/* No need to start the exporter if the jobid is empty */
-						per_client_state.job_exporter = Some(per_client_state.factory.resolve_job(&desc));
+						per_client_state.job_exporter = Some(per_client_state.factory.resolve_job(&desc, true));
 					}
 				}
 
@@ -79,9 +69,7 @@ impl UnixProxy
 		let mut received_data : Vec<u8> = Vec::new();
 
 		let mut per_client_state =PerClientState{
-			factory : factory.clone(),
-			main_exporter : factory.get_main(),
-			job_exporter : None,
+			factory : factory.clone(),			job_exporter : None,
 			job_desc : None
 		};
 
@@ -164,6 +152,8 @@ impl UnixProxy
 			listener,
 			factory
 		};
+
+		log::info!("UNIX proxy listening on {}", socket_path);
 
 		Ok(proxy)
 	}

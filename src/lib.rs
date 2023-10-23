@@ -93,7 +93,7 @@ impl MetricProxyClient
 
 		let mut can_run : bool = true;
 		
-		let sock_path = env::var("PROXY_PATH").unwrap_or("/tmp/metric_proxy".to_string());
+		let sock_path = env::var("PROXY_PATH").unwrap_or("/tmp/metric_proxy.unix".to_string());
 		let path = Path::new(&sock_path);
 
 
