@@ -31,11 +31,13 @@ struct ApiResponse
 
 
 enum WebResponse {
+	#[allow(unused)]
 	HTML(String),
 	StaticHtml(String, &'static str, &'static [u8]),
 	Text(String),
 	BadReq(String),
 	Success(String),
+	#[allow(unused)]
 	Redirect302(String),
 	Native(Response),
 	NoSuchDoc()
@@ -336,7 +338,7 @@ impl Web
 
 		match serde_json::to_vec(&jobs)
 		{
-			Ok(v) => {
+			Ok(_v) => {
 				return WebResponse::Native(Response::json(&jobs))
 			}
 			Err(e) => {

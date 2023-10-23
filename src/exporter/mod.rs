@@ -8,8 +8,6 @@ use std::thread::sleep;
 use std::time::Duration;
 use reqwest::blocking::Client;
 
-
-use crate::exporter;
 use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{JobProfile, JobDesc, CounterSnapshot};
 
@@ -724,7 +722,7 @@ impl ExporterFactory
 		if let Some(job_entry) = ht.get_mut(&desc.jobid)
 		{
 			job_entry.counter -= 1;
-			log::debug!("RELAXING Per Job exporter {} has refcount {}", desc.jobid, job_entry.counter);
+			log::debug !("RELAXING Per Job exporter {} has refcount {}", desc.jobid, job_entry.counter);
 			assert!(0 <= job_entry.counter);
 			if job_entry.counter == 0
 			{

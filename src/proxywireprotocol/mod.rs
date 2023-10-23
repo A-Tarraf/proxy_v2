@@ -161,6 +161,7 @@ pub(crate)struct JobProfile
 
 impl JobProfile
 {
+	#[allow(unused)]
 	pub(crate) fn merge(&mut self, other_prof : JobProfile) -> Result<(), ProxyErr>
 	{
 		self.desc.merge(other_prof.desc)?;
@@ -185,6 +186,7 @@ impl JobProfile
 		Ok(())
 	}
 
+	#[allow(unused)]
 	pub (crate) fn substract(&mut self, previous : & JobProfile) -> Result<(), ProxyErr>
 	{
 		/* Map all counters from self */

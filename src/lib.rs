@@ -97,7 +97,7 @@ impl MetricProxyClient
 		let path = Path::new(&sock_path);
 
 
-		let mut tsock : Option<UnixStream>;
+		let tsock : Option<UnixStream>;
 
 		if !path.exists()
 		{
