@@ -8,15 +8,17 @@ int main(int argc, char ** argv)
 
 	printf("Client %p\n", pclient);
 
+
+	struct MetricProxyClientCounter * scounter = metric_proxy_counter_new(pclient, "starts", "number of starts");
+
+	metric_proxy_counter_inc(scounter, 1);
+
+
 	struct MetricProxyClientCounter * pcounter = metric_proxy_counter_new(pclient, "key", "test key");
 
 	printf("Counter %p\n", pcounter);
 
 
-	while (1) {
-		metric_proxy_counter_inc(pcounter, 1);
-
-	}
 
 	metric_proxy_release(pclient);
 

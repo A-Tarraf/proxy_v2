@@ -1,11 +1,13 @@
 use serde::{Serialize, Deserialize};
-use std::env;
+use std::{env, collections::HashMap};
+
+use crate::proxy_common::ProxyErr;
 
 use super::proxy_common::unix_ts;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 #[repr(u8)]
-pub enum ProxyCommandType
+pub(crate)enum ProxyCommandType
 {
 	REGISTER = 0,
 	SET = 1,
@@ -17,46 +19,76 @@ pub enum ProxyCommandType
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 #[repr(u8)]
-pub enum CounterType
+pub(crate)enum CounterType
 {
 	COUNTER = 0,
 	GAUGE = 1
 }
 
 #[derive(Serialize,Deserialize, Debug)]
-pub struct ValueDesc
+pub(crate)struct ValueDesc
 {
-	pub name : String,
-	pub doc : String,
-	pub ctype : CounterType
+	pub(crate)name : String,
+	pub(crate)doc : String,
+	pub(crate)ctype : CounterType
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct CounterValue
+pub(crate)struct CounterValue
 {
-	pub name : String,
-	pub value : f64
+	pub(crate)name : String,
+	pub(crate)value : f64
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct JobDesc
+pub(crate)struct JobDesc
 {
-	pub jobid : String,
-	pub command : String,
-	pub size : i32,
-	pub nodelist : String,
-	pub partition : String,
-	pub cluster : String,
-	pub run_dir : String,
-	pub start_time : u64,
-	pub end_time : u64
+	pub(crate)jobid : String,
+	pub(crate)command : String,
+	pub(crate)size : i32,
+	pub(crate)nodelist : String,
+	pub(crate)partition : String,
+	pub(crate)cluster : String,
+	pub(crate)run_dir : String,
+	pub(crate)start_time : u64,
+	pub(crate)end_time : u64
+}
+
+
+impl JobDesc
+{
+	pub fn merge(&mut self, other_desc : JobDesc) -> Result<(), ProxyErr>
+	{
+		/* First handle descs */
+		if self.jobid != other_desc.jobid
+		{
+			return Err(ProxyErr::new("Mismatching job ids"))
+		}
+
+		if self.size != other_desc.size
+		{
+			return Err(ProxyErr::new("Mismatching sizes id"))
+		}
+
+		if let Some(min) = [self.start_time, other_desc.start_time].iter().min().cloned()
+		{
+			self.start_time = min;
+		}
+
+		if let Some(max) = [self.end_time, other_desc.end_time].iter().max().cloned()
+		{
+			self.end_time = max;
+		}
+
+		Ok(())
+	}
 }
 
 impl JobDesc
 {
 	// Only used in the client library
 	#[allow(unused)]
-	pub fn new() -> JobDesc
+	pub(crate)fn new() -> JobDesc
 	{
 		let mut jobid = env::var("PROXY_JOB_ID")
 		.or_else(|_| env::var("SLURM_JOBID"))
@@ -105,25 +137,52 @@ impl JobDesc
 }
 
 #[derive(Serialize,Deserialize, Debug)]
-pub enum ProxyCommand
+pub(crate)enum ProxyCommand
 {
 	Desc(ValueDesc),
 	Value(CounterValue),
 	JobDesc(JobDesc)
 }
 
-#[derive(Serialize,Deserialize, Debug)]
-pub struct CounterSnapshot
+#[derive(Serialize,Deserialize, Debug, Clone)]
+pub(crate)struct CounterSnapshot
 {
-	pub name : String,
-	pub doc : String,
-	pub ctype : CounterType,
-	pub value : f64
+	pub(crate)name : String,
+	pub(crate)doc : String,
+	pub(crate)ctype : CounterType,
+	pub(crate)value : f64
 }
 
 #[derive(Serialize,Deserialize, Debug)]
-pub struct JobProfile
+pub(crate)struct JobProfile
 {
-	pub desc : JobDesc,
-	pub counters : Vec<CounterSnapshot>
+	pub(crate)desc : JobDesc,
+	pub(crate)counters : Vec<CounterSnapshot>
+}
+
+impl JobProfile
+{
+	pub(crate) fn merge(&mut self, other_prof : JobProfile) -> Result<(), ProxyErr>
+	{
+		self.desc.merge(other_prof.desc)?;
+
+		/* Map all counters from self */
+		let mut map : HashMap<String, CounterSnapshot> = self.counters.iter().map(|v| (v.name.to_string(), v.clone())).collect();
+
+		for cnt in other_prof.counters.iter()
+		{
+			if let Some(existing) = map.get_mut(&cnt.name)
+			{
+				existing.value += cnt.value;
+			}
+			else
+			{
+				map.insert(cnt.name.to_string(), cnt.clone());
+			}
+		}
+
+		self.counters = map.values().into_iter().cloned().collect();
+
+		Ok(())
+	}
 }

@@ -7,6 +7,7 @@ use std::thread;
 
 use serde_json;
 
+use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::JobDesc;
 
 use super::proxy_common::ProxyErr;
@@ -109,10 +110,12 @@ impl UnixProxy
 			}
 		}
 
-		if let Some(desc) = per_client_state.job_desc
+		if let Some(mut desc) = per_client_state.job_desc
 		{
 			if desc.jobid != ""
 			{
+				/* We set the end Unix TS each time we relax */
+				desc.end_time = unix_ts();
 				per_client_state.factory.relax_job(&desc)?;
 			}
 		}

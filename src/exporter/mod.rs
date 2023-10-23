@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 use std::process::exit;
 use std::sync::{RwLock, Arc, Mutex};
 use std::error::Error;
 use std::thread::sleep;
 use std::time::Duration;
+
+use libc::__c_anonymous_ptrace_syscall_info_seccomp;
 
 use crate::proxywireprotocol::{JobProfile, JobDesc, CounterSnapshot};
 
@@ -288,8 +290,7 @@ pub(crate) struct ExporterFactory
 						PerJobRefcount
 					>
 				>,
-	prefix : PathBuf,
-	aggregate : bool
+	prefix : PathBuf
 }
 
 
@@ -338,14 +339,45 @@ impl ExporterFactory
 
 	}
 
+	fn profile_parse_jobid(target : & String) -> Result<String, Box<dyn Error>>
+	{
+		let path = PathBuf::from(target);
+		let filename = path.file_name().ok_or("Failed to parse path")?.to_string_lossy().to_string();
+
+		if let Some(jobid) = filename.split("___").next()
+		{
+			return Ok(jobid.to_string());
+		}
+
+		Err(ProxyErr::newboxed("Failed to parse jobid"))
+	}
 
 	fn accumulate_a_profile(profile_dir : & PathBuf , target : & String) -> Result<(), Box<dyn Error>>
 	{
 		let file = fs::File::open(&target)?;
-		let content : JobProfile = serde_json::from_reader(file)?;
-		/* If we are here we managed to read the file */
-		fs::remove_file(target).ok();
+		let mut content : JobProfile = serde_json::from_reader(file)?;
 
+		/* Compute path to profile for given job  */
+		let jobid = ExporterFactory::profile_parse_jobid(target)?;
+		let mut target_prof = profile_dir.clone();
+		target_prof.push(format!("{}.profile", jobid));
+
+		if target_prof.is_file()
+		{
+			/* We need to load and accumulate the existing profile */
+			let e_profile_file = fs::File::open(&target_prof)?;
+			let existing_prof : JobProfile = serde_json::from_reader(e_profile_file)?;
+			/* Aggregate the existing content */
+			content.merge(existing_prof)?;
+		}
+
+
+		/* Overwrite the profile */
+		let outfile = fs::File::create(target_prof)?;
+		serde_json::to_writer(outfile, &content)?;
+
+		/* If we are here we managed to read and collect the file */
+		fs::remove_file(target).ok();
 
 		Ok(())
 	}
@@ -401,8 +433,7 @@ impl ExporterFactory
 		Arc::new(ExporterFactory{
 			main: Arc::new(Exporter::new()),
 			perjob: Mutex::new(HashMap::new()),
-			prefix : profile_prefix,
-			aggregate
+			prefix : profile_prefix
 		})
 	}
 
