@@ -98,7 +98,7 @@ impl UnixProxy {
         }
 
         if let Some(mut desc) = per_client_state.job_desc {
-            if desc.jobid.is_empty() {
+            if !desc.jobid.is_empty() {
                 /* We set the end Unix TS each time we relax */
                 desc.end_time = unix_ts();
                 per_client_state.factory.relax_job(&desc)?;

@@ -348,8 +348,6 @@ impl JobProfile {
             .map(|v| (v.name.to_string(), v.clone()))
             .collect();
 
-        log::debug!("Beef {:?}", map);
-
         for cnt in previous.counters.iter() {
             if let Some(existing) = map.get_mut(&cnt.name) {
                 existing.delta(cnt)?;
@@ -357,8 +355,6 @@ impl JobProfile {
                 map.insert(cnt.name.to_string(), cnt.clone());
             }
         }
-
-        log::debug!("Aff {:?}", map);
 
         self.counters = map.values().cloned().collect();
 

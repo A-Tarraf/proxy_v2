@@ -18,12 +18,48 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
  * WEBSERVER *
  *************/
 
+struct ClientPivot {
+    url: String,
+    refcount: u32,
+    child: Vec<String>,
+}
+
+impl ClientPivot {
+    fn new(url: String) -> ClientPivot {
+        ClientPivot {
+            url,
+            refcount: 0,
+            child: Vec::new(),
+        }
+    }
+
+    fn mapto(&mut self, child_url: String) {
+        self.refcount += 1;
+        self.child.push(child_url);
+    }
+
+    fn is_partial(&self) -> bool {
+        if (self.refcount < 2) && (1 < self.refcount) {
+            return true;
+        }
+
+        false
+    }
+
+    fn is_free(&self) -> bool {
+        if self.refcount < 2 {
+            return true;
+        }
+
+        false
+    }
+}
+
 pub(crate) struct Web {
     port: u32,
     factory: Arc<ExporterFactory>,
     static_files: HashMap<String, Resource>,
-    known_client: Mutex<HashMap<String, u32>>,
-    pivot_list: Mutex<Vec<(String, String)>>,
+    known_client: Mutex<Vec<ClientPivot>>,
 }
 
 enum WebResponse {
@@ -44,7 +80,7 @@ impl WebResponse {
         match self {
             WebResponse::Html(s) => Response::html(s),
             WebResponse::StaticHtml(name, mime, data) => {
-                log::debug!("{} {} as {}", "STATIC".yellow(), name, mime);
+                log::trace!("{} {} as {}", "STATIC".yellow(), name, mime);
                 Response::from_data(mime, data)
             }
             WebResponse::Text(s) => Response::text(s),
@@ -78,11 +114,13 @@ impl Web {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
-            known_client: Mutex::new(HashMap::new()),
-            pivot_list: Mutex::new(Vec::new()),
+            known_client: Mutex::new(Vec::new()),
         };
         /* Add myself in the URLs */
-        web.known_client.lock().unwrap().insert(web.url(), 0);
+        web.known_client
+            .lock()
+            .unwrap()
+            .push(ClientPivot::new(web.url()));
         web
     }
 
@@ -304,52 +342,45 @@ impl Web {
             );
         }
 
-        let mut ht = self.known_client.lock().unwrap();
+        let mut clients = self.known_client.lock().unwrap();
 
-        /* First try the non-null ones with up to two siblings */
-        let mut target: Option<(&String, &mut u32)> = ht
-            .iter_mut()
-            .filter(|(k, v)| (**k != from) && (**v > 0) && (**v < 2))
-            .min_by(|a, b| a.1.cmp(&b.1));
+        let mut target = clients.iter_mut().find(|v| v.is_partial());
 
         if target.is_none() {
-            /* If no match allow the leafs working by min */
-            target = ht
-                .iter_mut()
-                .filter(|(k, _)| **k != from)
-                .min_by(|a, b| a.1.cmp(&b.1));
+            target = clients.iter_mut().find(|v| v.is_free());
         }
 
         let resp: WebResponse;
 
         if let Some(target) = target {
+            target.mapto(from.to_string());
+
             log::info!(
                 "Pivot response to {} is {} with ref {}",
                 from,
-                target.0,
-                target.1
+                target.url,
+                target.refcount
             );
 
-            /* Add the match to the pivot list */
-            self.pivot_list
-                .lock()
-                .unwrap()
-                .push((from.to_string(), target.0.to_string()));
-
-            *target.1 += 1;
-            resp = WebResponse::Success(target.0.to_string());
+            resp = WebResponse::Success(target.url.to_string());
         } else {
             resp = WebResponse::BadReq("Did not match any server".to_string());
         }
 
-        /* We start with 1 to avoid always attaching to leaf */
-        ht.insert(from.to_string(), 0);
+        clients.push(ClientPivot::new(from));
 
         resp
     }
 
     fn handle_topo(&self, _req: &Request) -> WebResponse {
-        let resp: Vec<(String, String)> = self.pivot_list.lock().unwrap().iter().cloned().collect();
+        let mut resp: Vec<(String, String)> = Vec::new();
+
+        for c in self.known_client.lock().unwrap().iter() {
+            for t in &c.child {
+                resp.push((c.url.clone(), t.clone()))
+            }
+        }
+
         WebResponse::Native(Response::json(&resp))
     }
 
@@ -441,7 +472,7 @@ impl Web {
 
             let (prefix, resource) = Web::parse_url(&url);
 
-            log::debug!(
+            log::trace!(
                 "GET {} mapped to ({} , {})",
                 request.raw_url(),
                 prefix.red(),

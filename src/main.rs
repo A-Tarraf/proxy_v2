@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::process::exit;
-use std::thread::{self, sleep, spawn};
+use std::thread::{self, sleep};
 use std::time::Duration;
 mod proxy_common;
 use proxy_common::init_log;

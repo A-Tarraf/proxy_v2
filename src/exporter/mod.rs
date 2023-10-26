@@ -254,8 +254,8 @@ impl ProxyScraper {
             /* Now Update Values */
 
             for p in profiles.iter_mut() {
-                log::debug!(
-                    "#### Processing {} from {} #####",
+                log::trace!(
+                    "Scraping {} from {}",
                     p.desc.jobid,
                     self.target_url
                 );
