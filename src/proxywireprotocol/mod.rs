@@ -1,6 +1,6 @@
 use crate::proxy_common::unix_ts;
 use crate::proxy_common::ProxyErr;
-use reqwest;
+
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, error::Error};
 
@@ -14,9 +14,31 @@ pub(crate) enum ProxyCommandType {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub(crate) enum CounterType {
-    COUNTER = 0,
-    GAUGE = 1,
+pub enum CounterType {
+    Counter {
+        value: f64,
+    },
+    Gauge {
+        min: f64,
+        max: f64,
+        hits: f64,
+        total: f64,
+    },
+}
+
+impl CounterType {
+    pub fn newcounter() -> CounterType {
+        CounterType::Counter { value: 0.0 }
+    }
+
+    pub fn newgauge() -> CounterType {
+        CounterType::Gauge {
+            min: 0.0,
+            max: 0.0,
+            hits: 0.0,
+            total: 0.0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -26,10 +48,29 @@ pub(crate) struct ValueDesc {
     pub(crate) ctype: CounterType,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct CounterValue {
     pub(crate) name: String,
-    pub(crate) value: f64,
+    pub(crate) value: CounterType,
+}
+
+impl CounterValue {
+    pub fn reset(&mut self) {
+        self.value = match self.value {
+            CounterType::Counter { value } => CounterType::Counter { value: 0.0 },
+            CounterType::Gauge {
+                min,
+                max,
+                hits: _,
+                total: _,
+            } => CounterType::Gauge {
+                min,
+                max,
+                hits: 0.0,
+                total: 0.0,
+            },
+        };
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -135,7 +176,136 @@ pub(crate) struct CounterSnapshot {
     pub(crate) name: String,
     pub(crate) doc: String,
     pub(crate) ctype: CounterType,
-    pub(crate) value: f64,
+}
+
+fn min_f64(a: &f64, b: &f64) -> f64 {
+    if *a < *b {
+        *a
+    } else {
+        *b
+    }
+}
+
+fn max_f64(a: &f64, b: &f64) -> f64 {
+    if *a < *b {
+        *b
+    } else {
+        *a
+    }
+}
+
+impl CounterSnapshot {
+    pub fn serialize(&self) -> String {
+        match self.ctype {
+            CounterType::Counter { value } => {
+                format!("{} {}\n", self.name, value)
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                format!(
+                    "avg_{} {}\nmin_{} {}\nmax_{} {}\n",
+                    self.name,
+                    total / hits,
+                    self.name,
+                    min,
+                    self.name,
+                    max
+                )
+            }
+        }
+    }
+
+    pub fn check_same_type(&self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
+        match (&self.ctype, &other.ctype) {
+            (CounterType::Gauge { .. }, CounterType::Gauge { .. }) => Ok(()),
+            (CounterType::Counter { .. }, CounterType::Counter { .. }) => Ok(()),
+            _ => Err(ProxyErr::new("Both instances are not of the same variant")),
+        }
+    }
+
+    pub fn merge(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
+        self.check_same_type(other)?;
+
+        match other.ctype {
+            CounterType::Counter { value } => {
+                /* For a counter we simply add the local and remote values */
+                self.ctype = match &self.ctype {
+                    CounterType::Counter { value: svalue } => CounterType::Counter {
+                        value: value + svalue,
+                    },
+                    _ => unreachable!(),
+                };
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                /* Here we sum the values and keep min and max accordingly */
+                self.ctype = match self.ctype {
+                    CounterType::Gauge {
+                        min: smin,
+                        max: smax,
+                        hits: shits,
+                        total: stotal,
+                    } => CounterType::Gauge {
+                        min: min_f64(&smin, &min),
+                        max: max_f64(&smax, &max),
+                        hits: hits + shits,
+                        total: total + stotal,
+                    },
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        Ok(())
+    }
+
+    fn delta(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
+        self.check_same_type(other)?;
+
+        match other.ctype {
+            CounterType::Counter { value } => {
+                /* For a counter we simply add the local and remote values */
+                self.ctype = match &self.ctype {
+                    CounterType::Counter { value: svalue } => CounterType::Counter {
+                        value: svalue - value,
+                    },
+                    _ => unreachable!(),
+                };
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                /* Here we sum the values and keep min and max accordingly */
+                self.ctype = match self.ctype {
+                    CounterType::Gauge {
+                        min: smin,
+                        max: smax,
+                        hits: shits,
+                        total: stotal,
+                    } => CounterType::Gauge {
+                        min: min_f64(&smin, &min),
+                        max: max_f64(&smax, &max),
+                        hits: shits - hits,
+                        total: stotal - total,
+                    },
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -158,13 +328,13 @@ impl JobProfile {
 
         for cnt in other_prof.counters.iter() {
             if let Some(existing) = map.get_mut(&cnt.name) {
-                existing.value += cnt.value;
+                existing.merge(cnt)?;
             } else {
                 map.insert(cnt.name.to_string(), cnt.clone());
             }
         }
 
-        self.counters = map.values().into_iter().cloned().collect();
+        self.counters = map.values().cloned().collect();
 
         Ok(())
     }
@@ -178,19 +348,19 @@ impl JobProfile {
             .map(|v| (v.name.to_string(), v.clone()))
             .collect();
 
+        log::debug!("Beef {:?}", map);
+
         for cnt in previous.counters.iter() {
             if let Some(existing) = map.get_mut(&cnt.name) {
-                if existing.value < cnt.value {
-                    log::error!("Cannot substract non-monothonic counter {}", existing.name);
-                    return Err(ProxyErr::new("Non monothonic substraction attempted"));
-                }
-                existing.value -= cnt.value;
+                existing.delta(cnt)?;
             } else {
                 map.insert(cnt.name.to_string(), cnt.clone());
             }
         }
 
-        self.counters = map.values().into_iter().cloned().collect();
+        log::debug!("Aff {:?}", map);
+
+        self.counters = map.values().cloned().collect();
 
         Ok(())
     }

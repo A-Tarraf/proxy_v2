@@ -10,27 +10,22 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use crate::proxy_common::unix_ts;
-use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, JobDesc, JobProfile};
+use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile};
 
 use super::proxy_common::{hostname, is_url_live, list_files_with_ext_in, unix_ts_us, ProxyErr};
-
-use super::proxywireprotocol::CounterType;
 
 /***********************
  * PROMETHEUS EXPORTER *
  ***********************/
+
 struct ExporterEntry {
-    name: String,
-    ctype: CounterType,
-    value: Arc<RwLock<f64>>,
+    value: Arc<RwLock<CounterSnapshot>>,
 }
 
 impl ExporterEntry {
-    fn new(name: String, ctype: CounterType) -> ExporterEntry {
+    fn new(value: CounterSnapshot) -> ExporterEntry {
         ExporterEntry {
-            name,
-            value: Arc::new(RwLock::new(0.0)),
-            ctype,
+            value: Arc::new(RwLock::new(value)),
         }
     }
 }
@@ -55,8 +50,8 @@ impl ExporterEntryGroup {
         spl[0].to_string()
     }
 
-    fn set(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-        match self.ht.write().unwrap().get_mut(name) {
+    fn set(&self, value: CounterSnapshot) -> Result<(), ProxyErr> {
+        match self.ht.write().unwrap().get_mut(&value.name) {
             Some(v) => {
                 let mut val = v.value.write().unwrap();
                 *val = value;
@@ -66,26 +61,20 @@ impl ExporterEntryGroup {
         }
     }
 
-    fn accumulate(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-        match self.ht.write().unwrap().get_mut(name) {
+    fn accumulate(&self, snapshot: &CounterSnapshot) -> Result<(), ProxyErr> {
+        match self.ht.write().unwrap().get_mut(&snapshot.name) {
             Some(v) => {
                 let mut val = v.value.write().unwrap();
-                match v.ctype {
-                    CounterType::COUNTER => {
-                        *val += value;
-                    }
-                    CounterType::GAUGE => {
-                        *val = value;
-                    }
-                }
+                val.merge(snapshot)?;
                 Ok(())
             }
             None => Err(ProxyErr::new("Failed to set counter")),
         }
     }
 
-    fn push(&self, name: &str, ctype: CounterType) -> Result<(), ProxyErr> {
-        if self.ht.read().unwrap().contains_key(name) {
+    fn push(&self, snapshot: CounterSnapshot) -> Result<(), ProxyErr> {
+        let name = snapshot.name.to_string();
+        if self.ht.read().unwrap().contains_key(&name) {
             return Ok(());
         } else {
             if name.contains('{') && !name.contains('}') {
@@ -93,8 +82,8 @@ impl ExporterEntryGroup {
                     format!("Bad metric name '{}' unmatched brackets", name).as_str(),
                 ));
             }
-            let new = ExporterEntry::new(name.to_string(), ctype);
-            self.ht.write().unwrap().insert(name.to_string(), new);
+            let new = ExporterEntry::new(snapshot);
+            self.ht.write().unwrap().insert(name, new);
         }
 
         Ok(())
@@ -109,7 +98,7 @@ impl ExporterEntryGroup {
         for (_, exporter_counter) in self.ht.read().unwrap().iter() {
             // Acquire the Mutex for this specific ExporterEntry
             let value = exporter_counter.value.read().unwrap();
-            ret += format!("{} {}\n", exporter_counter.name, value).as_str();
+            ret += value.serialize().as_str();
         }
 
         Ok(ret)
@@ -121,12 +110,7 @@ impl ExporterEntryGroup {
         for (_, exporter_counter) in self.ht.read().unwrap().iter() {
             // Acquire the Mutex for this specific ExporterEntry
             let value = exporter_counter.value.read().unwrap();
-            ret.push(CounterSnapshot {
-                name: exporter_counter.name.to_string(),
-                doc: self.doc.to_string(),
-                ctype: CounterType::COUNTER,
-                value: *value,
-            });
+            ret.push(value.clone());
         }
 
         Ok(ret)
@@ -144,46 +128,44 @@ impl Exporter {
         }
     }
 
-    pub(crate) fn accumulate(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-        log::trace!("Exporter accumulate {} {}", name, value);
-
-        let basename = ExporterEntryGroup::basename(name.to_string());
+    pub(crate) fn accumulate(&self, value: &CounterSnapshot) -> Result<(), ProxyErr> {
+        let basename = ExporterEntryGroup::basename(value.name.to_string());
 
         if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str()) {
-            exporter_counter.accumulate(name, value)
+            exporter_counter.accumulate(value)
         } else {
             return Err(ProxyErr::new(
-                format!("No such key {} cannot set it", name).as_str(),
+                format!("No such key {} cannot set it", value.name).as_str(),
             ));
         }
     }
 
-    pub(crate) fn set(&self, name: &str, value: f64) -> Result<(), ProxyErr> {
-        log::trace!("Exporter set {} {}", name, value);
+    pub(crate) fn set(&self, value: CounterSnapshot) -> Result<(), ProxyErr> {
+        log::trace!("Exporter set {} {:?}", value.name, value);
 
-        let basename = ExporterEntryGroup::basename(name.to_string());
+        let basename = ExporterEntryGroup::basename(value.name.to_string());
 
         if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str()) {
-            exporter_counter.set(name, value)
+            exporter_counter.set(value)
         } else {
             return Err(ProxyErr::new(
-                format!("No such key {} cannot set it", name).as_str(),
+                format!("No such key {} cannot set it", value.name).as_str(),
             ));
         }
     }
 
-    pub(crate) fn push(&self, name: &str, doc: &str, ctype: CounterType) -> Result<(), ProxyErr> {
-        log::trace!("Exporter push {} {} {:?}", name, doc, ctype);
+    pub(crate) fn push(&self, value: &CounterSnapshot) -> Result<(), ProxyErr> {
+        log::trace!("Exporter push {:?}", value);
 
-        let basename = ExporterEntryGroup::basename(name.to_string());
+        let basename = ExporterEntryGroup::basename(value.name.to_string());
 
         let mut ht = self.ht.write().unwrap();
 
         if ht.get(basename.as_str()).is_some() {
             return Ok(());
         } else {
-            let ncnt = ExporterEntryGroup::new(basename.to_owned(), doc.to_string());
-            ncnt.push(name, ctype)?;
+            let ncnt = ExporterEntryGroup::new(basename.to_owned(), value.doc.to_string());
+            ncnt.push(value.clone())?;
             ht.insert(basename, ncnt);
         }
 
@@ -272,6 +254,11 @@ impl ProxyScraper {
             /* Now Update Values */
 
             for p in profiles.iter_mut() {
+                log::debug!(
+                    "#### Processing {} from {} #####",
+                    p.desc.jobid,
+                    self.target_url
+                );
                 let cur: JobProfile;
                 if let Some(previous) = self.state.get(&p.desc.jobid) {
                     /* We clone previous snapshot before substracting */
@@ -285,8 +272,8 @@ impl ProxyScraper {
 
                 if let Some(exporter) = self.factory.resolve_by_id(&p.desc.jobid) {
                     for cnt in p.counters.iter() {
-                        exporter.push(&cnt.name, &cnt.doc, cnt.ctype.clone())?;
-                        exporter.accumulate(&cnt.name, cnt.value)?;
+                        exporter.push(cnt)?;
+                        exporter.accumulate(cnt)?;
                     }
                 } else {
                     return Err(ProxyErr::newboxed("No such JobID"));
@@ -701,10 +688,15 @@ impl ExporterFactory {
         ctype: CounterType,
         perjob_exporter: Option<Arc<Exporter>>,
     ) -> Result<(), ProxyErr> {
-        self.get_main().push(name, doc, ctype.clone())?;
+        let snapshot = CounterSnapshot {
+            name: name.to_string(),
+            doc: doc.to_string(),
+            ctype,
+        };
+        self.get_main().push(&snapshot)?;
 
         if let Some(e) = perjob_exporter {
-            e.push(name, doc, ctype)?;
+            e.push(&snapshot)?;
         }
 
         Ok(())
@@ -713,13 +705,19 @@ impl ExporterFactory {
     pub(crate) fn accumulate(
         &self,
         name: &str,
-        value: f64,
+        ctype: CounterType,
         perjob_exporter: Option<Arc<Exporter>>,
     ) -> Result<(), ProxyErr> {
-        self.get_main().accumulate(name, value)?;
+        let snapshot = CounterSnapshot {
+            name: name.to_string(),
+            doc: "".to_string(),
+            ctype,
+        };
+
+        self.get_main().accumulate(&snapshot)?;
 
         if let Some(e) = perjob_exporter {
-            e.accumulate(name, value)?;
+            e.accumulate(&snapshot)?;
         }
 
         Ok(())

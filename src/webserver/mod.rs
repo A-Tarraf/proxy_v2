@@ -1,12 +1,12 @@
-use crate::proxywireprotocol::ApiResponse;
+use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType};
 use crate::{
     exporter::{Exporter, ExporterFactory},
     proxy_common::{concat_slices, hostname},
 };
-use bincode::config::NativeEndian;
+
 use colored::Colorize;
 use rouille::{Request, Response};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use static_files::Resource;
 use std::collections::HashMap;
 use std::path::Path;
@@ -179,7 +179,13 @@ impl Web {
         let key = key.unwrap();
         let value = value.unwrap();
 
-        match self.factory.get_main().set(key.as_str(), value) {
+        let snap = CounterSnapshot {
+            name: key,
+            doc: "".to_string(),
+            ctype: CounterType::Counter { value },
+        };
+
+        match self.factory.get_main().set(snap) {
             Ok(_) => WebResponse::Success("set".to_string()),
             Err(e) => WebResponse::BadReq(e.to_string()),
         }
@@ -200,7 +206,13 @@ impl Web {
         let key = key.unwrap();
         let value = value.unwrap();
 
-        match self.factory.get_main().accumulate(key.as_str(), value) {
+        let snap = CounterSnapshot {
+            name: key,
+            doc: "".to_string(),
+            ctype: CounterType::Counter { value },
+        };
+
+        match self.factory.get_main().accumulate(&snap) {
             Ok(_) => WebResponse::Success("inc".to_string()),
             Err(e) => WebResponse::BadReq(e.to_string()),
         }
@@ -219,11 +231,13 @@ impl Web {
 
         let key = key.unwrap();
 
-        match self.factory.get_main().push(
-            key.as_str(),
-            doc.as_str(),
-            crate::proxywireprotocol::CounterType::COUNTER,
-        ) {
+        let snap = CounterSnapshot {
+            name: key,
+            doc,
+            ctype: CounterType::newcounter(),
+        };
+
+        match self.factory.get_main().push(&snap) {
             Ok(_) => WebResponse::Success("push".to_string()),
             Err(e) => WebResponse::BadReq(e.to_string()),
         }

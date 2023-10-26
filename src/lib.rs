@@ -20,31 +20,42 @@ use std::thread;
 
 use std::sync::Once;
 
-pub struct MetricProxyClientCounter {
+pub struct MetricProxyClientEntry {
     name: String,
-    value: Arc<Mutex<f64>>,
+    value: Arc<Mutex<CounterValue>>,
 }
 
-impl MetricProxyClientCounter {
-    fn new(name: String) -> MetricProxyClientCounter {
-        MetricProxyClientCounter {
-            name,
-            value: Arc::new(Mutex::new(0.0)),
+impl MetricProxyClientEntry {
+    fn newcounter(name: String) -> MetricProxyClientEntry {
+        MetricProxyClientEntry {
+            name: name.to_string(),
+            value: Arc::new(Mutex::new(CounterValue {
+                name,
+                value: CounterType::Counter { value: 0.0 },
+            })),
         }
     }
 
-    fn inc(&self, value: f64) -> Result<(), ProxyErr> {
+    fn inc(&self, increment: f64) -> Result<(), ProxyErr> {
         let mut tval = self.value.lock().unwrap();
-        *tval += value;
+
+        match tval.value {
+            CounterType::Counter { value } => {
+                tval.value = CounterType::Counter {
+                    value: value + increment,
+                }
+            }
+            _ => {
+                return Err(ProxyErr::new("Inc is only meaningfull for counters"));
+            }
+        }
+
         Ok(())
     }
 
-    fn collect(&self) -> f64 {
+    fn reset(&self) {
         let mut value = self.value.lock().unwrap();
-
-        let ret = *value;
-        *value = 0.0;
-        ret
+        value.reset();
     }
 }
 
@@ -52,7 +63,7 @@ pub struct MetricProxyClient {
     period: Duration,
     running: Arc<Mutex<bool>>,
     stream: Mutex<Option<UnixStream>>,
-    counters: RwLock<HashMap<String, Arc<MetricProxyClientCounter>>>,
+    counters: RwLock<HashMap<String, Arc<MetricProxyClientEntry>>>,
 }
 
 impl Drop for MetricProxyClient {
@@ -138,9 +149,11 @@ impl MetricProxyClient {
                 .unwrap()
                 .iter()
                 .map(|(_, v)| {
-                    let name = v.name.to_string();
-                    let value = v.collect();
-                    ProxyCommand::Value(CounterValue { name, value })
+                    let mut value = v.value.lock().unwrap();
+                    let ret = ProxyCommand::Value(value.clone());
+                    /* Make sure to clear the original counter */
+                    value.reset();
+                    ret
                 })
                 .collect();
         }
@@ -181,12 +194,12 @@ impl MetricProxyClient {
         &mut self,
         name: String,
         doc: String,
-    ) -> Result<Arc<MetricProxyClientCounter>, Box<dyn Error>> {
-        let counter: Arc<MetricProxyClientCounter>;
+    ) -> Result<Arc<MetricProxyClientEntry>, Box<dyn Error>> {
+        let counter: Arc<MetricProxyClientEntry>;
         let command = ProxyCommand::Desc(ValueDesc {
             name: name.to_string(),
             doc,
-            ctype: CounterType::COUNTER,
+            ctype: CounterType::newcounter(),
         });
 
         /* First try to add the counters */
@@ -196,7 +209,7 @@ impl MetricProxyClient {
             let foundcounter = ht.get_mut(&name);
 
             if foundcounter.is_none() {
-                counter = Arc::new(MetricProxyClientCounter::new(name.to_string()));
+                counter = Arc::new(MetricProxyClientEntry::newcounter(name.to_string()));
                 ht.insert(name.to_string(), counter.clone());
             } else {
                 counter = foundcounter.cloned().unwrap();
@@ -248,7 +261,7 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
     pclient: *mut MetricProxyClient,
     name: *const std::os::raw::c_char,
     doc: *const std::os::raw::c_char,
-) -> *mut MetricProxyClientCounter {
+) -> *mut MetricProxyClientEntry {
     let rname = unwrap_c_string(name);
     let rdoc = unwrap_c_string(doc);
 
@@ -266,7 +279,7 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
     let rdoc = rdoc.unwrap();
 
     if let Ok(c) = client.new_counter(rname, rdoc) {
-        return Arc::into_raw(c) as *mut MetricProxyClientCounter;
+        return Arc::into_raw(c) as *mut MetricProxyClientEntry;
     }
 
     return std::ptr::null_mut();
@@ -274,7 +287,7 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
 
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_counter_inc(
-    pcounter: *mut MetricProxyClientCounter,
+    pcounter: *mut MetricProxyClientEntry,
     value: std::ffi::c_double,
 ) -> std::ffi::c_int {
     let zero: std::ffi::c_int = 0;
@@ -284,7 +297,7 @@ pub unsafe extern "C" fn metric_proxy_counter_inc(
         return one;
     }
 
-    let counter: &mut MetricProxyClientCounter = unsafe { &mut *(pcounter) };
+    let counter: &mut MetricProxyClientEntry = unsafe { &mut *(pcounter) };
 
     if counter.inc(value).is_err() {
         return one;
