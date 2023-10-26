@@ -1,123 +1,101 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Metric Proxy</title>
-    <link rel="stylesheet" type="text/css" href="styles.css">
-</head>
-<body>
-    <header>
-        <h1>Metric Proxy</h1>
-    </header>
-    <nav>
-        <ul>
-            <li><a href="/">Home</a></li>
-            <li><a href="/jobs.html">Jobs</a></li>
-        </ul>
-    </nav>
-    <main>
-        <section>
-			<h1>Job Details</h1>
-			<div id="error-message"></div>
-			<h2>Job Description</h2>
-			<table id="desc-table">
-				<thead>
-					<tr>
-						 <th>Key</th>
-						 <th>Value</th>
-					</tr>
-			  </thead>
-			</table>
-			<h2>Counters</h2>
-			<table id="counters-table">
-				<thead>
-					<tr>
-						 <th>Name</th>
-						 <th>Documentation</th>
-						 <th>Value</th>
-					</tr>
-			  </thead>
-			  <tbody>
-			  </tbody>
-			</table>
-	  
-			<script>
-				// Function to parse GET parameters from the URL
-				function getQueryParam(name) {
-					 const urlParams = new URLSearchParams(window.location.search);
-					 return urlParams.get(name);
+<main>
+	<section>
+	<h1>Job Details</h1>
+	<div id="error-message"></div>
+	<h2>Job Description</h2>
+	<table id="desc-table">
+		<thead>
+			<tr>
+					<th>Key</th>
+					<th>Value</th>
+			</tr>
+		</thead>
+	</table>
+	<h2>Counters</h2>
+	<table id="counters-table">
+		<thead>
+			<tr>
+					<th>Name</th>
+					<th>Documentation</th>
+					<th>Value</th>
+			</tr>
+		</thead>
+		<tbody>
+		</tbody>
+	</table>
+
+	<script>
+		// Function to parse GET parameters from the URL
+		function getQueryParam(name) {
+				const urlParams = new URLSearchParams(window.location.search);
+				return urlParams.get(name);
+		}
+
+		// Function to fetch and display JSON data
+		function fetchAndDisplayData(jobId) {
+				// Fetch JSON data from the endpoint with the specified JOBID
+				fetch(`/job?job=${jobId}`)
+					.then(response => {
+						if (!response.ok) {
+							throw new Error(`Failed to fetch job information (status: ${response.status})`);
+						}
+						return response.json();
+					})	
+					.then(data => {
+						// Clear existing tables
+						clearTable("desc-table");
+						clearTable("counters-table");
+
+						// Display the job description
+						const descTable = document.getElementById("desc-table");
+						const desc = data.desc;
+						for (const key in desc) {
+								const row = descTable.insertRow();
+								const cell1 = row.insertCell(0);
+								const cell2 = row.insertCell(1);
+								cell1.textContent = key;
+								cell2.textContent = desc[key];
+						}
+
+						// Display the counters
+						const countersTable = document.getElementById("counters-table");
+						data.counters.forEach(counter => {
+								const row = countersTable.insertRow();
+								const cell1 = row.insertCell(0);
+								const cell2 = row.insertCell(1);
+								const cell3 = row.insertCell(2);
+								cell1.textContent = counter.name;
+								cell2.textContent = counter.doc;
+								cell3.textContent = counter.value;
+						});
+					})
+					.catch(error => {
+						const errorMessage = document.getElementById("error-message");
+						errorMessage.textContent = "Error: " + error;
+					});
+		}
+
+		// Function to clear a table
+		function clearTable(tableId) {
+				const table = document.getElementById(tableId);
+				while (table.rows.length > 1) {
+					table.deleteRow(1);
 				}
-	 
-				// Function to fetch and display JSON data
-				function fetchAndDisplayData(jobId) {
-					 // Fetch JSON data from the endpoint with the specified JOBID
-					 fetch(`/job?job=${jobId}`)
-							.then(response => {
-								if (!response.ok) {
-									throw new Error(`Failed to fetch job information (status: ${response.status})`);
-								}
-								return response.json();
-							})	
-						  .then(data => {
-								// Clear existing tables
-								clearTable("desc-table");
-								clearTable("counters-table");
-	 
-								// Display the job description
-								const descTable = document.getElementById("desc-table");
-								const desc = data.desc;
-								for (const key in desc) {
-									 const row = descTable.insertRow();
-									 const cell1 = row.insertCell(0);
-									 const cell2 = row.insertCell(1);
-									 cell1.textContent = key;
-									 cell2.textContent = desc[key];
-								}
-	 
-								// Display the counters
-								const countersTable = document.getElementById("counters-table");
-								data.counters.forEach(counter => {
-									 const row = countersTable.insertRow();
-									 const cell1 = row.insertCell(0);
-									 const cell2 = row.insertCell(1);
-									 const cell3 = row.insertCell(2);
-									 cell1.textContent = counter.name;
-									 cell2.textContent = counter.doc;
-									 cell3.textContent = counter.value;
-								});
-						  })
-						  .catch(error => {
-								const errorMessage = document.getElementById("error-message");
-								errorMessage.textContent = "Error: " + error;
-						  });
-				}
-	 
-				// Function to clear a table
-				function clearTable(tableId) {
-					 const table = document.getElementById(tableId);
-					 while (table.rows.length > 1) {
-						  table.deleteRow(1);
-					 }
-				}
-	 
-				// Get the JOBID from the URL parameter and fetch data
-				const jobId = getQueryParam("job");
-				if (jobId) {
-					 fetchAndDisplayData(jobId);
-	 
-					 // Refresh data every 5 seconds
-					 setInterval(function () {
-						  fetchAndDisplayData(jobId);
-					 }, 1000);
-				} else {
-					 const errorMessage = document.getElementById("error-message");
-					 errorMessage.textContent = "Error: JOBID parameter not found in the URL.";
-				}
-			</script>
-        </section>
-    </main>
-    <footer>
-        <p>&copy; 2023 Metric Proxy</p>
-    </footer>
-</body>
-</html>
+		}
+
+		// Get the JOBID from the URL parameter and fetch data
+		const jobId = getQueryParam("job");
+		if (jobId) {
+				fetchAndDisplayData(jobId);
+
+				// Refresh data every 5 seconds
+				setInterval(function () {
+					fetchAndDisplayData(jobId);
+				}, 1000);
+		} else {
+				const errorMessage = document.getElementById("error-message");
+				errorMessage.textContent = "Error: JOBID parameter not found in the URL.";
+		}
+	</script>
+	</section>
+</main>

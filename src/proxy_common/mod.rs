@@ -1,90 +1,136 @@
 use std::ffi::OsStr;
-use std::{error::Error, path::PathBuf};
-use env_logger;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{error::Error, path::PathBuf};
 
 /*******************
  * IMPLEMENT ERROR *
  *******************/
 
 #[derive(Debug)]
-pub(crate) struct ProxyErr
-{
-	message : String,
+pub(crate) struct ProxyErr {
+    message: String,
 }
 
 impl Error for ProxyErr {}
 
 impl ProxyErr {
-	// Create a constructor method for your custom error
-	#[allow(unused)]
-	pub(crate) fn new(message: &str) -> ProxyErr {
-	ProxyErr {
-			message: message.to_string(),
-	}
-	}
+    // Create a constructor method for your custom error
+    #[allow(unused)]
+    pub(crate) fn new(message: &str) -> ProxyErr {
+        ProxyErr {
+            message: message.to_string(),
+        }
+    }
 
-	#[allow(unused)]
-	pub(crate) fn newboxed(message: &str) -> Box<ProxyErr> {
-		Box::new(ProxyErr {
-				message: message.to_string(),
-		})
-
-	}
+    #[allow(unused)]
+    pub(crate) fn newboxed(message: &str) -> Box<ProxyErr> {
+        Box::new(ProxyErr {
+            message: message.to_string(),
+        })
+    }
 }
 
 impl std::fmt::Display for ProxyErr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.message)
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
-pub fn init_log()
-{
-	let env = env_logger::Env::new()
-							.default_filter_or("info");
-	env_logger::init_from_env(env);
+impl From<Box<dyn std::error::Error>> for ProxyErr {
+    fn from(err: Box<dyn std::error::Error>) -> Self {
+        ProxyErr::new(&err.to_string())
+    }
 }
 
-#[allow(unused)]
-pub fn unix_ts() -> u64
-{
-	let current_time = SystemTime::now();
-	current_time.duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs()
+impl From<retry::Error<Box<dyn std::error::Error>>> for ProxyErr {
+    fn from(err: retry::Error<Box<dyn std::error::Error>>) -> Self {
+        ProxyErr::new(err.to_string().as_str()) // Adjust this as per your ProxyErr constructor.
+    }
 }
 
-#[allow(unused)]
-pub fn unix_ts_us() -> u128
-{
-	let current_time = SystemTime::now();
-	current_time.duration_since(UNIX_EPOCH).expect("Time went backwards").as_micros()
+pub fn init_log() {
+    let env = env_logger::Env::new().default_filter_or("info");
+    env_logger::init_from_env(env);
 }
 
 #[allow(unused)]
-pub(crate) fn list_files_with_ext_in(path : &PathBuf, ext : &str) -> Result<Vec<String>, Box<dyn Error>>
-{
-	if ! path.is_dir()
-	{
-		return Err(ProxyErr::newboxed("Aggregator path is not a directory"));
-	}
+pub fn unix_ts() -> u64 {
+    let current_time = SystemTime::now();
+    current_time
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs()
+}
 
-	let mut ret : Vec<String> = Vec::new();
+#[allow(unused)]
+pub fn unix_ts_us() -> u128 {
+    let current_time = SystemTime::now();
+    current_time
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_micros()
+}
 
-	for entry in fs::read_dir(path)?
-	{
-		let entry = entry?;
-		let fname = PathBuf::from(entry.file_name());
+#[allow(unused)]
+pub(crate) fn list_files_with_ext_in(
+    path: &PathBuf,
+    ext: &str,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    if !path.is_dir() {
+        return Err(ProxyErr::newboxed("Aggregator path is not a directory"));
+    }
 
-		let mut full_path = path.clone();
-		full_path.push(fname);
+    let mut ret: Vec<String> = Vec::new();
 
-		if full_path.extension().unwrap_or(OsStr::new("")) == "partialprofile"
-		{
-			ret.push(full_path.to_string_lossy().to_string());
-		}
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let fname = PathBuf::from(entry.file_name());
 
-	}
+        let mut full_path = path.clone();
+        full_path.push(fname);
 
-	Ok(ret)
+        if full_path.extension().unwrap_or(OsStr::new("")) == "partialprofile" {
+            ret.push(full_path.to_string_lossy().to_string());
+        }
+    }
+
+    Ok(ret)
+}
+
+#[allow(unused)]
+pub(crate) fn hostname() -> String {
+    let host: std::ffi::OsString = gethostname::gethostname();
+    let strh = host.to_str().unwrap_or("unknown");
+    strh.to_string()
+}
+
+#[allow(unused)]
+pub(crate) fn is_url_live(url: &str) -> Result<(), Box<dyn Error>> {
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(url).send()?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(ProxyErr::newboxed(
+            format!(
+                "Failed to connect to {} got response {}",
+                url,
+                response.status()
+            )
+            .as_str(),
+        ))
+    }
+}
+
+#[allow(unused)]
+pub fn concat_slices(slices: [&'static [u8]; 3]) -> Vec<u8> {
+    let mut concatenated_data = Vec::new();
+
+    for slice in slices.iter() {
+        concatenated_data.extend_from_slice(slice);
+    }
+
+    concatenated_data
 }

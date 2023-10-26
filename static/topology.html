@@ -1,0 +1,50 @@
+<main>
+    <section>
+        <h2 id="head">Current Server Topology</h2>
+        <div id="mermaidChart"></div>
+    </section>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+        mermaid.initialize({ startOnLoad: false });
+
+        // Function to generate and render the Mermaid chart
+        async function generateAndRenderChart(data) {
+            const chartDefinition = `
+graph TD\n
+${data.map(([from, to]) => `${from} --> ${to}`).join('\n')}
+            `;
+            console.log(chartDefinition);
+            let element = document.querySelector('#mermaidChart');
+            element.innerHTML = '';
+            console.log(element)
+            const { svg } = await mermaid.render('mermaidChartr', chartDefinition);
+            element.innerHTML = svg;
+        }
+
+        // Function to make a GET request to the /topo endpoint
+        async function fetchTopoData() {
+            try {
+                const response = await fetch('/topo');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const data = await response.json(); // Assuming the response is in JSON format
+
+                // Call the function to generate and render the Mermaid chart
+                await generateAndRenderChart(data);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Rest of your code (including generateAndRenderChart function) here...
+
+        // Call the function to fetch data when the page loads
+        setInterval(function () {
+            fetchTopoData();
+        }, 1000);
+
+    </script>
+</main>
