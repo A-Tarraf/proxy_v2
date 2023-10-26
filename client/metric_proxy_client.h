@@ -5,7 +5,7 @@
 
 typedef struct MetricProxyClient MetricProxyClient;
 
-typedef struct MetricProxyClientCounter MetricProxyClientCounter;
+typedef struct MetricProxyValue MetricProxyValue;
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,11 +15,17 @@ struct MetricProxyClient *metric_proxy_init(void);
 
 int metric_proxy_release(struct MetricProxyClient *pclient);
 
-struct MetricProxyClientCounter *metric_proxy_counter_new(struct MetricProxyClient *pclient,
-                                                          const char *name,
-                                                          const char *doc);
+struct MetricProxyValue *metric_proxy_counter_new(struct MetricProxyClient *pclient,
+                                                  const char *name,
+                                                  const char *doc);
 
-int metric_proxy_counter_inc(struct MetricProxyClientCounter *pcounter, double value);
+int metric_proxy_counter_inc(struct MetricProxyValue *pcounter, double value);
+
+struct MetricProxyValue *metric_proxy_gauge_new(struct MetricProxyClient *pclient,
+                                                const char *name,
+                                                const char *doc);
+
+int metric_proxy_gauge_set(struct MetricProxyValue *pcounter, double value);
 
 #ifdef __cplusplus
 } // extern "C"

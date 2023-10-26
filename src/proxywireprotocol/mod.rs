@@ -31,12 +31,163 @@ impl CounterType {
         CounterType::Counter { value: 0.0 }
     }
 
+    #[allow(unused)]
     pub fn newgauge() -> CounterType {
         CounterType::Gauge {
             min: 0.0,
             max: 0.0,
             hits: 0.0,
             total: 0.0,
+        }
+    }
+
+    fn serialize(&self, name: &String) -> String {
+        match self {
+            CounterType::Counter { value } => {
+                format!("{} {}\n", name, value)
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                format!(
+                    "avg_{} {}\nmin_{} {}\nmax_{} {}\n",
+                    name,
+                    total / hits,
+                    name,
+                    min,
+                    name,
+                    max
+                )
+            }
+        }
+    }
+
+    pub(crate) fn merge(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
+        self.same_type(other)?;
+        match other {
+            CounterType::Counter { value } => {
+                /* For a counter we simply add the local and remote values */
+                match self {
+                    CounterType::Counter { value: svalue } => {
+                        *svalue += *value;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                /* Here we sum the values and keep min and max accordingly */
+                match self {
+                    CounterType::Gauge {
+                        min: smin,
+                        max: smax,
+                        hits: shits,
+                        total: stotal,
+                    } => {
+                        *smin = min_f64(*smin, *min);
+                        *smax = max_f64(*smax, *max);
+                        *shits += hits;
+                        *stotal += total;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
+        self.same_type(other)?;
+        match other {
+            CounterType::Counter { value } => {
+                /* For a counter we simply add the local and remote values */
+                match self {
+                    CounterType::Counter { value: svalue } => {
+                        *svalue += *value;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            CounterType::Gauge {
+                min: _,
+                max: _,
+                hits: _,
+                total,
+            } => {
+                /* Here we sum the values and keep min and max accordingly */
+                match self {
+                    CounterType::Gauge {
+                        min: smin,
+                        max: smax,
+                        hits: shits,
+                        total: stotal,
+                    } => {
+                        *smin = *total;
+                        *smax = *total;
+                        *shits = 1.0;
+                        *stotal = *total;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    fn delta(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
+        self.same_type(other)?;
+        match other {
+            CounterType::Counter { value } => {
+                /* For a counter we simply add the local and remote values */
+                match self {
+                    CounterType::Counter { value: svalue } => {
+                        *svalue -= *value;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                /* Here we sum the values and keep min and max accordingly */
+                match self {
+                    CounterType::Gauge {
+                        min: smin,
+                        max: smax,
+                        hits: shits,
+                        total: stotal,
+                    } => {
+                        *smin = min_f64(*smin, *min);
+                        *smax = max_f64(*smax, *max);
+                        *shits -= hits;
+                        *stotal -= total;
+                        Ok(())
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    fn same_type(&self, other: &CounterType) -> Result<(), ProxyErr> {
+        match (&self, &other) {
+            (CounterType::Gauge { .. }, CounterType::Gauge { .. }) => Ok(()),
+            (CounterType::Counter { .. }, CounterType::Counter { .. }) => Ok(()),
+            _ => Err(ProxyErr::new("Both instances are not of the same variant")),
         }
     }
 }
@@ -55,6 +206,7 @@ pub(crate) struct CounterValue {
 }
 
 impl CounterValue {
+    #[allow(unused)]
     pub fn reset(&mut self) {
         self.value = match self.value {
             CounterType::Counter { value } => CounterType::Counter { value: 0.0 },
@@ -178,133 +330,38 @@ pub(crate) struct CounterSnapshot {
     pub(crate) ctype: CounterType,
 }
 
-fn min_f64(a: &f64, b: &f64) -> f64 {
-    if *a < *b {
-        *a
+fn min_f64(a: f64, b: f64) -> f64 {
+    if a < b {
+        a
     } else {
-        *b
+        b
     }
 }
 
-fn max_f64(a: &f64, b: &f64) -> f64 {
-    if *a < *b {
-        *b
+fn max_f64(a: f64, b: f64) -> f64 {
+    if a < b {
+        b
     } else {
-        *a
+        a
     }
 }
 
 impl CounterSnapshot {
+    #[allow(unused)]
     pub fn serialize(&self) -> String {
-        match self.ctype {
-            CounterType::Counter { value } => {
-                format!("{} {}\n", self.name, value)
-            }
-            CounterType::Gauge {
-                min,
-                max,
-                hits,
-                total,
-            } => {
-                format!(
-                    "avg_{} {}\nmin_{} {}\nmax_{} {}\n",
-                    self.name,
-                    total / hits,
-                    self.name,
-                    min,
-                    self.name,
-                    max
-                )
-            }
-        }
-    }
-
-    pub fn check_same_type(&self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
-        match (&self.ctype, &other.ctype) {
-            (CounterType::Gauge { .. }, CounterType::Gauge { .. }) => Ok(()),
-            (CounterType::Counter { .. }, CounterType::Counter { .. }) => Ok(()),
-            _ => Err(ProxyErr::new("Both instances are not of the same variant")),
-        }
+        self.ctype.serialize(&self.name)
     }
 
     pub fn merge(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
-        self.check_same_type(other)?;
+        self.ctype.merge(&other.ctype)
+    }
 
-        match other.ctype {
-            CounterType::Counter { value } => {
-                /* For a counter we simply add the local and remote values */
-                self.ctype = match &self.ctype {
-                    CounterType::Counter { value: svalue } => CounterType::Counter {
-                        value: value + svalue,
-                    },
-                    _ => unreachable!(),
-                };
-            }
-            CounterType::Gauge {
-                min,
-                max,
-                hits,
-                total,
-            } => {
-                /* Here we sum the values and keep min and max accordingly */
-                self.ctype = match self.ctype {
-                    CounterType::Gauge {
-                        min: smin,
-                        max: smax,
-                        hits: shits,
-                        total: stotal,
-                    } => CounterType::Gauge {
-                        min: min_f64(&smin, &min),
-                        max: max_f64(&smax, &max),
-                        hits: hits + shits,
-                        total: total + stotal,
-                    },
-                    _ => unreachable!(),
-                };
-            }
-        }
-
-        Ok(())
+    pub fn set(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
+        self.ctype.set(&other.ctype)
     }
 
     fn delta(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
-        self.check_same_type(other)?;
-
-        match other.ctype {
-            CounterType::Counter { value } => {
-                /* For a counter we simply add the local and remote values */
-                self.ctype = match &self.ctype {
-                    CounterType::Counter { value: svalue } => CounterType::Counter {
-                        value: svalue - value,
-                    },
-                    _ => unreachable!(),
-                };
-            }
-            CounterType::Gauge {
-                min,
-                max,
-                hits,
-                total,
-            } => {
-                /* Here we sum the values and keep min and max accordingly */
-                self.ctype = match self.ctype {
-                    CounterType::Gauge {
-                        min: smin,
-                        max: smax,
-                        hits: shits,
-                        total: stotal,
-                    } => CounterType::Gauge {
-                        min: min_f64(&smin, &min),
-                        max: max_f64(&smax, &max),
-                        hits: shits - hits,
-                        total: stotal - total,
-                    },
-                    _ => unreachable!(),
-                };
-            }
-        }
-
-        Ok(())
+        self.ctype.delta(&other.ctype)
     }
 }
 

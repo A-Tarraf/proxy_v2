@@ -250,7 +250,7 @@ impl Web {
             ctype: CounterType::Counter { value },
         };
 
-        match self.factory.get_main().accumulate(&snap) {
+        match self.factory.get_main().accumulate(&snap, false) {
             Ok(_) => WebResponse::Success("inc".to_string()),
             Err(e) => WebResponse::BadReq(e.to_string()),
         }

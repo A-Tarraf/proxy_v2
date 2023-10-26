@@ -1,108 +1,126 @@
 <main>
 	<section>
-	<h1>Job Details</h1>
-	<div id="error-message"></div>
-	<h2>Job Description</h2>
-	<table id="desc-table">
-		<thead>
-			<tr>
+		<h1>Job Details</h1>
+		<div id="error-message"></div>
+		<h2>Job Description</h2>
+		<table id="desc-table">
+			<thead>
+				<tr>
 					<th>Key</th>
 					<th>Value</th>
-			</tr>
-		</thead>
-	</table>
-	<h2>Counters</h2>
-	<table id="counters-table">
-		<thead>
-			<tr>
+				</tr>
+			</thead>
+		</table>
+		<h2>Counters</h2>
+		<table id="counters-table">
+			<thead>
+				<tr>
 					<th>Name</th>
 					<th>Documentation</th>
 					<th>Value</th>
-			</tr>
-		</thead>
-		<tbody>
-		</tbody>
-	</table>
+				</tr>
+			</thead>
+			<tbody>
+			</tbody>
+		</table>
 
-	<script>
-		// Function to parse GET parameters from the URL
-		function getQueryParam(name) {
+		<script>
+			// Function to parse GET parameters from the URL
+			function getQueryParam(name) {
 				const urlParams = new URLSearchParams(window.location.search);
 				return urlParams.get(name);
-		}
+			}
 
-		// Function to fetch and display JSON data
-		function fetchAndDisplayData(jobId) {
-			// Fetch JSON data from the endpoint with the specified JOBID
-			fetch(`/job?job=${jobId}`)
-				.then(response => {
-					if (!response.ok) {
-					throw new Error(`Failed to fetch job information (status: ${response.status})`);
-					}
-					return response.json();
-				})	
-				.then(data => {
-					// Clear existing tables
-					clearTable("desc-table");
-					clearTable("counters-table");
+			// Function to fetch and display JSON data
+			function fetchAndDisplayData(jobId) {
+				// Fetch JSON data from the endpoint with the specified JOBID
+				fetch(`/job?job=${jobId}`)
+					.then(response => {
+						if (!response.ok) {
+							throw new Error(`Failed to fetch job information (status: ${response.status})`);
+						}
+						return response.json();
+					})
+					.then(data => {
+						// Clear existing tables
+						clearTable("desc-table");
+						clearTable("counters-table");
 
-					// Display the job description
-					const descTable = document.getElementById("desc-table");
-					const desc = data.desc;
-					for (const key in desc) {
-					const row = descTable.insertRow();
-					const cell1 = row.insertCell(0);
-					const cell2 = row.insertCell(1);
-					cell1.textContent = key;
-					// Check if the value is an object with a "Counter" property
-					if (typeof desc[key] === 'object' && 'Counter' in desc[key]) {
-						cell2.textContent = desc[key].Counter.value;
-					} else {
-						cell2.textContent = desc[key];
-					}
-					}
+						const descTable = document.getElementById("desc-table");
+						const countersTable = document.getElementById("counters-table");
 
-					// Display the counters
-					const countersTable = document.getElementById("counters-table");
-					data.counters.forEach(counter => {
-					const row = countersTable.insertRow();
-					const cell1 = row.insertCell(0);
-					const cell2 = row.insertCell(1);
-					const cell3 = row.insertCell(2);
-					cell1.textContent = counter.name;
-					cell2.textContent = counter.doc;
-					// Access the "Counter" value
-					cell3.textContent = counter.ctype.Counter.value;
+						data.desc && Object.keys(data.desc).forEach((key, index) => {
+							const row = descTable.insertRow();
+							const cell1 = row.insertCell(0);
+							const cell2 = row.insertCell(1);
+							cell1.textContent = key;
+
+							if (typeof data.desc[key] === 'object' && 'Counter' in data.desc[key]) {
+								cell2.textContent = data.desc[key].Counter.value;
+							} else {
+								cell2.textContent = data.desc[key];
+							}
+
+							// Apply different row colors for description table
+							row.className = index % 2 === 0 ? "even-row" : "odd-row";
+						});
+
+						data.counters && data.counters.forEach((counter) => {
+							const row = countersTable.insertRow();
+							const cell1 = row.insertCell(0);
+							const cell2 = row.insertCell(1);
+							const cell3 = row.insertCell(2);
+							cell1.textContent = counter.name;
+							cell2.textContent = counter.doc;
+
+							if (counter.ctype.Gauge) {
+								// Create a table in the cell for Gauge data
+								const gaugeTable = document.createElement('table');
+								const gaugeRow = gaugeTable.insertRow();
+								const avgCell = gaugeRow.insertCell(0);
+								const minCell = gaugeRow.insertCell(1);
+								const maxCell = gaugeRow.insertCell(2);
+								avgCell.textContent = "AVG: " + counter.ctype.Gauge.total / counter.ctype.Gauge.hits;
+								minCell.textContent = "Min: " + counter.ctype.Gauge.min;
+								maxCell.textContent = "Max: " + counter.ctype.Gauge.max;
+								cell3.appendChild(gaugeTable);
+							} else if (counter.ctype.Counter) {
+								cell3.textContent = counter.ctype.Counter.value;
+							}
+
+							// Apply different row colors for counters table
+							row.className = counter.ctype.Gauge ? "gauge-row" : "counter-row";
+						});
+
+					})
+					.catch(error => {
+						const errorMessage = document.getElementById("error-message");
+						errorMessage.textContent = "Error: " + error;
 					});
-				})
-				.catch(error => {
-					const errorMessage = document.getElementById("error-message");
-					errorMessage.textContent = "Error: " + error;
-				});
 			}
 
 
-		// Function to clear a table
-		function clearTable(tableId) {
+			// Function to clear a table
+			function clearTable(tableId) {
 				const table = document.getElementById(tableId);
 				while (table.rows.length > 1) {
 					table.deleteRow(1);
 				}
-		}
+			}
 
-		// Get the JOBID from the URL parameter and fetch data
-		const jobId = getQueryParam("job");
-		if (jobId) {
+			// Get the JOBID from the URL parameter and fetch data
+			const jobId = getQueryParam("job");
+			if (jobId) {
 				fetchAndDisplayData(jobId);
 
 				// Refresh data every 5 seconds
 				setInterval(function () {
 					fetchAndDisplayData(jobId);
 				}, 1000);
-		} else {
+			} else {
 				const errorMessage = document.getElementById("error-message");
 				errorMessage.textContent = "Error: JOBID parameter not found in the URL.";
-		}
-	</script>
+			}
+		</script>
 	</section>
 </main>

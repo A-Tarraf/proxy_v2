@@ -20,19 +20,26 @@ use std::thread;
 
 use std::sync::Once;
 
-pub struct MetricProxyClientEntry {
-    name: String,
-    value: Arc<Mutex<CounterValue>>,
+pub struct MetricProxyValue {
+    value: Mutex<CounterValue>,
 }
 
-impl MetricProxyClientEntry {
-    fn newcounter(name: String) -> MetricProxyClientEntry {
-        MetricProxyClientEntry {
-            name: name.to_string(),
-            value: Arc::new(Mutex::new(CounterValue {
+impl MetricProxyValue {
+    fn newcounter(name: String) -> MetricProxyValue {
+        MetricProxyValue {
+            value: Mutex::new(CounterValue {
                 name,
-                value: CounterType::Counter { value: 0.0 },
-            })),
+                value: CounterType::newcounter(),
+            }),
+        }
+    }
+
+    fn newgauge(name: String) -> MetricProxyValue {
+        MetricProxyValue {
+            value: Mutex::new(CounterValue {
+                name,
+                value: CounterType::newgauge(),
+            }),
         }
     }
 
@@ -53,6 +60,21 @@ impl MetricProxyClientEntry {
         Ok(())
     }
 
+    fn set(&self, value: f64) -> Result<(), ProxyErr> {
+        let mut tval = self.value.lock().unwrap();
+
+        let new = CounterType::Gauge {
+            min: value,
+            max: value,
+            hits: 1.0,
+            total: value,
+        };
+
+        tval.value.set(&new)?;
+
+        Ok(())
+    }
+
     fn reset(&self) {
         let mut value = self.value.lock().unwrap();
         value.reset();
@@ -63,7 +85,7 @@ pub struct MetricProxyClient {
     period: Duration,
     running: Arc<Mutex<bool>>,
     stream: Mutex<Option<UnixStream>>,
-    counters: RwLock<HashMap<String, Arc<MetricProxyClientEntry>>>,
+    counters: RwLock<HashMap<String, Arc<MetricProxyValue>>>,
 }
 
 impl Drop for MetricProxyClient {
@@ -190,16 +212,18 @@ impl MetricProxyClient {
         return self.send(&desc);
     }
 
-    fn new_counter(
+    fn push_entry(
         &mut self,
         name: String,
         doc: String,
-    ) -> Result<Arc<MetricProxyClientEntry>, Box<dyn Error>> {
-        let counter: Arc<MetricProxyClientEntry>;
+        ctype: CounterType,
+    ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
+        let counter: Arc<MetricProxyValue>;
+
         let command = ProxyCommand::Desc(ValueDesc {
             name: name.to_string(),
             doc,
-            ctype: CounterType::newcounter(),
+            ctype: ctype.clone(),
         });
 
         /* First try to add the counters */
@@ -209,7 +233,14 @@ impl MetricProxyClient {
             let foundcounter = ht.get_mut(&name);
 
             if foundcounter.is_none() {
-                counter = Arc::new(MetricProxyClientEntry::newcounter(name.to_string()));
+                counter = match ctype {
+                    CounterType::Counter { .. } => {
+                        Arc::new(MetricProxyValue::newcounter(name.to_string()))
+                    }
+                    CounterType::Gauge { .. } => {
+                        Arc::new(MetricProxyValue::newgauge(name.to_string()))
+                    }
+                };
                 ht.insert(name.to_string(), counter.clone());
             } else {
                 counter = foundcounter.cloned().unwrap();
@@ -219,6 +250,22 @@ impl MetricProxyClient {
         self.send(&command)?;
 
         Ok(counter)
+    }
+
+    fn new_counter(
+        &mut self,
+        name: String,
+        doc: String,
+    ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
+        self.push_entry(name, doc, CounterType::newcounter())
+    }
+
+    fn new_gauge(
+        &mut self,
+        name: String,
+        doc: String,
+    ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
+        self.push_entry(name, doc, CounterType::newgauge())
     }
 }
 
@@ -256,12 +303,14 @@ fn unwrap_c_string(pcstr: *const std::os::raw::c_char) -> Result<String, Box<dyn
     }
 }
 
+/* Counters */
+
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_counter_new(
     pclient: *mut MetricProxyClient,
     name: *const std::os::raw::c_char,
     doc: *const std::os::raw::c_char,
-) -> *mut MetricProxyClientEntry {
+) -> *mut MetricProxyValue {
     let rname = unwrap_c_string(name);
     let rdoc = unwrap_c_string(doc);
 
@@ -279,15 +328,15 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
     let rdoc = rdoc.unwrap();
 
     if let Ok(c) = client.new_counter(rname, rdoc) {
-        return Arc::into_raw(c) as *mut MetricProxyClientEntry;
+        return Arc::into_raw(c) as *mut MetricProxyValue;
     }
 
-    return std::ptr::null_mut();
+    std::ptr::null_mut()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_counter_inc(
-    pcounter: *mut MetricProxyClientEntry,
+    pcounter: *mut MetricProxyValue,
     value: std::ffi::c_double,
 ) -> std::ffi::c_int {
     let zero: std::ffi::c_int = 0;
@@ -297,9 +346,62 @@ pub unsafe extern "C" fn metric_proxy_counter_inc(
         return one;
     }
 
-    let counter: &mut MetricProxyClientEntry = unsafe { &mut *(pcounter) };
+    let counter: &mut MetricProxyValue = unsafe { &mut *(pcounter) };
 
     if counter.inc(value).is_err() {
+        return one;
+    }
+
+    zero
+}
+
+/* Gauges  */
+
+#[no_mangle]
+pub unsafe extern "C" fn metric_proxy_gauge_new(
+    pclient: *mut MetricProxyClient,
+    name: *const std::os::raw::c_char,
+    doc: *const std::os::raw::c_char,
+) -> *mut MetricProxyValue {
+    let rname = unwrap_c_string(name);
+    let rdoc = unwrap_c_string(doc);
+
+    if rname.is_err() || rdoc.is_err() || pclient.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let client: &mut MetricProxyClient = unsafe { &mut *(pclient) };
+
+    if !*client.running.lock().unwrap() {
+        return std::ptr::null_mut();
+    }
+
+    let rname = rname.unwrap();
+    let rdoc = rdoc.unwrap();
+
+    if let Ok(c) = client.new_gauge(rname, rdoc) {
+        log::warn!("New GAUGE was {:?}", c.value);
+        return Arc::into_raw(c) as *mut MetricProxyValue;
+    }
+
+    std::ptr::null_mut()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn metric_proxy_gauge_set(
+    pcounter: *mut MetricProxyValue,
+    value: std::ffi::c_double,
+) -> std::ffi::c_int {
+    let zero: std::ffi::c_int = 0;
+    let one: std::ffi::c_int = 1;
+
+    if pcounter.is_null() {
+        return one;
+    }
+
+    let gauge: &mut MetricProxyValue = unsafe { &mut *(pcounter) };
+
+    if gauge.set(value).is_err() {
         return one;
     }
 

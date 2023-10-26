@@ -61,11 +61,15 @@ impl ExporterEntryGroup {
         }
     }
 
-    fn accumulate(&self, snapshot: &CounterSnapshot) -> Result<(), ProxyErr> {
+    fn accumulate(&self, snapshot: &CounterSnapshot, merge: bool) -> Result<(), ProxyErr> {
         match self.ht.write().unwrap().get_mut(&snapshot.name) {
             Some(v) => {
                 let mut val = v.value.write().unwrap();
-                val.merge(snapshot)?;
+                if merge {
+                    val.merge(snapshot)?;
+                } else {
+                    val.set(snapshot);
+                }
                 Ok(())
             }
             None => Err(ProxyErr::new("Failed to set counter")),
@@ -128,11 +132,11 @@ impl Exporter {
         }
     }
 
-    pub(crate) fn accumulate(&self, value: &CounterSnapshot) -> Result<(), ProxyErr> {
+    pub(crate) fn accumulate(&self, value: &CounterSnapshot, merge: bool) -> Result<(), ProxyErr> {
         let basename = ExporterEntryGroup::basename(value.name.to_string());
 
         if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str()) {
-            exporter_counter.accumulate(value)
+            exporter_counter.accumulate(value, merge)
         } else {
             return Err(ProxyErr::new(
                 format!("No such key {} cannot set it", value.name).as_str(),
@@ -254,11 +258,7 @@ impl ProxyScraper {
             /* Now Update Values */
 
             for p in profiles.iter_mut() {
-                log::trace!(
-                    "Scraping {} from {}",
-                    p.desc.jobid,
-                    self.target_url
-                );
+                log::trace!("Scraping {} from {}", p.desc.jobid, self.target_url);
                 let cur: JobProfile;
                 if let Some(previous) = self.state.get(&p.desc.jobid) {
                     /* We clone previous snapshot before substracting */
@@ -273,7 +273,7 @@ impl ProxyScraper {
                 if let Some(exporter) = self.factory.resolve_by_id(&p.desc.jobid) {
                     for cnt in p.counters.iter() {
                         exporter.push(cnt)?;
-                        exporter.accumulate(cnt)?;
+                        exporter.accumulate(cnt, true)?;
                     }
                 } else {
                     return Err(ProxyErr::newboxed("No such JobID"));
@@ -714,10 +714,10 @@ impl ExporterFactory {
             ctype,
         };
 
-        self.get_main().accumulate(&snapshot)?;
+        self.get_main().accumulate(&snapshot, false)?;
 
         if let Some(e) = perjob_exporter {
-            e.accumulate(&snapshot)?;
+            e.accumulate(&snapshot, false)?;
         }
 
         Ok(())
