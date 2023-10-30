@@ -2,12 +2,13 @@ use reqwest::blocking::Client;
 use retry::{delay::Fixed, retry};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
+use std::{backtrace, fs};
 
 use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile};
@@ -68,11 +69,13 @@ impl ExporterEntryGroup {
                 if merge {
                     val.merge(snapshot)?;
                 } else {
-                    val.set(snapshot);
+                    val.set(snapshot)?;
                 }
                 Ok(())
             }
-            None => Err(ProxyErr::new("Failed to set counter")),
+            None => Err(ProxyErr::new(
+                format!("Failed to accumulate {} {:?}", snapshot.name, snapshot).as_str(),
+            )),
         }
     }
 
@@ -165,7 +168,8 @@ impl Exporter {
 
         let mut ht = self.ht.write().unwrap();
 
-        if ht.get(basename.as_str()).is_some() {
+        if let Some(ncnt) = ht.get(basename.as_str()) {
+            ncnt.push(value.clone())?;
             return Ok(());
         } else {
             let ncnt = ExporterEntryGroup::new(basename.to_owned(), value.doc.to_string());
@@ -203,33 +207,64 @@ impl Exporter {
     }
 }
 
+enum ScraperType {
+    Proxy,
+    Prometheus,
+}
+
 struct ProxyScraper {
     target_url: String,
     state: HashMap<String, JobProfile>,
     factory: Arc<ExporterFactory>,
     period: u64,
     last_scrape: u64,
+    ttype: ScraperType,
 }
 
 impl ProxyScraper {
-    fn new(target_url: String, period: u64, factory: Arc<ExporterFactory>) -> ProxyScraper {
-        ProxyScraper {
-            target_url,
+    fn detect_type(target_url: &String) -> Result<(String, ScraperType), ProxyErr> {
+        let url: String = if !target_url.starts_with("http") {
+            "http://".to_string() + target_url.as_str()
+        } else {
+            target_url.to_string()
+        };
+
+        /* First as a prometheus exporter */
+        let promurl = url.to_string() + "/metrics";
+        if is_url_live(&url).is_ok() {
+            log::info!("{} is a Prometheus Exporter", url);
+            return Ok((promurl, ScraperType::Prometheus));
+        }
+
+        /* Now determine the type first as a Proxy Exporter */
+        let joburl = url.to_string() + "/job";
+        if is_url_live(&joburl).is_ok() {
+            log::info!("{} is a Proxy Exporter", url);
+            return Ok((joburl, ScraperType::Proxy));
+        }
+
+        Err(ProxyErr::new(
+            format!("Failed to determine type of {}", target_url).as_str(),
+        ))
+    }
+
+    fn new(
+        target_url: &String,
+        period: u64,
+        factory: Arc<ExporterFactory>,
+    ) -> Result<ProxyScraper, ProxyErr> {
+        let (url, ttype) = ProxyScraper::detect_type(target_url)?;
+        Ok(ProxyScraper {
+            target_url: url,
             state: HashMap::new(),
             factory,
             period,
             last_scrape: 0,
-        }
+            ttype,
+        })
     }
 
-    fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts() - self.last_scrape < self.period {
-            /* Not to be scraped yet */
-            return Ok(());
-        }
-
-        log::debug!("Scraping {}", self.target_url);
-
+    fn scrape_proxy(&mut self) -> Result<(), Box<dyn Error>> {
         let mut deleted: Vec<JobDesc> = Vec::new();
 
         let client = Client::new();
@@ -260,7 +295,7 @@ impl ProxyScraper {
             for p in profiles.iter_mut() {
                 log::trace!("Scraping {} from {}", p.desc.jobid, self.target_url);
                 let cur: JobProfile;
-                if let Some(previous) = self.state.get(&p.desc.jobid) {
+                if let Some(previous) = self.state.get_mut(&p.desc.jobid) {
                     /* We clone previous snapshot before substracting */
                     cur = p.clone();
                     p.substract(previous)?;
@@ -284,6 +319,71 @@ impl ProxyScraper {
             }
         } else {
             return Err(ProxyErr::newboxed("Failed to make scraping request"));
+        }
+
+        Ok(())
+    }
+
+    fn prometheus_sample_name(s: &prometheus_parse::Sample) -> String {
+        let mut name = s.metric.to_string();
+
+        if !s.labels.is_empty() {
+            name = format!("{}{{{}\"}}", name, s.labels);
+        }
+
+        name
+    }
+
+    fn scrape_prometheus(&mut self) -> Result<(), Box<dyn Error>> {
+        let client = Client::new();
+        let response = client.get(&self.target_url).send()?;
+        let data = response.text()?;
+
+        let lines: Vec<_> = data.lines().map(|s| Ok(s.to_string())).collect();
+        let metrics = prometheus_parse::Scrape::parse(lines.into_iter())?;
+
+        for v in metrics.samples {
+            let entry: Option<(String, CounterType)> = match v.value {
+                prometheus_parse::Value::Counter(value) => Some((
+                    ProxyScraper::prometheus_sample_name(&v),
+                    CounterType::Counter { value },
+                )),
+                prometheus_parse::Value::Gauge(value) => Some((
+                    ProxyScraper::prometheus_sample_name(&v),
+                    CounterType::Gauge {
+                        min: 0.0,
+                        max: 0.0,
+                        hits: 1.0,
+                        total: value,
+                    },
+                )),
+                _ => None,
+            };
+
+            if let Some((name, value)) = entry {
+                self.factory.push(name.as_str(), "", value.clone(), None)?;
+                self.factory.accumulate(name.as_str(), value, None)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
+        if unix_ts() - self.last_scrape < self.period {
+            /* Not to be scraped yet */
+            return Ok(());
+        }
+
+        log::debug!("Scraping {}", self.target_url);
+
+        match self.ttype {
+            ScraperType::Proxy => {
+                self.scrape_proxy()?;
+            }
+            ScraperType::Prometheus => {
+                self.scrape_prometheus()?;
+            }
         }
 
         self.last_scrape = unix_ts();
@@ -452,10 +552,7 @@ impl ExporterFactory {
         url: &String,
         period: u64,
     ) -> Result<(), Box<dyn Error>> {
-        let job_url = "http://".to_string() + url + "/job";
-        is_url_live(job_url.as_str())?;
-
-        let new = ProxyScraper::new(job_url, period, factory.clone());
+        let new = ProxyScraper::new(url, period, factory.clone())?;
         factory
             .scrapes
             .lock()

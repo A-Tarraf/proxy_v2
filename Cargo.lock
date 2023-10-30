@@ -246,9 +246,7 @@ checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
- "js-sys",
  "num-traits",
- "wasm-bindgen",
  "windows-targets",
 ]
 
@@ -376,6 +374,12 @@ dependencies = [
  "redox_users",
  "windows-sys",
 ]
+
+[[package]]
+name = "either"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
 
 [[package]]
 name = "encoding_rs"
@@ -722,6 +726,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -986,13 +999,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "prometheus-scrape"
-version = "0.1.1"
+name = "prometheus-parse"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40aa5bbfffbdc27d7af15943357f7145eef4923bf1adbc29f7840ab151b19140"
+checksum = "0c2aa5feb83bf4b2c8919eaf563f51dbab41183de73ba2353c0e03cd7b6bd892"
 dependencies = [
  "chrono",
- "lazy_static",
+ "itertools",
+ "once_cell",
  "regex",
 ]
 
@@ -1008,7 +1022,7 @@ dependencies = [
  "gethostname",
  "libc",
  "log",
- "prometheus-scrape",
+ "prometheus-parse",
  "reqwest",
  "retry",
  "rouille",

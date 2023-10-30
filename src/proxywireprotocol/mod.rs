@@ -47,20 +47,12 @@ impl CounterType {
                 format!("{} {}\n", name, value)
             }
             CounterType::Gauge {
-                min,
-                max,
+                min: _,
+                max: _,
                 hits,
                 total,
             } => {
-                format!(
-                    "avg_{} {}\nmin_{} {}\nmax_{} {}\n",
-                    name,
-                    total / hits,
-                    name,
-                    min,
-                    name,
-                    max
-                )
+                format!("{} {}\n", name, total / hits,)
             }
         }
     }
@@ -392,6 +384,26 @@ impl JobProfile {
         }
 
         self.counters = map.values().cloned().collect();
+
+        Ok(())
+    }
+
+    #[allow(unused)]
+    pub(crate) fn reset_ranges(&mut self) -> Result<(), ProxyErr> {
+        for cnt in self.counters.iter_mut() {
+            match &mut cnt.ctype {
+                CounterType::Gauge {
+                    min,
+                    max,
+                    hits: _,
+                    total: _,
+                } => {
+                    *min = f64::MAX;
+                    *max = f64::MIN;
+                }
+                CounterType::Counter { value: _ } => {}
+            }
+        }
 
         Ok(())
     }
