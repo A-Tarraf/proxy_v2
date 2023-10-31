@@ -70,6 +70,7 @@ impl CounterType {
         }
     }
 
+    #[allow(unused)]
     fn value(&self) -> f64 {
         match self {
             Self::Counter { value } => *value,
@@ -230,8 +231,11 @@ impl CounterType {
 
 #[derive(Serialize, Clone)]
 pub(crate) enum AlarmOperator {
+    #[allow(unused)]
     Equal(f64),
+    #[allow(unused)]
     Less(f64),
+    #[allow(unused)]
     More(f64),
 }
 
@@ -263,6 +267,8 @@ pub(crate) struct ValueAlarmTrigger {
     metric: String,
     operator: AlarmOperator,
     curent: f64,
+    active: bool,
+    pretty: String,
 }
 
 pub(crate) struct ValueAlarm {
@@ -284,8 +290,9 @@ impl fmt::Display for ValueAlarm {
 }
 
 impl ValueAlarm {
+    #[allow(unused)]
     pub(crate) fn new(
-        name: String,
+        name: &String,
         counter: Arc<RwLock<CounterSnapshot>>,
         op: String,
         val: f64,
@@ -303,25 +310,35 @@ impl ValueAlarm {
         };
 
         Ok(ValueAlarm {
-            name,
+            name: name.to_string(),
             counter: counter.clone(),
             op: alop,
         })
     }
 
-    pub(crate) fn as_trigger(&self) -> ValueAlarmTrigger {
+    #[allow(unused)]
+    pub(crate) fn as_trigger(&self, active: Option<bool>) -> ValueAlarmTrigger {
         let cnt_locked = self.counter.read().unwrap();
+
+        let is_active = match active {
+            Some(v) => v,
+            None => self.op.apply(&self.counter.read().unwrap().ctype),
+        };
+
         ValueAlarmTrigger {
             name: self.name.to_string(),
             metric: cnt_locked.name.to_string(),
             operator: self.op.clone(),
             curent: cnt_locked.ctype.value(),
+            active: is_active,
+            pretty: self.to_string(),
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn check(&self) -> Option<ValueAlarmTrigger> {
         if self.op.apply(&self.counter.read().unwrap().ctype) {
-            Some(self.as_trigger())
+            Some(self.as_trigger(Some(true)))
         } else {
             None
         }
@@ -498,6 +515,7 @@ impl CounterSnapshot {
         self.ctype.merge(&other.ctype)
     }
 
+    #[allow(unused)]
     pub fn set(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
         self.ctype.set(&other.ctype)
     }

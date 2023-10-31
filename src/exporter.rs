@@ -140,14 +140,14 @@ impl ExporterEntryGroup {
 
 pub(crate) struct Exporter {
     ht: RwLock<HashMap<String, ExporterEntryGroup>>,
-    alarms: RwLock<Vec<ValueAlarm>>,
+    alarms: RwLock<HashMap<String, ValueAlarm>>,
 }
 
 impl Exporter {
     pub(crate) fn new() -> Exporter {
         Exporter {
             ht: RwLock::new(HashMap::new()),
-            alarms: RwLock::new(Vec::new()),
+            alarms: RwLock::new(HashMap::new()),
         }
     }
 
@@ -244,12 +244,30 @@ impl Exporter {
         value: f64,
     ) -> Result<(), ProxyErr> {
         let cnt: Arc<RwLock<CounterSnapshot>> = self.get(&metric)?;
-        let alarm = ValueAlarm::new(name, cnt, op, value)?;
+        let alarm = ValueAlarm::new(&name, cnt, op, value)?;
 
         log::info!("Adding new alarm {}", alarm);
 
-        self.alarms.write().unwrap().push(alarm);
+        let mut lht = self.alarms.write().unwrap();
 
+        if lht.contains_key(&name) {
+            return Err(ProxyErr::new(format!("Alarm {} is already defined", name)));
+        }
+
+        lht.insert(name, alarm);
+
+        Ok(())
+    }
+
+    pub(crate) fn delete_alarm(&self, alarm_name: &String) -> Result<(), ProxyErr> {
+        self.alarms
+            .write()
+            .unwrap()
+            .remove(alarm_name)
+            .ok_or(ProxyErr::new(format!(
+                "Failed to remove alarm {}",
+                alarm_name
+            )))?;
         Ok(())
     }
 
@@ -258,7 +276,7 @@ impl Exporter {
 
         let mut ret: Vec<ValueAlarmTrigger> = Vec::new();
 
-        for a in alarmv.iter() {
+        for (_, a) in alarmv.iter() {
             if let Some(v) = a.check() {
                 ret.push(v);
             }
@@ -404,10 +422,17 @@ impl ProxyScraper {
         let metrics = prometheus_parse::Scrape::parse(lines.into_iter())?;
 
         for v in metrics.samples {
-            let entry: Option<(String, CounterType)> = match v.value {
+            let doc: String = metrics
+                .docs
+                .get(&v.metric)
+                .unwrap_or(&"".to_string())
+                .clone();
+
+            let entry: Option<(String, CounterType, String)> = match v.value {
                 prometheus_parse::Value::Counter(value) => Some((
                     ProxyScraper::prometheus_sample_name(&v),
                     CounterType::Counter { value },
+                    doc,
                 )),
                 prometheus_parse::Value::Gauge(value) => Some((
                     ProxyScraper::prometheus_sample_name(&v),
@@ -417,12 +442,14 @@ impl ProxyScraper {
                         hits: 1.0,
                         total: value,
                     },
+                    doc,
                 )),
                 _ => None,
             };
 
-            if let Some((name, value)) = entry {
-                self.factory.push(name.as_str(), "", value.clone(), None)?;
+            if let Some((name, value, doc)) = entry {
+                self.factory
+                    .push(name.as_str(), doc.as_str(), value.clone(), None)?;
                 self.factory.accumulate(name.as_str(), value, None)?;
             }
         }
@@ -932,13 +959,14 @@ impl ExporterFactory {
         Ok(())
     }
 
-    pub(crate) fn check_alarms(&self) -> Vec<ValueAlarmTrigger> {
-        let mut ret: Vec<ValueAlarmTrigger> = Vec::new();
+    pub(crate) fn check_alarms(&self) -> HashMap<String, Vec<ValueAlarmTrigger>> {
+        let mut ret: HashMap<String, Vec<ValueAlarmTrigger>> = HashMap::new();
 
         let perjobht = self.perjob.lock().unwrap();
 
-        for (_, v) in perjobht.iter() {
-            ret.append(&mut v.exporter.check_alarms());
+        for (k, v) in perjobht.iter() {
+            let alarms: Vec<ValueAlarmTrigger> = v.exporter.check_alarms();
+            ret.insert(k.to_string(), alarms);
         }
 
         ret
@@ -956,11 +984,28 @@ impl ExporterFactory {
                 .read()
                 .unwrap()
                 .iter()
-                .map(|v| v.as_trigger())
+                .map(|(_, v)| v.as_trigger(None))
                 .collect();
             ret.insert(k.to_string(), alarms);
         }
 
         ret
+    }
+
+    pub(crate) fn delete_alarm(
+        &self,
+        target_job: &String,
+        alarm_name: &String,
+    ) -> Result<(), ProxyErr> {
+        let perjobht = self.perjob.lock().unwrap();
+
+        let perjob = perjobht.get(target_job).ok_or(ProxyErr::new(format!(
+            "Failed to locate job {}",
+            target_job
+        )))?;
+
+        perjob.exporter.delete_alarm(alarm_name)?;
+
+        Ok(())
     }
 }

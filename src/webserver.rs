@@ -440,7 +440,41 @@ impl Web {
         }
     }
 
-    fn handle_list_alarms(&self, req: &Request) -> WebResponse {
+    fn handle_del_alarms(&self, req: &Request) -> WebResponse {
+        let (tjob, to_del) = match req.method() {
+            "GET" => match (req.get_param("targetjob"), req.get_param("name")) {
+                (Some(t), Some(v)) => (t, v),
+                _ => {
+                    return WebResponse::BadReq("Missing 'name' GET parameter".to_string());
+                }
+            },
+            "POST" => {
+                #[derive(Deserialize)]
+                struct ToDel {
+                    target: String,
+                    name: String,
+                }
+                let al: Result<ToDel, JsonError> = rouille::input::json_input(req);
+                match al {
+                    Ok(v) => (v.target, v.name),
+                    Err(e) => {
+                        return WebResponse::BadReq(format!("Failed to parse json {}", e));
+                    }
+                }
+            }
+            _ => {
+                return WebResponse::BadReq("No such request type".to_string());
+            }
+        };
+
+        if let Err(e) = self.factory.delete_alarm(&tjob, &to_del) {
+            WebResponse::BadReq(format!("Failed to delete {}", e))
+        } else {
+            WebResponse::Success(format!("Deleted {} from {}", to_del, tjob))
+        }
+    }
+
+    fn handle_list_alarms(&self, _: &Request) -> WebResponse {
         let alarms = self.factory.list_alarms();
         WebResponse::Native(Response::json(&alarms))
     }
@@ -533,6 +567,7 @@ impl Web {
                 "alarms" => match resource.as_str() {
                     "" => self.handle_alarms(request),
                     "add" => self.handle_add_alarms(request),
+                    "del" => self.handle_del_alarms(request),
                     "list" => self.handle_list_alarms(request),
                     _ => WebResponse::BadReq(url),
                 },

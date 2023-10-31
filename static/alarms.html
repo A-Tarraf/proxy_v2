@@ -1,0 +1,254 @@
+<main>
+    <section>
+        <h2>Create New Alarm</h2>
+        <form id="createAlarmForm">
+            <label for="name">Name:</label>
+            <input type="text" id="name" name="name" required><br><br>
+
+            <label for="target">Target:</label>
+            <select id="target" name="target" required>
+                <!-- Options for selecting the target will be added dynamically using JavaScript -->
+            </select><br><br>
+
+            <label for="metric">Metric:</label>
+            <select id="metric" name="metric" required>
+                <!-- Options for selecting the metric will be added dynamically using JavaScript -->
+            </select><br><br>
+
+            <label for="operation">Operation:</label>
+            <select id="operation" name="operation" required>
+                <option value=">">Greater Than</option>
+                <option value="<">Less Than</option>
+                <option value="=">Equal To</option>
+                <!-- Add more options as needed -->
+            </select><br><br>
+
+            <label for="value">Value:</label>
+            <input type="number" step="0.01" id="value" name="value" required><br><br>
+
+            <input type="submit" value="Create Alarm">
+        </form>
+    </section>
+    <section>
+        <h2>Active Alarms</h2>
+
+        <!-- Active Alarms -->
+        <div class="alarm-list">
+            <ul id="activeAlarms">
+                <!-- Active alarms will be listed here dynamically using JavaScript -->
+            </ul>
+        </div>
+    </section>
+    <section>
+
+        <!-- All Alarms -->
+        <div class="alarm-list">
+            <h2>All Alarms</h2>
+            <ul id="allAlarms">
+                <!-- All alarms will be listed here dynamically using JavaScript -->
+            </ul>
+        </div>
+    </section>
+
+    <script>
+        // Function to fetch and display alarms
+        async function fetchAndDisplayAlarms(endpoint, containerId) {
+            try {
+                const response = await fetch(endpoint);
+                if (response.ok) {
+                    const data = await response.json();
+                    displayAlarms(data, containerId);
+                } else {
+                    console.error(`Failed to fetch data from ${endpoint}`);
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        // Function to delete an alarm and refresh the page
+        async function deleteAlarm(target, name) {
+            const deletePayload = {
+                target,
+                name
+            };
+
+            try {
+                const response = await fetch('/alarms/del', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(deletePayload)
+                });
+
+                if (response.ok) {
+                    // Refresh the page after successfully deleting the alarm
+                    location.reload();
+                } else {
+                    console.error('Failed to delete the alarm.');
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        // Function to create a delete button for an alarm
+        function createDeleteButton(target, name) {
+            const deleteButton = document.createElement('button');
+            deleteButton.textContent = 'Delete';
+            deleteButton.addEventListener('click', () => {
+                deleteAlarm(target, name);
+            });
+            return deleteButton;
+        }
+
+        // Function to display alarms
+        function displayAlarms(data, containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+
+            for (const group in data) {
+                const groupAlarms = data[group];
+
+                if (groupAlarms.length > 0) {
+                    const groupHeader = document.createElement('h3');
+                    groupHeader.textContent = group;
+                    container.appendChild(groupHeader);
+                }
+
+                groupAlarms.forEach(alarm => {
+                    const alarmDiv = document.createElement('li');
+                    alarmDiv.classList.add('alarm');
+                    alarmDiv.innerHTML = `
+                            ${alarm.pretty}
+                            <ul>
+                                <li><strong>Name:</strong> ${alarm.name}</li>
+                                <li><strong>Metric:</strong> ${alarm.metric}</li>
+                                <li><strong>Operator:</strong> ${Object.keys(alarm.operator)} ${Object.values(alarm.operator)}</li>
+                                <li><strong>Current:</strong> ${alarm.current}</li>
+                                <li><strong>Active:</strong> ${alarm.active ? 'Yes' : 'No'}</li>
+                            </ul>
+                        `;
+                    const deleteButton = createDeleteButton(group, alarm.name);
+                    alarmDiv.appendChild(deleteButton);
+
+                    container.appendChild(alarmDiv);
+                });
+            }
+        }
+
+        // Function to populate the Metric select element based on the selected Target
+        async function populateMetricSelect() {
+            const targetSelect = document.getElementById('target');
+            const metricSelect = document.getElementById('metric');
+            const selectedTarget = targetSelect.value;
+
+            // Clear existing options
+            metricSelect.innerHTML = '';
+
+            try {
+                const response = await fetch("/job");
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Find the item with the selected jobid
+                    const selectedItem = data.find(item => item.desc.jobid === selectedTarget);
+
+                    if (selectedItem) {
+                        // Add metric options based on the selected target
+                        for (const counter of selectedItem.counters) {
+                            const option = document.createElement('option');
+                            option.value = counter.name;
+                            option.text = counter.name;
+                            metricSelect.appendChild(option);
+                        }
+                    } else {
+                        console.error(`Job with jobid ${selectedTarget} not found.`);
+                    }
+                } else {
+                    console.error(`Failed to fetch data from ${endpoint}`);
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        async function populateJobSelect() {
+            // Fetch data from the /job endpoint
+            fetch('/job')  // Replace with the actual endpoint URL
+                .then(response => response.json())
+                .then(data => {
+                    const comboBox = document.getElementById('target');
+                    data.forEach(item => {
+                        // Create an option element for each "jobid"
+                        const option = document.createElement('option');
+                        option.value = item.desc.jobid;
+                        option.textContent = item.desc.jobid;
+                        comboBox.appendChild(option);
+                    });
+
+                    // Set the value to the first option
+                    comboBox.value = comboBox.options[0].value;
+                    // Create a new event
+                    const event = new Event('change');
+                    // Dispatch the event to trigger the event listener
+                    comboBox.dispatchEvent(event);
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+        document.getElementById('createAlarmForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            const name = document.getElementById('name').value;
+            const target = document.getElementById('target').value;
+            const metric = document.getElementById('metric').value;
+            const operation = document.getElementById('operation').value;
+            const value = parseFloat(document.getElementById('value').value);
+
+            // Create the JSON request object
+            const request = {
+                name: name,
+                target: target,
+                metric: metric,
+                operation: operation,
+                value: value
+            };
+
+            // Send the request using fetch
+            fetch('/alarms/add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Handle the response as needed
+                    console.log(data);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+
+            // Reset the form
+            event.target.reset();
+
+            // Fetch and display data from the given endpoints
+            fetchAndDisplayAlarms('/alarms/', 'activeAlarms');
+            fetchAndDisplayAlarms('/alarms/list', 'allAlarms');
+        });
+
+        // Event listener to populate the Metric select element when the Target changes
+        document.getElementById('target').addEventListener('change', populateMetricSelect);
+
+        // Initialize the Metric select options based on the default Target
+        populateJobSelect();
+
+        // Fetch and display data from the given endpoints
+        fetchAndDisplayAlarms('/alarms/', 'activeAlarms');
+        fetchAndDisplayAlarms('/alarms/list', 'allAlarms');
+    </script>
+</main>
