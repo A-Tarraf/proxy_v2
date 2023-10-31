@@ -309,15 +309,19 @@ impl ValueAlarm {
         })
     }
 
+    pub(crate) fn as_trigger(&self) -> ValueAlarmTrigger {
+        let cnt_locked = self.counter.read().unwrap();
+        ValueAlarmTrigger {
+            name: self.name.to_string(),
+            metric: cnt_locked.name.to_string(),
+            operator: self.op.clone(),
+            curent: cnt_locked.ctype.value(),
+        }
+    }
+
     pub(crate) fn check(&self) -> Option<ValueAlarmTrigger> {
         if self.op.apply(&self.counter.read().unwrap().ctype) {
-            let cnt_locked = self.counter.read().unwrap();
-            Some(ValueAlarmTrigger {
-                name: self.name.to_string(),
-                metric: cnt_locked.name.to_string(),
-                operator: self.op.clone(),
-                curent: cnt_locked.ctype.value(),
-            })
+            Some(self.as_trigger())
         } else {
             None
         }

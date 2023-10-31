@@ -440,6 +440,11 @@ impl Web {
         }
     }
 
+    fn handle_list_alarms(&self, req: &Request) -> WebResponse {
+        let alarms = self.factory.list_alarms();
+        WebResponse::Native(Response::json(&alarms))
+    }
+
     fn serve_static_file(&self, url: &str) -> WebResponse {
         /* remove slash before */
         assert!(url.starts_with('/'));
@@ -525,8 +530,12 @@ impl Web {
                 "pivot" => self.handle_pivot(request),
                 "topo" => self.handle_topo(request),
                 "join" => self.handle_join(request),
-                "alarms" => self.handle_alarms(request),
-                "addalarm" => self.handle_add_alarms(request),
+                "alarms" => match resource.as_str() {
+                    "" => self.handle_alarms(request),
+                    "add" => self.handle_add_alarms(request),
+                    "list" => self.handle_list_alarms(request),
+                    _ => WebResponse::BadReq(url),
+                },
                 _ => self.serve_static_file(url.as_str()),
             };
 

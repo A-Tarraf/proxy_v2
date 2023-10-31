@@ -943,4 +943,24 @@ impl ExporterFactory {
 
         ret
     }
+
+    pub(crate) fn list_alarms(&self) -> HashMap<String, Vec<ValueAlarmTrigger>> {
+        let mut ret: HashMap<String, Vec<ValueAlarmTrigger>> = HashMap::new();
+
+        let perjobht = self.perjob.lock().unwrap();
+
+        for (k, v) in perjobht.iter() {
+            let alarms: Vec<ValueAlarmTrigger> = v
+                .exporter
+                .alarms
+                .read()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_trigger())
+                .collect();
+            ret.insert(k.to_string(), alarms);
+        }
+
+        ret
+    }
 }
