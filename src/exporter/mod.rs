@@ -2,13 +2,13 @@ use reqwest::blocking::Client;
 use retry::{delay::Fixed, retry};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 use std::{backtrace, fs};
+use std::{io, os};
 
 use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile};
@@ -413,6 +413,7 @@ impl PerJobRefcount {
 
 pub(crate) struct ExporterFactory {
     main: Arc<Exporter>,
+    pernode: Arc<Exporter>,
     perjob: Mutex<HashMap<String, PerJobRefcount>>,
     prefix: PathBuf,
     scrapes: Mutex<HashMap<String, ProxyScraper>>,
@@ -607,6 +608,7 @@ impl ExporterFactory {
 
         let ret = Arc::new(ExporterFactory {
             main: Arc::new(Exporter::new()),
+            pernode: Arc::new(Exporter::new()),
             perjob: Mutex::new(HashMap::new()),
             prefix: profile_prefix,
             scrapes: Mutex::new(HashMap::new()),
@@ -640,11 +642,37 @@ impl ExporterFactory {
             .unwrap()
             .insert(main_job.desc.jobid.to_string(), main_job);
 
+        /* This creates a job entry for the pernode job */
+        let node_job = PerJobRefcount {
+            desc: JobDesc {
+                jobid: format!("Node: {}", hostname()),
+                command: format!("Sum of all Jobs running on {}", hostname()),
+                size: 0,
+                nodelist: hostname(),
+                partition: "".to_string(),
+                cluster: "".to_string(),
+                run_dir: "".to_string(),
+                start_time: 0,
+                end_time: 0,
+            },
+            exporter: ret.pernode.clone(),
+            counter: 1,
+            saveprofile: false,
+        };
+        ret.perjob
+            .lock()
+            .unwrap()
+            .insert(node_job.desc.jobid.to_string(), node_job);
+
         ret
     }
 
     pub(crate) fn get_main(&self) -> Arc<Exporter> {
         self.main.clone()
+    }
+
+    pub(crate) fn get_node(&self) -> Arc<Exporter> {
+        self.pernode.clone()
     }
 
     pub(crate) fn resolve_by_id(&self, jobid: &String) -> Option<Arc<Exporter>> {
@@ -700,9 +728,10 @@ impl ExporterFactory {
         let hostname = hostname();
 
         let fname = format!(
-            "{}___{}.{}.partialprofile",
+            "{}___{}.{}.{}.partialprofile",
             desc.jobid,
             hostname,
+            std::process::id(),
             unix_ts_us()
         );
 
@@ -791,6 +820,7 @@ impl ExporterFactory {
             ctype,
         };
         self.get_main().push(&snapshot)?;
+        self.get_node().push(&snapshot)?;
 
         if let Some(e) = perjob_exporter {
             e.push(&snapshot)?;
@@ -812,6 +842,7 @@ impl ExporterFactory {
         };
 
         self.get_main().accumulate(&snapshot, false)?;
+        self.get_node().accumulate(&snapshot, false)?;
 
         if let Some(e) = perjob_exporter {
             e.accumulate(&snapshot, false)?;
