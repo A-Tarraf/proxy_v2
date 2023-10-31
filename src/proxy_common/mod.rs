@@ -17,14 +17,14 @@ impl Error for ProxyErr {}
 impl ProxyErr {
     // Create a constructor method for your custom error
     #[allow(unused)]
-    pub(crate) fn new(message: &str) -> ProxyErr {
+    pub(crate) fn new<T: ToString>(message: T) -> ProxyErr {
         ProxyErr {
             message: message.to_string(),
         }
     }
 
     #[allow(unused)]
-    pub(crate) fn newboxed(message: &str) -> Box<ProxyErr> {
+    pub(crate) fn newboxed<T: ToString>(message: T) -> Box<ProxyErr> {
         Box::new(ProxyErr {
             message: message.to_string(),
         })
@@ -39,7 +39,7 @@ impl std::fmt::Display for ProxyErr {
 
 impl From<Box<dyn std::error::Error>> for ProxyErr {
     fn from(err: Box<dyn std::error::Error>) -> Self {
-        ProxyErr::new(&err.to_string())
+        ProxyErr::new(err)
     }
 }
 
@@ -106,12 +106,21 @@ pub(crate) fn hostname() -> String {
 }
 
 #[allow(unused)]
-pub(crate) fn is_url_live(url: &str) -> Result<(), Box<dyn Error>> {
+pub(crate) fn is_url_live(url: &str, html: bool) -> Result<(), Box<dyn Error>> {
     let client = reqwest::blocking::Client::new();
     let response = client.get(url).send()?;
 
     if response.status().is_success() {
-        Ok(())
+        let txt = response.text().unwrap();
+        let has_html = txt.contains("<html>");
+        if html == has_html {
+            Ok(())
+        } else {
+            Err(ProxyErr::newboxed(format!(
+                "Response {} HTML {:?} expected {:?} over {}",
+                url, has_html, html, txt
+            )))
+        }
     } else {
         Err(ProxyErr::newboxed(
             format!(

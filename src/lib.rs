@@ -34,6 +34,19 @@ impl MetricProxyValue {
         }
     }
 
+    fn updated(&self) -> bool {
+        let val = self.value.lock().unwrap();
+        match val.value {
+            CounterType::Counter { value } => value > 0.0,
+            CounterType::Gauge {
+                min: _,
+                max: _,
+                hits,
+                total: _,
+            } => hits > 0.0,
+        }
+    }
+
     fn newgauge(name: String) -> MetricProxyValue {
         MetricProxyValue {
             value: Mutex::new(CounterValue {
@@ -170,6 +183,7 @@ impl MetricProxyClient {
                 .read()
                 .unwrap()
                 .iter()
+                .filter(|(_, v)| v.updated())
                 .map(|(_, v)| {
                     let mut value = v.value.lock().unwrap();
                     let ret = ProxyCommand::Value(value.clone());
@@ -380,7 +394,6 @@ pub unsafe extern "C" fn metric_proxy_gauge_new(
     let rdoc = rdoc.unwrap();
 
     if let Ok(c) = client.new_gauge(rname, rdoc) {
-        log::warn!("New GAUGE was {:?}", c.value);
         return Arc::into_raw(c) as *mut MetricProxyValue;
     }
 

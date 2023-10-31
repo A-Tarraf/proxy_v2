@@ -5,6 +5,7 @@ use crate::{
 };
 
 use colored::Colorize;
+use rouille::input::json::JsonError;
 use rouille::{Request, Response};
 use serde::Deserialize;
 use static_files::Resource;
@@ -405,6 +406,40 @@ impl Web {
         }
     }
 
+    fn handle_alarms(&self, _req: &Request) -> WebResponse {
+        let trigerred_alarms = self.factory.check_alarms();
+        WebResponse::Native(Response::json(&trigerred_alarms))
+    }
+
+    fn handle_add_alarms(&self, req: &Request) -> WebResponse {
+        #[derive(Deserialize)]
+        struct AlarmDef {
+            name: String,
+            target: String,
+            metric: String,
+            operation: String,
+            value: f64,
+        }
+
+        let al: Result<AlarmDef, JsonError> = rouille::input::json_input(req);
+
+        match al {
+            Ok(def) => {
+                match self.factory.add_alarm(
+                    def.name,
+                    def.target,
+                    def.metric,
+                    def.operation,
+                    def.value,
+                ) {
+                    Ok(_) => WebResponse::Success("alarm registered".to_string()),
+                    Err(e) => WebResponse::BadReq(e.to_string()),
+                }
+            }
+            Err(e) => WebResponse::BadReq(e.to_string()),
+        }
+    }
+
     fn serve_static_file(&self, url: &str) -> WebResponse {
         /* remove slash before */
         assert!(url.starts_with('/'));
@@ -490,6 +525,8 @@ impl Web {
                 "pivot" => self.handle_pivot(request),
                 "topo" => self.handle_topo(request),
                 "join" => self.handle_join(request),
+                "alarms" => self.handle_alarms(request),
+                "addalarm" => self.handle_add_alarms(request),
                 _ => self.serve_static_file(url.as_str()),
             };
 

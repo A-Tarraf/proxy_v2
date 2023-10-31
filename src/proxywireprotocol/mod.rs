@@ -2,6 +2,9 @@ use crate::proxy_common::unix_ts;
 use crate::proxy_common::ProxyErr;
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::{Arc, RwLock};
+
 use std::{collections::HashMap, env, error::Error};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -26,14 +29,40 @@ pub enum CounterType {
     },
 }
 
+impl fmt::Display for CounterType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            CounterType::Counter { value } => {
+                write!(f, "{} COUNTER", value)
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                write!(
+                    f,
+                    "{} (Min: {}, Max : {}, Hits: {}, Total : {}) GAUGE",
+                    total / hits,
+                    min,
+                    max,
+                    hits,
+                    total
+                )
+            }
+        }
+    }
+}
+
 impl CounterType {
     pub fn newcounter() -> CounterType {
-        CounterType::Counter { value: 0.0 }
+        Self::Counter { value: 0.0 }
     }
 
     #[allow(unused)]
     pub fn newgauge() -> CounterType {
-        CounterType::Gauge {
+        Self::Gauge {
             min: 0.0,
             max: 0.0,
             hits: 0.0,
@@ -41,12 +70,24 @@ impl CounterType {
         }
     }
 
+    fn value(&self) -> f64 {
+        match self {
+            Self::Counter { value } => *value,
+            Self::Gauge {
+                min: _,
+                max: _,
+                hits,
+                total,
+            } => *total / *hits,
+        }
+    }
+
     fn serialize(&self, name: &String) -> String {
         match self {
-            CounterType::Counter { value } => {
+            Self::Counter { value } => {
                 format!("{} {}\n", name, value)
             }
-            CounterType::Gauge {
+            Self::Gauge {
                 min: _,
                 max: _,
                 hits,
@@ -179,7 +220,106 @@ impl CounterType {
         match (&self, &other) {
             (CounterType::Gauge { .. }, CounterType::Gauge { .. }) => Ok(()),
             (CounterType::Counter { .. }, CounterType::Counter { .. }) => Ok(()),
-            _ => Err(ProxyErr::new("Both instances are not of the same variant")),
+            _ => Err(ProxyErr::new(format!(
+                "Both instances are not of the same variant {:?} and {:?}",
+                self, other
+            ))),
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) enum AlarmOperator {
+    Equal(f64),
+    Less(f64),
+    More(f64),
+}
+
+impl AlarmOperator {
+    fn apply(&self, val: &CounterType) -> bool {
+        let value: f64 = val.value();
+
+        match self {
+            Self::Equal(v) => *v == value,
+            Self::Less(v) => *v > value,
+            Self::More(v) => *v < value,
+        }
+    }
+}
+
+impl fmt::Display for AlarmOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            Self::Equal(v) => write!(f, "= {}", *v),
+            Self::Less(v) => write!(f, "< {}", *v),
+            Self::More(v) => write!(f, "> {}", *v),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct ValueAlarmTrigger {
+    name: String,
+    metric: String,
+    operator: AlarmOperator,
+    curent: f64,
+}
+
+pub(crate) struct ValueAlarm {
+    name: String,
+    counter: Arc<RwLock<CounterSnapshot>>,
+    op: AlarmOperator,
+}
+
+impl fmt::Display for ValueAlarm {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} : {} {}",
+            self.name,
+            self.counter.read().unwrap(),
+            self.op
+        )
+    }
+}
+
+impl ValueAlarm {
+    pub(crate) fn new(
+        name: String,
+        counter: Arc<RwLock<CounterSnapshot>>,
+        op: String,
+        val: f64,
+    ) -> Result<ValueAlarm, ProxyErr> {
+        let alop = match op.as_str() {
+            "=" => AlarmOperator::Equal(val),
+            "<" => AlarmOperator::Less(val),
+            ">" => AlarmOperator::More(val),
+            _ => {
+                return Err(ProxyErr::new(format!(
+                    "No operator for {} only has = < and >",
+                    op
+                )));
+            }
+        };
+
+        Ok(ValueAlarm {
+            name,
+            counter: counter.clone(),
+            op: alop,
+        })
+    }
+
+    pub(crate) fn check(&self) -> Option<ValueAlarmTrigger> {
+        if self.op.apply(&self.counter.read().unwrap().ctype) {
+            let cnt_locked = self.counter.read().unwrap();
+            Some(ValueAlarmTrigger {
+                name: self.name.to_string(),
+                metric: cnt_locked.name.to_string(),
+                operator: self.op.clone(),
+                curent: cnt_locked.ctype.value(),
+            })
+        } else {
+            None
         }
     }
 }
@@ -320,6 +460,12 @@ pub(crate) struct CounterSnapshot {
     pub(crate) name: String,
     pub(crate) doc: String,
     pub(crate) ctype: CounterType,
+}
+
+impl fmt::Display for CounterSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} ({}) = {}", self.name, self.doc, self.ctype)
+    }
 }
 
 fn min_f64(a: f64, b: f64) -> f64 {

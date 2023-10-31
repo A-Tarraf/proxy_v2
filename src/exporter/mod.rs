@@ -2,16 +2,17 @@ use reqwest::blocking::Client;
 use retry::{delay::Fixed, retry};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
-use std::{backtrace, fs};
-use std::{io, os};
 
 use crate::proxy_common::unix_ts;
-use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile};
+use crate::proxywireprotocol::{
+    ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
+};
 
 use super::proxy_common::{hostname, is_url_live, list_files_with_ext_in, unix_ts_us, ProxyErr};
 
@@ -79,6 +80,19 @@ impl ExporterEntryGroup {
         }
     }
 
+    fn get(&self, metric: &String) -> Result<Arc<RwLock<CounterSnapshot>>, ProxyErr> {
+        let ret = self
+            .ht
+            .read()
+            .unwrap()
+            .get(metric)
+            .ok_or(ProxyErr::new("Failed to get in metric group"))?
+            .value
+            .clone();
+
+        Ok(ret)
+    }
+
     fn push(&self, snapshot: CounterSnapshot) -> Result<(), ProxyErr> {
         let name = snapshot.name.to_string();
         if self.ht.read().unwrap().contains_key(&name) {
@@ -126,12 +140,14 @@ impl ExporterEntryGroup {
 
 pub(crate) struct Exporter {
     ht: RwLock<HashMap<String, ExporterEntryGroup>>,
+    alarms: RwLock<Vec<ValueAlarm>>,
 }
 
 impl Exporter {
     pub(crate) fn new() -> Exporter {
         Exporter {
             ht: RwLock::new(HashMap::new()),
+            alarms: RwLock::new(Vec::new()),
         }
     }
 
@@ -141,9 +157,23 @@ impl Exporter {
         if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str()) {
             exporter_counter.accumulate(value, merge)
         } else {
-            return Err(ProxyErr::new(
-                format!("No such key {} cannot set it", value.name).as_str(),
-            ));
+            Err(ProxyErr::new(format!(
+                "No such key {} cannot set it",
+                value.name
+            )))
+        }
+    }
+
+    pub(crate) fn get(&self, metric: &String) -> Result<Arc<RwLock<CounterSnapshot>>, ProxyErr> {
+        let basename = ExporterEntryGroup::basename(metric.to_string());
+
+        if let Some(exporter_counter) = self.ht.read().unwrap().get(basename.as_str()) {
+            exporter_counter.get(metric)
+        } else {
+            Err(ProxyErr::new(format!(
+                "No such key {} cannot get it",
+                metric
+            )))
         }
     }
 
@@ -205,6 +235,37 @@ impl Exporter {
 
         Ok(ret)
     }
+
+    pub(crate) fn add_alarm(
+        &self,
+        name: String,
+        metric: String,
+        op: String,
+        value: f64,
+    ) -> Result<(), ProxyErr> {
+        let cnt: Arc<RwLock<CounterSnapshot>> = self.get(&metric)?;
+        let alarm = ValueAlarm::new(name, cnt, op, value)?;
+
+        log::info!("Adding new alarm {}", alarm);
+
+        self.alarms.write().unwrap().push(alarm);
+
+        Ok(())
+    }
+
+    pub(crate) fn check_alarms(&self) -> Vec<ValueAlarmTrigger> {
+        let alarmv = self.alarms.read().unwrap();
+
+        let mut ret: Vec<ValueAlarmTrigger> = Vec::new();
+
+        for a in alarmv.iter() {
+            if let Some(v) = a.check() {
+                ret.push(v);
+            }
+        }
+
+        ret
+    }
 }
 
 enum ScraperType {
@@ -229,18 +290,18 @@ impl ProxyScraper {
             target_url.to_string()
         };
 
-        /* First as a prometheus exporter */
-        let promurl = url.to_string() + "/metrics";
-        if is_url_live(&url).is_ok() {
-            log::info!("{} is a Prometheus Exporter", url);
-            return Ok((promurl, ScraperType::Prometheus));
-        }
-
         /* Now determine the type first as a Proxy Exporter */
         let joburl = url.to_string() + "/job";
-        if is_url_live(&joburl).is_ok() {
+        if is_url_live(&joburl, false).is_ok() {
             log::info!("{} is a Proxy Exporter", url);
             return Ok((joburl, ScraperType::Proxy));
+        }
+
+        /* First as a prometheus exporter */
+        let promurl = url.to_string() + "/metrics";
+        if is_url_live(&promurl, false).is_ok() {
+            log::info!("{} is a Prometheus Exporter", url);
+            return Ok((promurl, ScraperType::Prometheus));
         }
 
         Err(ProxyErr::new(
@@ -849,5 +910,37 @@ impl ExporterFactory {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn add_alarm(
+        &self,
+        name: String,
+        target_job: String,
+        metric: String,
+        op: String,
+        value: f64,
+    ) -> Result<(), ProxyErr> {
+        let perjobht = self.perjob.lock().unwrap();
+
+        let perjob = perjobht.get(&target_job).ok_or(ProxyErr::new(format!(
+            "Failed to locate job {}",
+            target_job
+        )))?;
+
+        perjob.exporter.add_alarm(name, metric, op, value)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn check_alarms(&self) -> Vec<ValueAlarmTrigger> {
+        let mut ret: Vec<ValueAlarmTrigger> = Vec::new();
+
+        let perjobht = self.perjob.lock().unwrap();
+
+        for (_, v) in perjobht.iter() {
+            ret.append(&mut v.exporter.check_alarms());
+        }
+
+        ret
     }
 }
