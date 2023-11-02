@@ -250,5 +250,10 @@
         // Fetch and display data from the given endpoints
         fetchAndDisplayAlarms('/alarms/', 'activeAlarms');
         fetchAndDisplayAlarms('/alarms/list', 'allAlarms');
+
+        setInterval(function () {
+            fetchAndDisplayAlarms('/alarms/', 'activeAlarms');
+            fetchAndDisplayAlarms('/alarms/list', 'allAlarms');
+        }, 1000);
     </script>
 </main>

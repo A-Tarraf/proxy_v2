@@ -267,7 +267,7 @@ pub(crate) struct ValueAlarmTrigger {
     name: String,
     metric: String,
     operator: AlarmOperator,
-    curent: f64,
+    current: f64,
     active: bool,
     pretty: String,
 }
@@ -330,7 +330,7 @@ impl ValueAlarm {
             name: self.name.to_string(),
             metric: cnt_locked.name.to_string(),
             operator: self.op.clone(),
-            curent: cnt_locked.ctype.value(),
+            current: cnt_locked.ctype.value(),
             active: is_active,
             pretty: self.to_string(),
         }

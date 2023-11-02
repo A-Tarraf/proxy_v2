@@ -5,59 +5,59 @@ body {
 	color: #f0f0f0; /* Light text color for readability */
 }
 
-/* Header */
+/* Header Styles */
 header {
-	background-color: #2e86de; /* A technological blue color */
-	color: #fff;
-	text-align: center;
+	background: linear-gradient(to bottom, #2e86de, #1a1a1a); /* Gradient background for the header */
 	padding: 20px;
+	text-align: center;
+	color: #fff; /* White text color for the header */
 }
 
+/* Title Styles */
 header h1 {
-	color: #fff;
+	font-size: 36px; /* Adjust the font size as needed */
+	text-transform: uppercase;
+	margin: 0; /* Remove margin for the title */
 }
 
-/* Navigation */
+/* Navigation Styles */
 nav {
 	background-color: #333;
+	text-align: left;
+	padding: 10px;
 }
 
+/* Remove list-style (bullets) from the navigation list */
 nav ul {
-	list-style-type: none;
-	margin: 0;
+	list-style: none;
 	padding: 0;
 }
 
+/* Navigation List Items */
 nav li {
 	display: inline;
-	margin-right: 20px;
+	margin: 0 10px; /* Adjust margin for spacing between buttons */
 }
 
-/* Remove the default underline and change the link color */
+a:visited {
+	color: inherit;
+}
+
+/* Navigation Buttons */
 nav a {
 	text-decoration: none;
-	color: #2e86de; /* Change the link color to the technological blue color */
-	font-weight: bold; /* Make the text bold */
-	transition: color 0.3s; /* Add a smooth color transition on hover */
-	display: inline-block; /* Make the links block-level elements for padding */
-	padding: 10px 15px; /* Add padding to the links */
+	color: #fff; /* White text color for navigation buttons */
+	font-weight: bold;
+	padding: 10px 20px; /* Adjust padding as needed */
+	border: 2px solid #fff; /* White border for buttons */
+	border-radius: 5px; /* Rounded corners for buttons */
+	transition: background-color 0.3s, color 0.3s; /* Smooth transition on hover */
 }
 
-/* Change the link color on hover for a fancier effect */
+/* Button Hover Effect */
 nav a:hover {
-	color: #ff6b6b; /* Change the link color on hover to a pastel red color */
-	background-color: #2e86de; /* Maintain the blue background on hover */
-	border-radius: 5px; /* Add rounded corners */
-	box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); /* Add a subtle shadow on hover */
-}
-
-nav a:visited {
-	color: inherit; /* Use the default link color for visited links within the navigation bar */
-}
-
-/* Add a smooth transition for the background color change */
-nav a {
-	transition: color 0.3s, background-color 0.3s;
+	background-color: #fff; /* White background color on hover */
+	color: #333; /* Dark text color on hover */
 }
 
 
@@ -111,11 +111,6 @@ tr:hover {
 	color: #fff; /* Change the text color to white on hover for better readability */
 }
 
-/* Change the link color for visited links */
-a:visited {
-	color: #ff00ff; /* A visible color for visited links (e.g., bright pink) */
-}
-
 
 /* Heading Styles */
 h1, h2, h3 {
@@ -154,9 +149,18 @@ label {
     color: #2e86de; /* Technological blue color for labels */
 }
 
+button {
+	background-color: #2e86de; /* A technological blue color for the submit button */
+	color: #fff; /* White text color for the button */
+	padding: 10px 15px;
+	border: none;
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+
 /* Submit Button */
-input[type="submit"],
-button[type="submit"] {
+input[type="submit"] {
     background-color: #2e86de; /* A technological blue color for the submit button */
     color: #fff; /* White text color for the button */
     padding: 10px 15px;
