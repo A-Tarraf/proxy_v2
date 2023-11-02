@@ -1,6 +1,5 @@
-use reqwest::blocking::Client;
 use retry::{delay::Fixed, retry};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,14 +8,13 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::systemmetrics::SystemMetrics;
-
-use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
 
-use super::proxy_common::{hostname, is_url_live, list_files_with_ext_in, unix_ts_us, ProxyErr};
+use super::proxy_common::{hostname, list_files_with_ext_in, unix_ts_us, ProxyErr};
+
+use crate::scrapper::ProxyScraper;
 
 /***********************
  * PROMETHEUS EXPORTER *
@@ -288,231 +286,6 @@ impl Exporter {
     }
 }
 
-enum ScraperType {
-    Proxy,
-    Prometheus,
-    SystemMetrics { sys: Box<SystemMetrics> },
-}
-
-struct ProxyScraper {
-    target_url: String,
-    state: HashMap<String, JobProfile>,
-    factory: Arc<ExporterFactory>,
-    period: u64,
-    last_scrape: u64,
-    ttype: ScraperType,
-}
-
-impl ProxyScraper {
-    fn detect_type(target_url: &String) -> Result<(String, ScraperType), ProxyErr> {
-        if target_url == "/system" {
-            return Ok((
-                target_url.to_string(),
-                ScraperType::SystemMetrics {
-                    sys: Box::new(SystemMetrics::new()),
-                },
-            ));
-        }
-
-        let url: String = if !target_url.starts_with("http") {
-            "http://".to_string() + target_url.as_str()
-        } else {
-            target_url.to_string()
-        };
-
-        /* Now determine the type first as a Proxy Exporter */
-        let joburl = url.to_string() + "/job";
-        if is_url_live(&joburl, false).is_ok() {
-            log::info!("{} is a Proxy Exporter", url);
-            return Ok((joburl, ScraperType::Proxy));
-        }
-
-        /* First as a prometheus exporter */
-        let promurl = url.to_string() + "/metrics";
-        if is_url_live(&promurl, false).is_ok() {
-            log::info!("{} is a Prometheus Exporter", url);
-            return Ok((promurl, ScraperType::Prometheus));
-        }
-
-        Err(ProxyErr::new(
-            format!("Failed to determine type of {}", target_url).as_str(),
-        ))
-    }
-
-    fn new(
-        target_url: &String,
-        period: u64,
-        factory: Arc<ExporterFactory>,
-    ) -> Result<ProxyScraper, ProxyErr> {
-        let (url, ttype) = ProxyScraper::detect_type(target_url)?;
-        Ok(ProxyScraper {
-            target_url: url,
-            state: HashMap::new(),
-            factory,
-            period,
-            last_scrape: 0,
-            ttype,
-        })
-    }
-
-    fn scrape_proxy(&mut self) -> Result<(), Box<dyn Error>> {
-        let mut deleted: Vec<JobDesc> = Vec::new();
-
-        let client = Client::new();
-        let response = client.get(&self.target_url).send()?;
-
-        // Check if the response was successful (status code 200 OK)
-        if response.status().is_success() {
-            // Deserialize the JSON response into your data structure
-            let mut profiles: Vec<JobProfile> = response.json()?;
-            let new_keys: HashSet<String> = profiles.iter().map(|v| v.desc.jobid.clone()).collect();
-
-            /* First detect if a job has left */
-            for (k, v) in self.state.iter() {
-                if !new_keys.contains(k) {
-                    /* Key has been dropped save name in list for notify */
-                    deleted.push(v.desc.clone());
-                    self.factory.relax_job(&v.desc)?;
-                }
-            }
-
-            /* Remove all deleted from the shadow state */
-            for k in deleted.iter() {
-                self.state.remove(&k.jobid);
-            }
-
-            /* Now Update Values */
-
-            for p in profiles.iter_mut() {
-                log::trace!("Scraping {} from {}", p.desc.jobid, self.target_url);
-                let cur: JobProfile;
-                if let Some(previous) = self.state.get_mut(&p.desc.jobid) {
-                    /* We clone previous snapshot before substracting */
-                    cur = p.clone();
-                    p.substract(previous)?;
-                } else {
-                    /* New Job Register in Job List */
-                    let _ = self.factory.resolve_job(&p.desc, false);
-                    cur = p.to_owned();
-                }
-
-                if let Some(exporter) = self.factory.resolve_by_id(&p.desc.jobid) {
-                    for cnt in p.counters.iter() {
-                        exporter.push(cnt)?;
-                        exporter.accumulate(cnt, true)?;
-                    }
-                } else {
-                    return Err(ProxyErr::newboxed("No such JobID"));
-                }
-
-                /* Now insert the non-substracted for next call state */
-                self.state.insert(p.desc.jobid.to_string(), cur);
-            }
-        } else {
-            return Err(ProxyErr::newboxed("Failed to make scraping request"));
-        }
-
-        Ok(())
-    }
-
-    fn prometheus_sample_name(s: &prometheus_parse::Sample) -> String {
-        let mut name = s.metric.to_string();
-
-        if !s.labels.is_empty() {
-            name = format!("{}{{{}\"}}", name, s.labels);
-        }
-
-        name
-    }
-
-    fn scrape_prometheus(&mut self) -> Result<(), Box<dyn Error>> {
-        let client = Client::new();
-        let response = client.get(&self.target_url).send()?;
-        let data = response.text()?;
-
-        let lines: Vec<_> = data.lines().map(|s| Ok(s.to_string())).collect();
-        let metrics = prometheus_parse::Scrape::parse(lines.into_iter())?;
-
-        for v in metrics.samples {
-            let doc: String = metrics
-                .docs
-                .get(&v.metric)
-                .unwrap_or(&"".to_string())
-                .clone();
-
-            let entry: Option<(String, CounterType, String)> = match v.value {
-                prometheus_parse::Value::Counter(value) => Some((
-                    ProxyScraper::prometheus_sample_name(&v),
-                    CounterType::Counter { value },
-                    doc,
-                )),
-                prometheus_parse::Value::Gauge(value) => Some((
-                    ProxyScraper::prometheus_sample_name(&v),
-                    CounterType::Gauge {
-                        min: 0.0,
-                        max: 0.0,
-                        hits: 1.0,
-                        total: value,
-                    },
-                    doc,
-                )),
-                _ => None,
-            };
-
-            if let Some((name, value, doc)) = entry {
-                self.factory
-                    .push(name.as_str(), doc.as_str(), value.clone(), None)?;
-                self.factory.accumulate(name.as_str(), value, None)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn scrape_system_metrics(&mut self) -> Result<(), Box<dyn Error>> {
-        let sys = match &mut self.ttype {
-            ScraperType::SystemMetrics { sys } => sys,
-            _ => {
-                unreachable!();
-            }
-        };
-
-        let metrics = sys.scrape()?;
-
-        for m in metrics.iter() {
-            self.factory.push(&m.name, &m.doc, m.ctype.clone(), None)?;
-            self.factory.accumulate(&m.name, m.ctype.clone(), None)?;
-        }
-
-        Ok(())
-    }
-
-    fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts() - self.last_scrape < self.period {
-            /* Not to be scraped yet */
-            return Ok(());
-        }
-
-        log::debug!("Scraping {}", self.target_url);
-
-        match self.ttype {
-            ScraperType::Proxy => {
-                self.scrape_proxy()?;
-            }
-            ScraperType::Prometheus => {
-                self.scrape_prometheus()?;
-            }
-            ScraperType::SystemMetrics { .. } => {
-                self.scrape_system_metrics()?;
-            }
-        }
-
-        self.last_scrape = unix_ts();
-
-        Ok(())
-    }
-}
-
 struct PerJobRefcount {
     desc: JobDesc,
     counter: i32,
@@ -679,7 +452,7 @@ impl ExporterFactory {
             .scrapes
             .lock()
             .unwrap()
-            .insert(new.target_url.to_string(), new);
+            .insert(new.url().to_string(), new);
         Ok(())
     }
 
@@ -1029,6 +802,16 @@ impl ExporterFactory {
         }
 
         ret
+    }
+
+    pub(crate) fn get_local_job_exporters(&self) -> Vec<Arc<Exporter>> {
+        self.perjob
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, v)| v.saveprofile)
+            .map(|(_, v)| v.exporter.clone())
+            .collect()
     }
 
     pub(crate) fn delete_alarm(

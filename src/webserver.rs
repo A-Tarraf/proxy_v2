@@ -382,6 +382,10 @@ impl Web {
             }
         }
 
+        if resp.is_empty() {
+            resp.push((self.url().to_string(), self.url().to_string()));
+        }
+
         WebResponse::Native(Response::json(&resp))
     }
 

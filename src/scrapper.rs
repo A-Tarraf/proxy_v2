@@ -1,3 +1,4 @@
+use crate::exporter::Exporter;
 use crate::proxy_common::ProxyErr;
 use crate::proxy_common::{is_url_live, unix_ts};
 use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
@@ -6,6 +7,7 @@ use reqwest::blocking::Client;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::Arc;
+use std::vec;
 
 use crate::systemmetrics::SystemMetrics;
 enum ScraperType {
@@ -203,9 +205,18 @@ impl ProxyScraper {
 
         let metrics = sys.scrape()?;
 
-        for m in metrics.iter() {
-            self.factory.push(&m.name, &m.doc, m.ctype.clone(), None)?;
-            self.factory.accumulate(&m.name, m.ctype.clone(), None)?;
+        // We push in MAIN, NODE and All exporters which may generate profiles
+        // THese exporters are the one attached locally and thus bound to
+        // node local performance
+        let mut target_exporters: Vec<Arc<Exporter>> =
+            vec![self.factory.get_main(), self.factory.get_node()];
+        target_exporters.append(&mut self.factory.get_local_job_exporters());
+
+        for e in target_exporters {
+            for m in metrics.iter() {
+                e.push(m)?;
+                e.accumulate(m, true)?;
+            }
         }
 
         Ok(())

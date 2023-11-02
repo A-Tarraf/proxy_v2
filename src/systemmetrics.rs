@@ -1,6 +1,4 @@
-use sysinfo::{
-    Component, ComponentExt, Cpu, CpuExt, DiskExt, NetworkExt, ProcessExt, System, SystemExt,
-};
+use sysinfo::{ComponentExt, CpuExt, DiskExt, NetworkExt, System, SystemExt};
 
 use crate::{
     proxy_common::{unix_ts, ProxyErr},
