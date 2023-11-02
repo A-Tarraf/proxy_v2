@@ -1,34 +1,20 @@
-
-/* Style for h1 */
-h1 {
-	text-align: center;
-	font-size: 36px;
-	color: #333;
-	text-transform: uppercase;
-}
-
-/* Style for h2 */
-h2 {
-	font-size: 24px;
-	color: #0077b6; /* A nice blue color */
-}
-
-/* Style for h3 */
-h3 {
-	font-size: 18px;
-	color: #f94144; /* A nice red color */
-}
-
+/* Global Styles */
 body {
 	font-family: Arial, sans-serif;
+	background-color: #1a1a1a; /* Dark background color */
+	color: #f0f0f0; /* Light text color for readability */
 }
 
 /* Header */
 header {
-	background-color: #3498db;
+	background-color: #2e86de; /* A technological blue color */
 	color: #fff;
 	text-align: center;
 	padding: 20px;
+}
+
+header h1 {
+	color: #fff;
 }
 
 /* Navigation */
@@ -50,7 +36,7 @@ nav li {
 /* Remove the default underline and change the link color */
 nav a {
 	text-decoration: none;
-	color: #0077b6; /* Change the link color to a custom color */
+	color: #2e86de; /* Change the link color to the technological blue color */
 	font-weight: bold; /* Make the text bold */
 	transition: color 0.3s; /* Add a smooth color transition on hover */
 	display: inline-block; /* Make the links block-level elements for padding */
@@ -59,16 +45,22 @@ nav a {
 
 /* Change the link color on hover for a fancier effect */
 nav a:hover {
-	color: #ff6b6b; /* Change the link color on hover to a different color */
-	background-color: #0077b6; /* Add a background color on hover */
+	color: #ff6b6b; /* Change the link color on hover to a pastel red color */
+	background-color: #2e86de; /* Maintain the blue background on hover */
 	border-radius: 5px; /* Add rounded corners */
 	box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2); /* Add a subtle shadow on hover */
+}
+
+nav a:visited {
+	color: inherit; /* Use the default link color for visited links within the navigation bar */
 }
 
 /* Add a smooth transition for the background color change */
 nav a {
 	transition: color 0.3s, background-color 0.3s;
 }
+
+
 /* Main content */
 main {
 	padding: 20px;
@@ -87,17 +79,123 @@ footer {
 	padding: 10px;
 }
 
+/* Table Styles */
+/* Table Styles */
 table {
 	border-collapse: collapse;
 	width: 100%;
+	background-color: #1a1a1a; /* Dark background for tables */
+	font-size: 16px; /* Increased font size for better readability */
 }
 
 th, td {
-	border: 1px solid #ddd;
+	border: 1px solid #444; /* Darker border color for contrast */
 	text-align: left;
 	padding: 8px;
+	color: #f0f0f0; /* Light text color for table cells */
 }
 
 th {
-	background-color: #f2f2f2;
+	background-color: #2e86de; /* A technological blue color for table headers */
+	color: #fff; /* White text color for table headers */
+}
+
+/* Alternating Row Background Colors */
+tr:nth-child(even) {
+	background-color: #333; /* Dark background color for even rows */
+}
+
+/* Hover effect for table rows */
+tr:hover {
+	background-color: #0077b6; /* Change the background color on hover to a different color (e.g., a nice blue) */
+	color: #fff; /* Change the text color to white on hover for better readability */
+}
+
+/* Change the link color for visited links */
+a:visited {
+	color: #ff00ff; /* A visible color for visited links (e.g., bright pink) */
+}
+
+
+/* Heading Styles */
+h1, h2, h3 {
+	color: #2e86de; /* Technological blue color for headings */
+}
+
+h2 {
+	font-size: 24px;
+}
+
+h3 {
+	font-size: 18px;
+}
+
+/* Adjust h1 */
+h1 {
+	text-align: center;
+	font-size: 36px;
+	text-transform: uppercase;
+}
+
+/* Input Fields */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+textarea {
+    background-color: #333; /* Dark background for input fields */
+    border: 1px solid #444; /* Darker border color for contrast */
+    color: #f0f0f0; /* Light text color for input fields */
+    padding: 10px;
+    border-radius: 5px;
+}
+
+/* Labels for Input Fields */
+label {
+    color: #2e86de; /* Technological blue color for labels */
+}
+
+/* Submit Button */
+input[type="submit"],
+button[type="submit"] {
+    background-color: #2e86de; /* A technological blue color for the submit button */
+    color: #fff; /* White text color for the button */
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+/* Style for Select Dropdowns */
+select {
+    background-color: #333; /* Dark background for select dropdowns */
+    border: 1px solid #444; /* Darker border color for contrast */
+    color: #f0f0f0; /* Light text color for select options */
+    padding: 10px;
+    border-radius: 5px;
+}
+
+
+/* Input Field with type "number" */
+input[type="number"] {
+	background-color: #333; /* Dark background for input fields */
+	border: 1px solid #444; /* Darker border color for contrast */
+	color: #f0f0f0; /* Light text color for input fields */
+	padding: 10px;
+	border-radius: 5px;
+}
+
+/* Labels for Input Fields */
+label {
+	color: #2e86de; /* Technological blue color for labels */
+}
+
+/* Submit Button */
+input[type="submit"],
+button[type="submit"] {
+	background-color: #2e86de; /* A technological blue color for the submit button */
+	color: #fff; /* White text color for the button */
+	padding: 10px 15px;
+	border: none;
+	border-radius: 5px;
+	cursor: pointer;
 }
