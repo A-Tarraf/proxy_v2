@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
+use crate::systemmetrics::SystemMetrics;
+
 use crate::proxy_common::unix_ts;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
@@ -289,6 +291,7 @@ impl Exporter {
 enum ScraperType {
     Proxy,
     Prometheus,
+    SystemMetrics { sys: Box<SystemMetrics> },
 }
 
 struct ProxyScraper {
@@ -302,6 +305,15 @@ struct ProxyScraper {
 
 impl ProxyScraper {
     fn detect_type(target_url: &String) -> Result<(String, ScraperType), ProxyErr> {
+        if target_url == "/system" {
+            return Ok((
+                target_url.to_string(),
+                ScraperType::SystemMetrics {
+                    sys: Box::new(SystemMetrics::new()),
+                },
+            ));
+        }
+
         let url: String = if !target_url.starts_with("http") {
             "http://".to_string() + target_url.as_str()
         } else {
@@ -457,6 +469,24 @@ impl ProxyScraper {
         Ok(())
     }
 
+    fn scrape_system_metrics(&mut self) -> Result<(), Box<dyn Error>> {
+        let sys = match &mut self.ttype {
+            ScraperType::SystemMetrics { sys } => sys,
+            _ => {
+                unreachable!();
+            }
+        };
+
+        let metrics = sys.scrape()?;
+
+        for m in metrics.iter() {
+            self.factory.push(&m.name, &m.doc, m.ctype.clone(), None)?;
+            self.factory.accumulate(&m.name, m.ctype.clone(), None)?;
+        }
+
+        Ok(())
+    }
+
     fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
         if unix_ts() - self.last_scrape < self.period {
             /* Not to be scraped yet */
@@ -471,6 +501,9 @@ impl ProxyScraper {
             }
             ScraperType::Prometheus => {
                 self.scrape_prometheus()?;
+            }
+            ScraperType::SystemMetrics { .. } => {
+                self.scrape_system_metrics()?;
             }
         }
 
@@ -751,6 +784,12 @@ impl ExporterFactory {
             .lock()
             .unwrap()
             .insert(node_job.desc.jobid.to_string(), node_job);
+
+        /* Now insert the default system scrape */
+        let systemurl = "/system".to_string();
+        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 5, ret.clone()) {
+            ret.scrapes.lock().unwrap().insert(systemurl, sys_metrics);
+        }
 
         ret
     }

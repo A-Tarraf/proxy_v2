@@ -15,6 +15,7 @@ mod webserver;
 use webserver::Web;
 
 mod proxywireprotocol;
+mod systemmetrics;
 
 extern crate clap;
 

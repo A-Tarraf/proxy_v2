@@ -3,6 +3,7 @@ use crate::proxy_common::ProxyErr;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::format;
 use std::sync::{Arc, RwLock};
 
 use std::{collections::HashMap, env, error::Error};
@@ -506,6 +507,28 @@ fn max_f64(a: f64, b: f64) -> f64 {
 }
 
 impl CounterSnapshot {
+    pub fn new(
+        name: String,
+        attributes: &[(String, String)],
+        doc: String,
+        value: CounterType,
+    ) -> CounterSnapshot {
+        let attrs: Vec<String> = attributes
+            .iter()
+            .map(|(k, v)| format!("{}=\"{}\"", k, v.replace('"', "\\\"")))
+            .collect();
+        let name = match attrs.len() {
+            0 => name,
+            _ => format!("{}{{{}}}", name, attrs.join(",")),
+        };
+
+        CounterSnapshot {
+            name,
+            doc,
+            ctype: value,
+        }
+    }
+
     #[allow(unused)]
     pub fn serialize(&self) -> String {
         self.ctype.serialize(&self.name)
