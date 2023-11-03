@@ -1,0 +1,72 @@
+<main>
+    <section>
+        <h2>Profile Data</h2>
+
+        <div id="profiledata"></div>
+
+        <script>
+            // Function to make an HTTP GET request to the JSON endpoint
+            function fetchData() {
+                fetch('/profiles/percmd')
+                    .then(response => response.json())
+                    .then(data => {
+                        // Call a function to generate the HTML tables from the JSON data
+                        renderProfileData(data);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching data:', error);
+                    });
+            }
+    
+            // Function to generate an HTML table for a specific command
+            function createTableForCommand(command, entries) {
+                const table = document.createElement('table');
+                table.classList.add('profileTable');
+    
+                const headerRow = table.insertRow(0);
+                for (const key of Object.keys(entries[0])) {
+                    const headerCell = document.createElement('th');
+                    headerCell.textContent = key;
+                    headerRow.appendChild(headerCell);
+                }
+    
+                entries.forEach((entry, index) => {
+                const row = table.insertRow(index + 1);
+                for (const key of Object.keys(entry)) {
+                    const cell = row.insertCell();
+
+                    // Create a link for the jobid
+                    if (key === 'jobid') {
+                        const link = document.createElement('a');
+                        link.href = `/profiles/get?jobid=${entry[key]}`;
+                        link.textContent = entry[key];
+                        cell.appendChild(link);
+                    } else {
+                        cell.textContent = entry[key];
+                    }
+                    }
+                 });
+    
+                return table;
+            }
+    
+            // Function to generate HTML tables and headers for each command
+            function renderProfileData(data) {
+                const profileDataElement = document.getElementById('profiledata');
+    
+                for (const command in data) {
+                    if (data.hasOwnProperty(command)) {
+                        const entries = data[command];
+                        const commandHeader = document.createElement('h3');
+                        commandHeader.textContent = command;
+                        profileDataElement.appendChild(commandHeader);
+                        const table = createTableForCommand(command, entries);
+                        profileDataElement.appendChild(table);
+                    }
+                }
+            }
+    
+            // Call the fetchData function to fetch and display data
+            fetchData();
+        </script>
+</main>

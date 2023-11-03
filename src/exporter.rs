@@ -12,6 +12,8 @@ use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
 
+use crate::profiles::ProfileView;
+
 use super::proxy_common::{hostname, list_files_with_ext_in, unix_ts_us, ProxyErr};
 
 use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
@@ -311,6 +313,7 @@ pub(crate) struct ExporterFactory {
     perjob: Mutex<HashMap<String, PerJobRefcount>>,
     prefix: PathBuf,
     scrapes: Mutex<HashMap<String, ProxyScraper>>,
+    pub saved_profiles: Arc<ProfileView>,
 }
 
 fn create_dir_or_fail(path: &PathBuf) {
@@ -407,7 +410,7 @@ impl ExporterFactory {
         assert!(partial_dir.is_dir());
 
         loop {
-            let ret = list_files_with_ext_in(&partial_dir, ".partialprofile")?;
+            let ret = list_files_with_ext_in(&partial_dir, "partialprofile")?;
 
             for partial in ret.iter() {
                 if let Err(e) = ExporterFactory::accumulate_a_profile(&profile_dir, partial) {
@@ -515,8 +518,9 @@ impl ExporterFactory {
             main: Arc::new(Exporter::new()),
             pernode: Arc::new(Exporter::new()),
             perjob: Mutex::new(HashMap::new()),
-            prefix: profile_prefix,
+            prefix: profile_prefix.clone(),
             scrapes: Mutex::new(HashMap::new()),
+            saved_profiles: Arc::new(ProfileView::new(profile_prefix)),
         });
 
         let scrape_ref = ret.clone();

@@ -43,6 +43,10 @@ a:visited {
 	color: inherit;
 }
 
+a {
+	color: #fff;
+}
+
 /* Navigation Buttons */
 nav a {
 	text-decoration: none;
@@ -53,6 +57,8 @@ nav a {
 	border-radius: 5px; /* Rounded corners for buttons */
 	transition: background-color 0.3s, color 0.3s; /* Smooth transition on hover */
 }
+
+
 
 /* Button Hover Effect */
 nav a:hover {

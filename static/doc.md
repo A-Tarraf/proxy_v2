@@ -200,6 +200,44 @@ We propose the following endpoints for alarms:
 			-H "Content-Type: application/json" \
 			-d '{"target": "main", "name": "My Alarm"}'
 
+## Scanning Finished Jobs (Profiles)
+
+As exposed in the [example GUI](/profiles.html), for manipulating profiles (final snapshot of jobs) the folowing JSON endpoints are provided:
+
+- [http://127.0.0.1:1337/profiles](http://127.0.0.1:1337/profiles) a list of profiles on the system, data layout is a job description as shown in [http://127.0.0.1:1337/joblist](http://127.0.0.1:1337/joblist)
+- [http://127.0.0.1:1337/percmd](http://127.0.0.1:1337/percmd) a list of profiles gathered by launch command to ease procesing by command
+
+		{
+		"./command_a ": [
+				{
+					"jobid": "test2",
+					"command": "./command_a ",
+					"size": 1,
+					"nodelist": "",
+					"partition": "",
+					"cluster": "",
+					"run_dir": "/XXX/proxy_v2/client",
+					"start_time": 1699020416,
+					"end_time": 1699020421
+				}
+			],
+		"./command_b ": [
+				{
+					"jobid": "test1",
+					"command": "./command_b ",
+					"size": 1,
+					"nodelist": "",
+					"partition": "",
+					"cluster": "",
+					"run_dir": "/XXX/proxy_v2/client",
+					"start_time": 1699020317,
+					"end_time": 1699020398
+				}
+			]
+		}
+
+
+- [http://127.0.0.1:1337/get?jobid=XXX](http://127.0.0.1:1337/get?jobid=XXX) allows to get a given profile, layout is identical to a job JSON snapshot as exposed in [http://localhost:1337/job/?job=main](http://localhost:1337/job/?job=main).
 
 ## Adding New Scrapes using /join
 
@@ -218,16 +256,16 @@ You can get the list of current scrapes at [http://localhost:1337/join/list](htt
 It consists in such JSON:
 
 	[
-	{
-		"target_url": "http://localhost:9100/metrics",
-		"ttype": "Prometheus",
-		"period": 5,
-		"last_scrape": 1699010032
-	},
-	{
-		"target_url": "/system",
-		"ttype": "System",
-		"period": 5,
-		"last_scrape": 1699010032
-	}
+		{
+			"target_url": "http://localhost:9100/metrics",
+			"ttype": "Prometheus",
+			"period": 5,
+			"last_scrape": 1699010032
+		},
+		{
+			"target_url": "/system",
+			"ttype": "System",
+			"period": 5,
+			"last_scrape": 1699010032
+		}
 	]

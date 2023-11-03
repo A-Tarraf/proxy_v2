@@ -90,7 +90,7 @@ pub(crate) fn list_files_with_ext_in(
         let mut full_path = path.clone();
         full_path.push(fname);
 
-        if full_path.extension().unwrap_or(OsStr::new("")) == "partialprofile" {
+        if full_path.extension().unwrap_or(OsStr::new("")) == ext {
             ret.push(full_path.to_string_lossy().to_string());
         }
     }

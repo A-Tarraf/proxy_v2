@@ -15,6 +15,7 @@
             <li><a href="/jobs.html">Jobs</a></li>
             <li><a href="/alarms.html">Alarms</a></li>
             <li><a href="/topology.html">Proxy Topology</a></li>
+            <li><a href="/profiles.html">Profiles</a></li>
             <li><a href="/doc.html">API Documentation</a></li>
         </ul>
     </nav>

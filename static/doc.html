@@ -167,6 +167,41 @@
           -d &#39;{&quot;target&quot;: &quot;main&quot;, &quot;name&quot;: &quot;My Alarm&quot;}&#39;</code></pre></li>
         </ul></li>
         </ul>
+<h2 id="scanning-finished-jobs-profiles">Scanning Finished Jobs (Profiles)</h2>
+<p>As exposed in the <a href="/profiles.html">example GUI</a>, for manipulating profiles (final snapshot of jobs) the folowing JSON endpoints are provided:</p>
+<ul>
+<li><p><a href="http://127.0.0.1:1337/profiles">http://127.0.0.1:1337/profiles</a> a list of profiles on the system, data layout is a job description as shown in <a href="http://127.0.0.1:1337/joblist">http://127.0.0.1:1337/joblist</a></p></li>
+<li><p><a href="http://127.0.0.1:1337/percmd">http://127.0.0.1:1337/percmd</a> a list of profiles gathered by launch command to ease procesing by command</p>
+<pre><code>  {
+  &quot;./command_a &quot;: [
+          {
+              &quot;jobid&quot;: &quot;test2&quot;,
+              &quot;command&quot;: &quot;./command_a &quot;,
+              &quot;size&quot;: 1,
+              &quot;nodelist&quot;: &quot;&quot;,
+              &quot;partition&quot;: &quot;&quot;,
+              &quot;cluster&quot;: &quot;&quot;,
+              &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
+              &quot;start_time&quot;: 1699020416,
+              &quot;end_time&quot;: 1699020421
+          }
+      ],
+  &quot;./command_b &quot;: [
+          {
+              &quot;jobid&quot;: &quot;test1&quot;,
+              &quot;command&quot;: &quot;./command_b &quot;,
+              &quot;size&quot;: 1,
+              &quot;nodelist&quot;: &quot;&quot;,
+              &quot;partition&quot;: &quot;&quot;,
+              &quot;cluster&quot;: &quot;&quot;,
+              &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
+              &quot;start_time&quot;: 1699020317,
+              &quot;end_time&quot;: 1699020398
+          }
+      ]
+  }</code></pre></li>
+<li><p><a href="http://127.0.0.1:1337/get?jobid=XXX">http://127.0.0.1:1337/get?jobid=XXX</a> allows to get a given profile, layout is identical to a job JSON snapshot as exposed in <a href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a>.</p></li>
+</ul>
         <h2 id="adding-new-scrapes-using-join">Adding New Scrapes using /join</h2>
         <p>It is possible to request a proxy to scrape a given target. Currently the following targets are supported:</p>
         <ul>
@@ -177,7 +212,8 @@
         <p><a href="http://localhost:1337/join?to=localhost:9100">http://localhost:1337/join?to=localhost:9100</a> will add the <a href="https://github.com/prometheus/node_exporter">node exporter</a> running on localhost (classically on <a href="http://localhost:9100">http://localhost:9100</a>) and the proxy is able to scrape such metrics.</p>        
         <p>You can get the list of current scrapes at <a href="http://localhost:1337/join/list">http://localhost:1337/join/list</a></p>
         <p>It consists in such JSON:</p>
-        <pre><code>[
+        <pre><code>
+        [
         {
             &quot;target_url&quot;: &quot;http://localhost:9100/metrics&quot;,
             &quot;ttype&quot;: &quot;Prometheus&quot;,
@@ -190,6 +226,7 @@
             &quot;period&quot;: 5,
             &quot;last_scrape&quot;: 1699010032
         }
-        ]</code></pre>
+        ]
+        </code></pre>
     </section>
 </main>

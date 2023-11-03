@@ -14,6 +14,7 @@ use proxy::UnixProxy;
 mod webserver;
 use webserver::Web;
 
+mod profiles;
 mod proxywireprotocol;
 mod scrapper;
 mod systemmetrics;
@@ -42,6 +43,7 @@ struct Args {
     #[arg(short, long, value_delimiter = ',')]
     sub_proxies: Option<Vec<String>>,
 
+    /// Address of the proxy to pivot on to build a proxy tree
     #[arg(short, long)]
     root_proxy: Option<String>,
 }
