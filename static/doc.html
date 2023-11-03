@@ -1,0 +1,179 @@
+<main>
+    <section>
+        <h2 id="listing-jobs">Listing Jobs</h2>
+        <p>Job management offers the following endpoints:</p>
+        <ul>
+        <li><p>A list of current jobs and their metadata at <a href="http://127.0.0.1:1337/joblist">http://127.0.0.1:1337/job/list</a></p>
+        <pre><code>  [
+              {
+                  &quot;jobid&quot;: &quot;main&quot;,
+                  &quot;command&quot;: &quot;Sum of all Jobs&quot;,
+                  &quot;size&quot;: 0,
+                  &quot;nodelist&quot;: &quot;&quot;,
+                  &quot;partition&quot;: &quot;&quot;,
+                  &quot;cluster&quot;: &quot;&quot;,
+                  &quot;run_dir&quot;: &quot;&quot;,
+                  &quot;start_time&quot;: 0,
+                  &quot;end_time&quot;: 0
+              },
+              {
+                  &quot;jobid&quot;: &quot;Node: deneb&quot;,
+                  &quot;command&quot;: &quot;Sum of all Jobs running on deneb&quot;,
+                  &quot;size&quot;: 0,
+                  &quot;nodelist&quot;: &quot;deneb&quot;,
+                  &quot;partition&quot;: &quot;&quot;,
+                  &quot;cluster&quot;: &quot;&quot;,
+                  &quot;run_dir&quot;: &quot;&quot;,
+                  &quot;start_time&quot;: 0,
+                  &quot;end_time&quot;: 0
+              }
+          ]</code></pre></li>
+        <li><p>A global view of all jobs all at once <a href="http://localhost:1337/job">http://localhost:1337/job</a> it includes <strong>all</strong> the data (metadata and counters)</p>
+        <pre><code>  [
+          {
+              &quot;desc&quot;: {
+                  &quot;jobid&quot;: &quot;main&quot;,
+                  &quot;command&quot;: &quot;Sum of all Jobs&quot;,
+                  &quot;size&quot;: 0,
+                  &quot;nodelist&quot;: &quot;&quot;,
+                  &quot;partition&quot;: &quot;&quot;,
+                  &quot;cluster&quot;: &quot;&quot;,
+                  &quot;run_dir&quot;: &quot;&quot;,
+                  &quot;start_time&quot;: 0,
+                  &quot;end_time&quot;: 0
+              },
+              &quot;counters&quot;: [
+                  {
+                      &quot;name&quot;: &quot;proxy_cpu_total&quot;,
+                      &quot;doc&quot;: &quot;Number of tracked CPUs by individual proxies&quot;,
+                      &quot;ctype&quot;: {
+                          &quot;Gauge&quot;: {
+                              &quot;min&quot;: 8,
+                              &quot;max&quot;: 8,
+                              &quot;hits&quot;: 1,
+                              &quot;total&quot;: 8
+                          }
+                      }
+                  },
+                  ...
+              ]
+          },
+          {
+              &quot;desc&quot;: {
+                  &quot;jobid&quot;: &quot;Node: deneb&quot;,
+                  &quot;command&quot;: &quot;Sum of all Jobs running on deneb&quot;,
+                  &quot;size&quot;: 0,
+                  &quot;nodelist&quot;: &quot;deneb&quot;,
+                  &quot;partition&quot;: &quot;&quot;,
+                  &quot;cluster&quot;: &quot;&quot;,
+                  &quot;run_dir&quot;: &quot;&quot;,
+                  &quot;start_time&quot;: 0,
+                  &quot;end_time&quot;: 0
+              },
+              &quot;counters&quot;: [
+                  {
+                      &quot;name&quot;: &quot;proxy_network_receive_packets_total{interface=\&quot;docker0\&quot;}&quot;,
+                      &quot;doc&quot;: &quot;Total number of packets received on the given device&quot;,
+                      &quot;ctype&quot;: {
+                          &quot;Counter&quot;: {
+                              &quot;value&quot;: 0
+                          }
+                      }
+                  },
+                  ...
+              ]
+          }
+          ]</code></pre></li>
+        <li><p>A JSON export of jobs <a href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a> it filters only the job of interest instead of returning the full array of jobs. It extracts the jobfrom the array given by <a href="http://localhost:1337/job">http://localhost:1337/job</a> and has the same structure.</p></li>
+        <li><p>A prometheus export for each job <a href="http://localhost:1337/metrics/?job=testjob">http://localhost:1337/metrics/?job=testjob</a>. Note <a href="http://localhost:1337/metrics">http://localhost:1337/metrics</a> is the export of the main job and thus equivalent to <a href="http://localhost:1337/metrics/?job=main">http://localhost:1337/metrics/?job=main</a></p></li>
+        </ul>
+        <h2 id="managing-alarms">Managing Alarms</h2>
+        <p>See the <a href="/alarms.html">Alarm Example GUI</a> for reference.</p>
+        <p>We propose the following endpoints for alarms:</p>
+        <ul>
+        <li><p><a href="http://127.0.0.1:1337/alarms">http://127.0.0.1:1337/alarms</a> : list current raised alarms</p>
+        <pre><code>      {
+              &quot;main&quot;: [
+                  {
+                  &quot;name&quot;: &quot;My Alarm&quot;,
+                  &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;,
+                  &quot;operator&quot;: {
+                          &quot;More&quot;: 33
+                  },
+                  &quot;current&quot;: 51.56660318374634,
+                  &quot;active&quot;: true,
+                  &quot;pretty&quot;: &quot;My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 51.56660318374634 (Min: 51.56660318374634, Max : 51.56660318374634, Hits: 1, Total : 51.56660318374634) GAUGE &gt; 33&quot;
+                  }
+              ]
+              }</code></pre></li>
+        <li><p><a href="http://127.0.0.1:1337/alarms/list">http://127.0.0.1:1337/alarms/list</a> : list all registered alarms</p>
+        <pre><code>  {
+          &quot;main&quot;: [
+              {
+              &quot;name&quot;: &quot;My Other Alarm&quot;,
+              &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;,
+              &quot;operator&quot;: {
+                      &quot;Less&quot;: 33
+              },
+              &quot;current&quot;: 6.246700286865234,
+              &quot;active&quot;: true,
+              &quot;pretty&quot;: &quot;My Other Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 6.246700286865234 (Min: 6.246700286865234, Max : 6.246700286865234, Hits: 1, Total : 6.246700286865234) GAUGE &lt; 33&quot;
+              },
+              {
+              &quot;name&quot;: &quot;My Alarm&quot;,
+              &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;,
+              &quot;operator&quot;: {
+                      &quot;More&quot;: 33
+              },
+              &quot;current&quot;: 6.246700286865234,
+              &quot;active&quot;: false,
+              &quot;pretty&quot;: &quot;My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 6.246700286865234 (Min: 6.246700286865234, Max : 6.246700286865234, Hits: 1, Total : 6.246700286865234) GAUGE &gt; 33&quot;
+              }
+          ]
+          }</code></pre></li>
+        <li><p><a href="http://127.0.0.1:1337/alarms/add">http://127.0.0.1:1337/alarms/add</a> : add a new alarm</p>
+        <p>Takes a JSON object</p>
+        <pre><code>  {
+              &quot;name&quot;: &quot;My Alarm&quot;,
+              &quot;target&quot;: &quot;main&quot;,
+              &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;,
+              &quot;operation&quot;: &quot;&gt;&quot;,
+              &quot;value&quot;: 33
+          }</code></pre>
+        <p>You can make it with curl:</p>
+        <pre><code>  curl -s http://localhost:1337/alarms/add\
+          -H &quot;Content-Type: application/json&quot; \
+          -d &#39;{ &quot;name&quot;: &quot;My Alarm&quot;, &quot;target&quot;: &quot;main&quot;, &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;, &quot;operation&quot;: &quot;&gt;&quot;, &quot;value&quot;: 33 }&#39;</code></pre>
+        <p>Operation can be “&lt;” “&gt;” and “=” to w.r.t. value.</p></li>
+        <li><p><a href="http://127.0.0.1:1337/alarms/del">http://127.0.0.1:1337/alarms/del</a> : delete an existing alarm</p>
+        <ul>
+        <li><p>Using the GET protocol:</p>
+        <ul>
+        <li><strong>targetjob</strong> : name of the job</li>
+        <li><strong>name</strong> : name of the alarm</li>
+        </ul>
+        <p>Example with Curl</p>
+        <pre><code>  # Be careful with the &amp; in bash/sh
+          curl &quot;http://localhost:1337/alarms/del?targetjob=main&amp;name=My%20Alarm&quot;</code></pre></li>
+        <li><p>Using the POST protocol:</p>
+        <p>Send the following JSON:</p>
+        <pre><code>  {
+                  &quot;target&quot;: &quot;main&quot;,
+                  &quot;name&quot;: &quot;My Alarm&quot;,
+          }</code></pre>
+        <p>Example with Curl:</p>
+        <pre><code>  curl -s http://localhost:1337/alarms/del \
+          -H &quot;Content-Type: application/json&quot; \
+          -d &#39;{&quot;target&quot;: &quot;main&quot;, &quot;name&quot;: &quot;My Alarm&quot;}&#39;</code></pre></li>
+        </ul></li>
+        </ul>
+        <h2 id="adding-new-scrapes-using-join">Adding New Scrapes using /join</h2>
+        <p>It is possible to request a proxy to scrape a given target. Currently the following targets are supported:</p>
+        <ul>
+        <li>Another proxy meaning you may pass the url to another proxy to have it collected by the current proxt</li>
+        <li>A prometheus exporter, meaning the <code>/metric</code> endpoint will be harvested, currently only counters and gauges are handled. In the case of prometheus scrapes, they are aggregated only in “main” and inside the “node” specific job.</li>
+        </ul>
+        <p>Only the GET requests are supported using the <code>to</code> argument, for example:</p>
+        <p><a href="http://localhost:1337/join?to=localhost:9100">http://localhost:1337/join?to=localhost:9100</a> will add the <a href="https://github.com/prometheus/node_exporter">node exporter</a> running on localhost (classically on <a href="http://localhost:9100">http://localhost:9100</a>) and the proxy is able to scrape such metrics.</p>        
+    </section>
+</main>
