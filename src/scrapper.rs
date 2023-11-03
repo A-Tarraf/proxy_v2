@@ -215,7 +215,7 @@ impl ProxyScraper {
         for e in target_exporters {
             for m in metrics.iter() {
                 e.push(m)?;
-                e.accumulate(m, true)?;
+                e.accumulate(m, false)?;
             }
         }
 
