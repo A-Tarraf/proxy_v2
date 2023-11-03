@@ -571,7 +571,7 @@ impl ExporterFactory {
 
         /* Now insert the default system scrape */
         let systemurl = "/system".to_string();
-        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 5, ret.clone()) {
+        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 1000, ret.clone()) {
             ret.scrapes.lock().unwrap().insert(systemurl, sys_metrics);
         }
 

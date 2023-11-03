@@ -1,6 +1,6 @@
 use crate::exporter::Exporter;
-use crate::proxy_common::ProxyErr;
 use crate::proxy_common::{is_url_live, unix_ts};
+use crate::proxy_common::{unix_ts_us, ProxyErr};
 use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
 use crate::ExporterFactory;
 use core::fmt;
@@ -33,7 +33,7 @@ pub struct ProxyScraper {
     state: HashMap<String, JobProfile>,
     factory: Arc<ExporterFactory>,
     period: u64,
-    last_scrape: u64,
+    last_scrape: u128,
     ttype: ScraperType,
 }
 
@@ -101,8 +101,8 @@ impl ProxyScraper {
         ProxyScraperSnapshot {
             target_url: self.target_url.to_string(),
             ttype: self.ttype.to_string(),
-            period: self.period,
-            last_scrape: self.last_scrape,
+            period: self.period / 1000,
+            last_scrape: (self.last_scrape / 1000000) as u64,
         }
     }
 
@@ -252,7 +252,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts() - self.last_scrape < self.period {
+        if unix_ts_us() - self.last_scrape < (self.period * 1000) as u128 {
             /* Not to be scraped yet */
             return Ok(());
         }
@@ -271,7 +271,7 @@ impl ProxyScraper {
             }
         }
 
-        self.last_scrape = unix_ts();
+        self.last_scrape = unix_ts_us();
 
         Ok(())
     }
