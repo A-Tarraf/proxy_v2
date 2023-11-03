@@ -14,7 +14,7 @@ use crate::proxywireprotocol::{
 
 use super::proxy_common::{hostname, list_files_with_ext_in, unix_ts_us, ProxyErr};
 
-use crate::scrapper::ProxyScraper;
+use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
 
 /***********************
  * PROMETHEUS EXPORTER *
@@ -454,6 +454,17 @@ impl ExporterFactory {
             .unwrap()
             .insert(new.url().to_string(), new);
         Ok(())
+    }
+
+    pub(crate) fn list_scrapes(&self) -> Vec<ProxyScraperSnapshot> {
+        let ret: Vec<ProxyScraperSnapshot> = self
+            .scrapes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, v)| v.snapshot())
+            .collect();
+        ret
     }
 
     pub(crate) fn join(

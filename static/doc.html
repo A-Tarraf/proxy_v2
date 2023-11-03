@@ -3,7 +3,7 @@
         <h2 id="listing-jobs">Listing Jobs</h2>
         <p>Job management offers the following endpoints:</p>
         <ul>
-        <li><p>A list of current jobs and their metadata at <a href="http://127.0.0.1:1337/joblist">http://127.0.0.1:1337/job/list</a></p>
+        <li><p>A list of current jobs and their metadata at <a href="http://127.0.0.1:1337/job/list">http://127.0.0.1:1337/job/list</a></p>
         <pre><code>  [
               {
                   &quot;jobid&quot;: &quot;main&quot;,
@@ -175,5 +175,21 @@
         </ul>
         <p>Only the GET requests are supported using the <code>to</code> argument, for example:</p>
         <p><a href="http://localhost:1337/join?to=localhost:9100">http://localhost:1337/join?to=localhost:9100</a> will add the <a href="https://github.com/prometheus/node_exporter">node exporter</a> running on localhost (classically on <a href="http://localhost:9100">http://localhost:9100</a>) and the proxy is able to scrape such metrics.</p>        
+        <p>You can get the list of current scrapes at <a href="http://localhost:1337/join/list">http://localhost:1337/join/list</a></p>
+        <p>It consists in such JSON:</p>
+        <pre><code>[
+        {
+            &quot;target_url&quot;: &quot;http://localhost:9100/metrics&quot;,
+            &quot;ttype&quot;: &quot;Prometheus&quot;,
+            &quot;period&quot;: 5,
+            &quot;last_scrape&quot;: 1699010032
+        },
+        {
+            &quot;target_url&quot;: &quot;/system&quot;,
+            &quot;ttype&quot;: &quot;System&quot;,
+            &quot;period&quot;: 5,
+            &quot;last_scrape&quot;: 1699010032
+        }
+        ]</code></pre>
     </section>
 </main>

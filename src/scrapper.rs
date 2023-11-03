@@ -3,19 +3,31 @@ use crate::proxy_common::ProxyErr;
 use crate::proxy_common::{is_url_live, unix_ts};
 use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
 use crate::ExporterFactory;
+use core::fmt;
 use reqwest::blocking::Client;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::sync::Arc;
 use std::vec;
 
 use crate::systemmetrics::SystemMetrics;
+
 enum ScraperType {
     Proxy,
     Prometheus,
     SystemMetrics { sys: Box<SystemMetrics> },
 }
 
+impl fmt::Display for ScraperType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ScraperType::Proxy => write!(f, "Proxy"),
+            ScraperType::Prometheus => write!(f, "Prometheus"),
+            ScraperType::SystemMetrics { .. } => write!(f, "System"),
+        }
+    }
+}
 pub struct ProxyScraper {
     target_url: String,
     state: HashMap<String, JobProfile>,
@@ -23,6 +35,14 @@ pub struct ProxyScraper {
     period: u64,
     last_scrape: u64,
     ttype: ScraperType,
+}
+
+#[derive(Serialize)]
+pub struct ProxyScraperSnapshot {
+    target_url: String,
+    ttype: String,
+    period: u64,
+    last_scrape: u64,
 }
 
 impl ProxyScraper {
@@ -75,6 +95,15 @@ impl ProxyScraper {
             last_scrape: 0,
             ttype,
         })
+    }
+
+    pub(crate) fn snapshot(&self) -> ProxyScraperSnapshot {
+        ProxyScraperSnapshot {
+            target_url: self.target_url.to_string(),
+            ttype: self.ttype.to_string(),
+            period: self.period,
+            last_scrape: self.last_scrape,
+        }
     }
 
     pub(crate) fn url(&self) -> &String {

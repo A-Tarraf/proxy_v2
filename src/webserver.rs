@@ -301,6 +301,11 @@ impl Web {
         }
     }
 
+    fn handle_join_list(&self, _req: &Request) -> WebResponse {
+        let scrapes = self.factory.list_scrapes();
+        WebResponse::Native(Response::json(&scrapes))
+    }
+
     fn handle_join(&self, req: &Request) -> WebResponse {
         let to = req.get_param("to");
 
@@ -570,7 +575,11 @@ impl Web {
                 },
                 "pivot" => self.handle_pivot(request),
                 "topo" => self.handle_topo(request),
-                "join" => self.handle_join(request),
+                "join" => match resource.as_str() {
+                    "" => self.handle_join(request),
+                    "list" => self.handle_join_list(request),
+                    _ => WebResponse::BadReq(url),
+                },
                 "alarms" => match resource.as_str() {
                     "" => self.handle_alarms(request),
                     "add" => self.handle_add_alarms(request),

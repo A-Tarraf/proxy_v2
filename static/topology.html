@@ -3,6 +3,21 @@
         <h2 id="head">Current Server Topology</h2>
         <div id="mermaidChart"></div>
     </section>
+    <section>
+        <h2>List of Scrapes</h2>
+        <table id="scrapes">
+            <thead>
+              <tr>
+                <th>Target URL</th>
+                <th>Type</th>
+                <th>Period</th>
+                <th>Last Scrape</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+            </tbody>
+          </table>
+    </section>
     <script type="module">
         import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
 
@@ -39,12 +54,50 @@ ${data.map(([from, to]) => `${from} --> ${to}`).join('\n')}
             }
         }
 
-        // Rest of your code (including generateAndRenderChart function) here...
+        // Function to fetch data and populate the table
+        function ScrapeTable() {
+            const tableBody = document.querySelector('#scrapes tbody');
+            tableBody.innerHTML = '';
+            // Fetch JSON data from the endpoint
+            fetch('/join/list')
+            .then(response => response.json())
+            .then(data => {
+                // Iterate through the data and create table rows
+                data.forEach(item => {
+                const row = document.createElement('tr');
+
+                // Populate table cells with data
+                const targetUrlCell = document.createElement('td');
+                targetUrlCell.textContent = item.target_url;
+                row.appendChild(targetUrlCell);
+
+                const typeCell = document.createElement('td');
+                typeCell.textContent = item.ttype;
+                row.appendChild(typeCell);
+
+                const periodCell = document.createElement('td');
+                periodCell.textContent = item.period;
+                row.appendChild(periodCell);
+
+                const lastScrapeCell = document.createElement('td');
+                lastScrapeCell.textContent = new Date(item.last_scrape * 1000).toLocaleString();
+                row.appendChild(lastScrapeCell);
+
+                // Append the row to the table
+                tableBody.appendChild(row);
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching data:', error);
+            });
+        }
 
         // Call the function to fetch data when the page loads
         setInterval(function () {
             fetchTopoData();
-        }, 1000);
-
+            ScrapeTable();
+        }, 5000);
+        fetchTopoData();
+        ScrapeTable();
     </script>
 </main>

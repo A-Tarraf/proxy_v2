@@ -2,7 +2,7 @@
 
 Job management offers the following endpoints:
 
-- A list of current jobs and their metadata at [http://127.0.0.1:1337/job/list](http://127.0.0.1:1337/joblist)
+- A list of current jobs and their metadata at [http://127.0.0.1:1337/job/list](http://127.0.0.1:1337/job/list)
 
 		[
 			{
@@ -212,3 +212,22 @@ Only the GET requests are supported using the `to` argument, for example:
 
 [http://localhost:1337/join?to=localhost:9100](http://localhost:1337/join?to=localhost:9100) will add the [node exporter](https://github.com/prometheus/node_exporter) running on localhost (classically on [http://localhost:9100](http://localhost:9100)) and the proxy is able to scrape such metrics.
 
+
+You can get the list of current scrapes at [http://localhost:1337/join/list](http://localhost:1337/join/list)
+
+It consists in such JSON:
+
+	[
+	{
+		"target_url": "http://localhost:9100/metrics",
+		"ttype": "Prometheus",
+		"period": 5,
+		"last_scrape": 1699010032
+	},
+	{
+		"target_url": "/system",
+		"ttype": "System",
+		"period": 5,
+		"last_scrape": 1699010032
+	}
+	]
