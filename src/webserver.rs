@@ -563,8 +563,11 @@ impl Web {
                 "accumulate" => self.handle_accumulate(request),
                 "push" => self.handle_push(request),
                 "metrics" => self.handle_metrics(request),
-                "joblist" => self.handle_joblist(request),
-                "job" => self.handle_job(request),
+                "job" => match resource.as_str() {
+                    "list" => self.handle_joblist(request),
+                    "" => self.handle_job(request),
+                    _ => WebResponse::BadReq(url),
+                },
                 "pivot" => self.handle_pivot(request),
                 "topo" => self.handle_topo(request),
                 "join" => self.handle_join(request),

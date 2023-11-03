@@ -21,7 +21,7 @@
 		<script>
 			// Fetch JSON data from the endpoint
 			function fetchAndDisplay() {
-				fetch("/joblist")
+				fetch("/job/list")
 					.then(response => {
 						if (!response.ok) {
 							throw new Error(`Failed to fetch job information (status: ${response.status})`);
