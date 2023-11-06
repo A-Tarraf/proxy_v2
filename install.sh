@@ -206,7 +206,7 @@ fi
 
 	cd "${BUILDTEMP}" || error_out "Failed to move to ${BUILDTEMP}"
 
-	"${SOURCE_ROOT}/exporters/strace/configure" "--prefix=${PREFIX}" --program-prefix=proxy_exporter_ --enable-mpers=no || error_out "Failed to configure strace"
+	${SOURCE_ROOT}/exporters/strace/configure --prefix=${PREFIX} --program-prefix=proxy_exporter_ --enable-mpers=no || error_out "Failed to configure strace"
 
 	make install -j8 || error_out "Failed to install strace"
 
