@@ -66,6 +66,7 @@ header "Build Project"
 SOURCE_ROOT="$(readlink -f $(dirname "$0"))"
 export SOURCE_ROOT
 
+cargo build || error_out "Failed to build package see previous errors"
 cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to install rust package"
 
 # The Build Directory
