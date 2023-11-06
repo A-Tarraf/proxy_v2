@@ -204,6 +204,9 @@ fi
 
 	export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig/:$PKG_CONFIG_PATH"
 
+	cd "${SOURCE_ROOT}/exporters/strace/" || error_out "Failed to enter strace sourcedir"
+	./bootstrap || error_out "Failed to bootstrap strace"
+
 	cd "${BUILDTEMP}" || error_out "Failed to move to ${BUILDTEMP}"
 
 	${SOURCE_ROOT}/exporters/strace/configure --prefix=${PREFIX} --program-prefix=proxy_exporter_ --enable-mpers=no || error_out "Failed to configure strace"
