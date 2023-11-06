@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::process::exit;
 use std::{error::Error, path::PathBuf};
 
@@ -10,12 +10,13 @@ use std::path::Path;
 
 use clap::Parser;
 use std::env::current_exe;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use std::fs;
 
 enum Exporter {
     Preload { name: String, path: PathBuf },
+    Prefix { name: String, cmd: Vec<String> },
 }
 
 impl Exporter {
@@ -36,12 +37,12 @@ impl Exporter {
     fn name(&self) -> String {
         match self {
             Exporter::Preload { name, path: _ } => name.to_string(),
+            Exporter::Prefix { name, cmd: _ } => name.to_string(),
         }
     }
 }
 
 struct ExporterList {
-    libdir: PathBuf,
     exporters: Vec<Exporter>,
 }
 
@@ -84,17 +85,36 @@ impl ExporterList {
         Err(ProxyErr::newboxed("Failed to infer binary prefix"))
     }
 
+    fn locate_strace(bindir: &Path) -> Option<PathBuf> {
+        let strace = bindir.join("strace_proxy");
+
+        let strace: Option<PathBuf> = if strace.is_file() {
+            Some(strace)
+        } else {
+            pathsearch::find_executable_in_path("strace_proxy")
+        };
+
+        strace
+    }
+
     fn new() -> Result<ExporterList, Box<dyn Error>> {
         let (bindir, libdir) = ExporterList::getpaths()?;
         log::debug!("Libdir is {}", libdir.to_string_lossy());
 
-        let exporters: Vec<Exporter> = list_files_with_ext_in(&libdir, "so")?
+        let mut exporters: Vec<Exporter> = list_files_with_ext_in(&libdir, "so")?
             .iter()
             .filter(|v| v.contains("libmetricproxy-exporter"))
             .map(|v| Exporter::newpreload(Path::new(v).to_path_buf()))
             .collect();
 
-        Ok(ExporterList { libdir, exporters })
+        if let Some(strace) = ExporterList::locate_strace(&bindir) {
+            exporters.push(Exporter::Prefix {
+                name: "strace".to_string(),
+                cmd: vec![strace.to_string_lossy().to_string(), "-c".to_string()],
+            })
+        }
+
+        Ok(ExporterList { exporters })
     }
 
     fn exists(&self, exporter: &String) -> bool {
@@ -141,9 +161,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         exit(1);
     }
 
-    let mut preloads: Option<String> = None;
-
-    if let Some(exporters) = args.exporter.clone() {
+    let preloads: Option<String> = if let Some(exporters) = args.exporter.clone() {
         for e in exporters.iter().as_ref() {
             if !exs.exists(e) {
                 log::error!("No such exporter {}", e);
@@ -151,10 +169,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        preloads = Some(exs.generate_preloads(&exporters));
+        Some(exs.generate_preloads(&exporters))
     } else {
-        preloads = Some(exs.generate_preloads(&[]));
-    }
+        Some(exs.generate_preloads(&[]))
+    };
 
     /* Prepare to Run the command  */
     let mut cmd = Command::new(args.command[0].clone());
