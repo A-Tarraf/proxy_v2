@@ -63,6 +63,18 @@ impl ExporterList {
             .join(":")
     }
 
+    fn generate_prefixes(&self, filter: &[String]) -> Vec<String> {
+        self.exporters
+            .iter()
+            .filter(|v| filter.is_empty() || filter.contains(&v.name()))
+            .filter_map(|v| match v {
+                Exporter::Prefix { name: _, cmd } => Some(cmd.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
     fn getpaths() -> Result<(PathBuf, PathBuf), Box<dyn Error>> {
         let current_exe = current_exe()?;
         let current_exe = fs::canonicalize(current_exe)?;
@@ -86,12 +98,12 @@ impl ExporterList {
     }
 
     fn locate_strace(bindir: &Path) -> Option<PathBuf> {
-        let strace = bindir.join("strace_proxy");
+        let strace = bindir.join("proxy_exporter_strace");
 
         let strace: Option<PathBuf> = if strace.is_file() {
             Some(strace)
         } else {
-            pathsearch::find_executable_in_path("strace_proxy")
+            pathsearch::find_executable_in_path("proxy_exporter_strace")
         };
 
         strace
@@ -128,7 +140,7 @@ impl ExporterList {
 struct Args {
     /// List detected exporters
     #[arg(short, long, default_value_t = false)]
-    exporterlist: bool,
+    listexporters: bool,
     /// List of exporters to activate
     #[arg(short, long, value_delimiter = ',')]
     exporter: Option<Vec<String>>,
@@ -149,7 +161,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let exs = ExporterList::new()?;
     let args = Args::parse();
 
-    if args.exporterlist {
+    if args.listexporters {
         for v in exs.exporters.iter() {
             println!(" - {}", v.name());
         }
@@ -161,21 +173,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         exit(1);
     }
 
-    let preloads: Option<String> = if let Some(exporters) = args.exporter.clone() {
-        for e in exporters.iter().as_ref() {
-            if !exs.exists(e) {
-                log::error!("No such exporter {}", e);
-                exit(1);
+    let (preloads, prefixes): (Option<String>, Vec<String>) =
+        if let Some(exporters) = args.exporter.clone() {
+            for e in exporters.iter().as_ref() {
+                if !exs.exists(e) {
+                    log::error!("No such exporter {}", e);
+                    exit(1);
+                }
             }
-        }
 
-        Some(exs.generate_preloads(&exporters))
-    } else {
-        Some(exs.generate_preloads(&[]))
-    };
+            (
+                Some(exs.generate_preloads(&exporters)),
+                exs.generate_prefixes(&exporters),
+            )
+        } else {
+            (Some(exs.generate_preloads(&[])), exs.generate_prefixes(&[]))
+        };
+
+    let mut command = Vec::new();
+    command.extend(prefixes.iter());
+    command.extend(args.command.iter());
 
     /* Prepare to Run the command  */
-    let mut cmd = Command::new(args.command[0].clone());
+    let mut cmd = Command::new(command[0].clone());
 
     /* Handle env preloads */
     if let Some(pr) = preloads {
@@ -193,11 +213,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     /* Forward arguments */
-    let args: Vec<OsString> = args.command[1..]
-        .iter()
-        .cloned()
-        .map(OsString::from)
-        .collect();
+    let args: Vec<OsString> = command[1..].iter().cloned().map(OsString::from).collect();
 
     for arg in &args {
         cmd.arg(arg);
