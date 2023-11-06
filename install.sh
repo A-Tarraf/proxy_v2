@@ -63,7 +63,7 @@ header "Build Project"
 
 
 # Root of Package
-SOURCE_ROOT="$(dirname "$0")"
+SOURCE_ROOT="$(readlink -f $(dirname "$0"))"
 export SOURCE_ROOT
 
 cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to install rust package"
@@ -109,6 +109,21 @@ if test -f "${PROXY_HEADER}"; then
 else
 	error_out "Failed to generate proxy header see previous errors"
 fi
+
+
+check_dir "${PREFIX}/lib/pkgconfig/"
+
+cat << EOF > "${PREFIX}/lib/pkgconfig/proxyclient.pc"
+prefix=${PREFIX}
+includedir=\${prefix}/include
+libdir=\${prefix}/lib
+
+Name: proxyclient
+Description: Client library for the Metric Proxy
+Version: 0.1
+Cflags: -I\${includedir} -Wl,-rpath=\${libdir}
+Libs: -L\${libdir} -lproxyclient -Wl,-rpath=\${libdir}
+EOF
 
 #
 # Build dep detection
@@ -178,4 +193,26 @@ else
 	error_out "Failed to generate MPI wrappers library"
 fi
 
+#
+# Deploy the Modified Strace
+#
+	header "Deploying Modified Strace"
 
+
+	if test ! -f "${PREFIX}/bin/proxy_exporter_strace"; then
+
+	export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig/:$PKG_CONFIG_PATH"
+
+	cd "${BUILDTEMP}" || error_out "Failed to move to ${BUILDTEMP}"
+
+	"${SOURCE_ROOT}/exporters/strace/configure" "--prefix=${PREFIX}" --program-prefix=proxy_exporter_ --enable-mpers=no || error_out "Failed to configure strace"
+
+	make install -j8 || error_out "Failed to install strace"
+
+	echo "Sucessfully deployed"
+else
+	echo "Already installed"
+fi
+
+# All done if we are here
+rm -fr "${BUILDTEMP}"
