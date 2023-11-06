@@ -127,13 +127,15 @@ impl ExporterEntryGroup {
         Ok(ret)
     }
 
-    fn snapshot(&self) -> Result<Vec<CounterSnapshot>, ProxyErr> {
+    fn snapshot(&self, full: bool) -> Result<Vec<CounterSnapshot>, ProxyErr> {
         let mut ret: Vec<CounterSnapshot> = Vec::new();
 
         for (_, exporter_counter) in self.ht.read().unwrap().iter() {
             // Acquire the Mutex for this specific ExporterEntry
-            let value = exporter_counter.value.read().unwrap();
-            ret.push(value.clone());
+            let value = exporter_counter.value.read().unwrap().clone();
+            if value.hasdata() || full {
+                ret.push(value.clone());
+            }
         }
 
         Ok(ret)
@@ -224,14 +226,14 @@ impl Exporter {
         Ok(ret)
     }
 
-    pub(crate) fn profile(&self, desc: &JobDesc) -> Result<JobProfile, ProxyErr> {
+    pub(crate) fn profile(&self, desc: &JobDesc, full: bool) -> Result<JobProfile, ProxyErr> {
         let mut ret = JobProfile {
             desc: desc.clone(),
             counters: Vec::new(),
         };
 
         for (_, exporter_counter) in self.ht.read().unwrap().iter() {
-            let snaps = exporter_counter.snapshot()?;
+            let snaps = exporter_counter.snapshot(full)?;
             ret.counters.extend(snaps);
         }
 
@@ -302,8 +304,8 @@ impl Drop for PerJobRefcount {
 }
 
 impl PerJobRefcount {
-    fn profile(&self) -> Result<JobProfile, ProxyErr> {
-        self.exporter.profile(&self.desc)
+    fn profile(&self, full: bool) -> Result<JobProfile, ProxyErr> {
+        self.exporter.profile(&self.desc, full)
     }
 }
 
@@ -635,7 +637,7 @@ impl ExporterFactory {
     }
 
     fn saveprofile(&self, per_job: &PerJobRefcount, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
-        let snap = per_job.exporter.profile(desc)?;
+        let snap = per_job.exporter.profile(desc, false)?;
 
         let mut target_dir = self.prefix.clone();
         target_dir.push("partial");
@@ -673,12 +675,12 @@ impl ExporterFactory {
             .collect()
     }
 
-    pub(crate) fn profiles(&self) -> Vec<JobProfile> {
+    pub(crate) fn profiles(&self, full: bool) -> Vec<JobProfile> {
         let mut ret: Vec<JobProfile> = Vec::new();
 
         if let Ok(ht) = self.perjob.lock() {
             for v in ht.values() {
-                if let Ok(p) = v.profile() {
+                if let Ok(p) = v.profile(full) {
                     ret.push(p);
                 }
             }
@@ -687,9 +689,9 @@ impl ExporterFactory {
         ret
     }
 
-    pub(crate) fn profile_of(&self, jobid: &String) -> Result<JobProfile, ProxyErr> {
+    pub(crate) fn profile_of(&self, jobid: &String, full: bool) -> Result<JobProfile, ProxyErr> {
         if let Some(elem) = self.perjob.lock().unwrap().get(jobid) {
-            return elem.profile();
+            return elem.profile(full);
         }
 
         Err(ProxyErr::new("No such Job ID"))

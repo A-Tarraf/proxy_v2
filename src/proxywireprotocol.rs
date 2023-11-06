@@ -71,6 +71,22 @@ impl CounterType {
         }
     }
 
+    pub fn hasdata(&self) -> bool {
+        match self {
+            CounterType::Counter { value } => {
+                return *value != 0.0;
+            }
+            Self::Gauge {
+                min: _,
+                max: _,
+                hits,
+                total: _,
+            } => {
+                return *hits != 0.0;
+            }
+        }
+    }
+
     #[allow(unused)]
     fn value(&self) -> f64 {
         match self {
@@ -527,6 +543,10 @@ impl CounterSnapshot {
             doc,
             ctype: value,
         }
+    }
+
+    pub fn hasdata(&self) -> bool {
+        self.ctype.hasdata()
     }
 
     #[allow(unused)]

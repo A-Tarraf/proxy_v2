@@ -396,12 +396,13 @@ impl Web {
 
     fn handle_job(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("job") {
-            match self.factory.profile_of(&jobid) {
+            match self.factory.profile_of(&jobid, true) {
                 Ok(p) => WebResponse::Native(Response::json(&p)),
                 Err(e) => WebResponse::BadReq(e.to_string()),
             }
         } else {
-            let all = self.factory.profiles();
+            /* For all we skip null values to be faster */
+            let all = self.factory.profiles(false);
             WebResponse::Native(Response::json(&all))
         }
     }
