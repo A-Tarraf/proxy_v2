@@ -458,6 +458,11 @@ impl JobDesc {
         let cmdline_bytes = std::fs::read("/proc/self/cmdline").unwrap_or(Vec::new());
         let command = String::from_utf8(cmdline_bytes).unwrap_or("".to_string());
         let command = command.replace('\0', " ");
+        let command = command
+            .find("--")
+            .map(|index| &command[(index + "--".len())..])
+            .unwrap_or(command.as_str())
+            .to_string();
 
         JobDesc {
             jobid,

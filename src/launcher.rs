@@ -122,7 +122,11 @@ impl ExporterList {
         if let Some(strace) = ExporterList::locate_strace(&bindir) {
             exporters.push(Exporter::Prefix {
                 name: "strace".to_string(),
-                cmd: vec![strace.to_string_lossy().to_string(), "-c".to_string()],
+                cmd: vec![
+                    strace.to_string_lossy().to_string(),
+                    "-c".to_string(),
+                    "--".to_string(),
+                ],
             })
         }
 
