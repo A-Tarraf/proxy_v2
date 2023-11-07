@@ -2,7 +2,7 @@ use retry::{delay::Fixed, retry};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
@@ -14,7 +14,7 @@ use crate::proxywireprotocol::{
 
 use crate::profiles::ProfileView;
 
-use super::proxy_common::{hostname, list_files_with_ext_in, unix_ts_us, ProxyErr};
+use super::proxy_common::{hostname, ProxyErr};
 
 use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
 
@@ -316,6 +316,7 @@ pub(crate) struct ExporterFactory {
     prefix: PathBuf,
     scrapes: Mutex<HashMap<String, ProxyScraper>>,
     pub saved_profiles: Arc<ProfileView>,
+    aggregator: bool,
 }
 
 fn create_dir_or_fail(path: &PathBuf) {
@@ -348,81 +349,6 @@ impl ExporterFactory {
 
         if !profile_dir.exists() {
             create_dir_or_fail(&profile_dir);
-        }
-
-        // Partial subdirectory
-        let mut partial_dir = path.clone();
-        partial_dir.push("partial");
-
-        if !partial_dir.exists() {
-            create_dir_or_fail(&partial_dir);
-        }
-    }
-
-    fn profile_parse_jobid(target: &String) -> Result<String, Box<dyn Error>> {
-        let path = PathBuf::from(target);
-        let filename = path
-            .file_name()
-            .ok_or("Failed to parse path")?
-            .to_string_lossy()
-            .to_string();
-
-        if let Some(jobid) = filename.split("___").next() {
-            return Ok(jobid.to_string());
-        }
-
-        Err(ProxyErr::newboxed("Failed to parse jobid"))
-    }
-
-    fn accumulate_a_profile(profile_dir: &Path, target: &String) -> Result<(), Box<dyn Error>> {
-        let file = fs::File::open(target)?;
-        let mut content: JobProfile = serde_json::from_reader(file)?;
-
-        /* Compute path to profile for given job  */
-        let jobid = ExporterFactory::profile_parse_jobid(target)?;
-        let mut target_prof = profile_dir.to_path_buf();
-        target_prof.push(format!("{}.profile", jobid));
-
-        if target_prof.is_file() {
-            /* We need to load and accumulate the existing profile */
-            let e_profile_file = fs::File::open(&target_prof)?;
-            let existing_prof: JobProfile = serde_json::from_reader(e_profile_file)?;
-            /* Aggregate the existing content */
-            content.merge(existing_prof)?;
-        }
-
-        /* Overwrite the profile */
-        let outfile = fs::File::create(target_prof)?;
-        serde_json::to_writer(outfile, &content)?;
-
-        /* If we are here we managed to read and collect the file */
-        fs::remove_file(target).ok();
-
-        Ok(())
-    }
-
-    fn aggregate_profiles(prefix: PathBuf) -> Result<(), Box<dyn Error>> {
-        let mut profile_dir = prefix.clone();
-        profile_dir.push("profiles");
-
-        let mut partial_dir = prefix.clone();
-        partial_dir.push("partial");
-
-        assert!(profile_dir.is_dir());
-        assert!(partial_dir.is_dir());
-
-        loop {
-            let ret = list_files_with_ext_in(&partial_dir, "partialprofile")?;
-
-            for partial in ret.iter() {
-                if let Err(e) = ExporterFactory::accumulate_a_profile(&profile_dir, partial) {
-                    log::error!("Failed to process {} : {}", partial, e.to_string());
-                } else {
-                    log::trace!("Aggregated profile {}", partial);
-                }
-            }
-
-            sleep(Duration::from_secs(1));
         }
     }
 
@@ -508,14 +434,6 @@ impl ExporterFactory {
     pub(crate) fn new(profile_prefix: PathBuf, aggregate: bool) -> Arc<ExporterFactory> {
         ExporterFactory::check_profile_dir(&profile_prefix);
 
-        if aggregate {
-            let thread_prefix = profile_prefix.clone();
-            // Start Aggreg thread
-            std::thread::spawn(move || {
-                ExporterFactory::aggregate_profiles(thread_prefix).unwrap();
-            });
-        }
-
         let ret = Arc::new(ExporterFactory {
             main: Arc::new(Exporter::new()),
             pernode: Arc::new(Exporter::new()),
@@ -523,6 +441,7 @@ impl ExporterFactory {
             prefix: profile_prefix.clone(),
             scrapes: Mutex::new(HashMap::new()),
             saved_profiles: Arc::new(ProfileView::new(profile_prefix)),
+            aggregator: aggregate,
         });
 
         let scrape_ref = ret.clone();
@@ -640,22 +559,15 @@ impl ExporterFactory {
         let snap = per_job.exporter.profile(desc, false)?;
 
         let mut target_dir = self.prefix.clone();
-        target_dir.push("partial");
+        target_dir.push("profiles");
 
-        let hostname = hostname();
-
-        let fname = format!(
-            "{}___{}.{}.{}.partialprofile",
-            desc.jobid,
-            hostname,
-            std::process::id(),
-            unix_ts_us()
-        );
+        let fname = format!("{}.profile", desc.jobid);
 
         target_dir.push(fname);
 
         log::debug!(
-            "Saving partial profile to {}",
+            "Saving profile for {} in {}",
+            desc.jobid,
             target_dir.to_str().unwrap_or("")
         );
 
@@ -712,7 +624,9 @@ impl ExporterFactory {
             if job_entry.counter == 0 {
                 /* Serialize */
                 if let Some(perjob) = ht.get(&desc.jobid) {
-                    self.saveprofile(perjob, desc)?;
+                    if self.aggregator {
+                        self.saveprofile(perjob, desc)?;
+                    }
                     /* Delete */
                     ht.remove(&desc.jobid);
                 }
