@@ -5,15 +5,16 @@ body {
 	color: #333;
 }
 
-/* Header Styles */
-/* Header Styles */
 header {
 	background: linear-gradient(to bottom, #1f8996, #FFF);
 	padding: 20px;
 	height: 100px;
 	text-align: center;
 	color: #fff;
-	position: relative; /* Add this line for positioning */
+	position: relative;
+	display: flex; /* Use flexbox for vertical alignment */
+	justify-content: center; /* Center horizontally */
+	align-items: center; /* Center vertically */
 }
 
 /* Logo Styles */
