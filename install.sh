@@ -63,7 +63,8 @@ header "Build Project"
 
 
 # Root of Package
-SOURCE_ROOT="$(readlink -f $(dirname "$0"))"
+DIRNAME=$(dirname "$0")
+SOURCE_ROOT="$(readlink -f "${DIRNAME}")"
 export SOURCE_ROOT
 
 cargo build || error_out "Failed to build package see previous errors"
