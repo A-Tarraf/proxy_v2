@@ -7,8 +7,8 @@ use std::time::Duration;
 use std::{error::Error, io::Write};
 
 mod proxy_common;
-use proxy_common::init_log;
 use proxy_common::ProxyErr;
+use proxy_common::{get_proxy_path, init_log};
 
 mod proxywireprotocol;
 use libc::{signal, SIGPIPE, SIG_IGN};
@@ -121,7 +121,7 @@ impl MetricProxyClient {
 
         let mut can_run: bool = true;
 
-        let sock_path = env::var("PROXY_PATH").unwrap_or("/tmp/metric_proxy.unix".to_string());
+        let sock_path = env::var("PROXY_PATH").unwrap_or(get_proxy_path());
         let path = Path::new(&sock_path);
 
         let tsock = if !path.exists() {

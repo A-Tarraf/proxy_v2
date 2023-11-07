@@ -142,7 +142,8 @@ impl UnixProxy {
         let path = Path::new(&socket_path);
 
         if path.exists() {
-            std::fs::remove_file(path)?;
+            std::fs::remove_file(path)
+                .or(Err(ProxyErr::new("Failed to remove previous proxy file")))?;
         }
 
         let listener = UnixListener::bind(path)?;

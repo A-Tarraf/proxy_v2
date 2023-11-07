@@ -3,7 +3,7 @@ use std::process::exit;
 use std::thread::{self, sleep};
 use std::time::Duration;
 mod proxy_common;
-use proxy_common::init_log;
+use proxy_common::{get_proxy_path, init_log};
 
 mod exporter;
 use exporter::ExporterFactory;
@@ -32,8 +32,8 @@ struct Args {
     port: u32,
 
     // Path of the UNIX proxy for the gateway
-    #[arg(short, long, default_value = "/tmp/metric_proxy.unix")]
-    unix: String,
+    #[arg(short, long)]
+    unix: Option<String>,
 
     /// Should profile aggregation be deactivated
     #[arg(short, long, default_value_t = false)]
@@ -88,8 +88,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let unix = if let Some(unix) = args.unix {
+        unix.clone()
+    } else {
+        get_proxy_path()
+    };
+
     // Create the UNIX proxy with a reference to the exporter
-    let proxy = UnixProxy::new(args.unix, factory.clone())?;
+    let proxy = UnixProxy::new(unix, factory.clone())?;
 
     // Run the proxy detached with a ref to the exporter data
     thread::spawn(move || proxy.run());
