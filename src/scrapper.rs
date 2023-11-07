@@ -1,5 +1,5 @@
 use crate::exporter::Exporter;
-use crate::proxy_common::{is_url_live, unix_ts};
+use crate::proxy_common::is_url_live;
 use crate::proxy_common::{unix_ts_us, ProxyErr};
 use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
 use crate::ExporterFactory;

@@ -1,8 +1,7 @@
 use super::proxywireprotocol::{JobDesc, JobProfile};
-use crate::proxy_common::{list_files_with_ext_in, ProxyErr};
+use crate::proxy_common::list_files_with_ext_in;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::format;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;

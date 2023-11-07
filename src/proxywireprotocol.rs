@@ -3,19 +3,9 @@ use crate::proxy_common::ProxyErr;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::format;
 use std::sync::{Arc, RwLock};
 
 use std::{collections::HashMap, env, error::Error};
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-#[repr(u8)]
-pub(crate) enum ProxyCommandType {
-    REGISTER = 0,
-    SET = 1,
-    GET = 2,
-    LIST = 3,
-}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum CounterType {
@@ -71,19 +61,16 @@ impl CounterType {
         }
     }
 
+    #[allow(unused)]
     pub fn hasdata(&self) -> bool {
         match self {
-            CounterType::Counter { value } => {
-                return *value != 0.0;
-            }
+            CounterType::Counter { value } => *value != 0.0,
             Self::Gauge {
                 min: _,
                 max: _,
                 hits,
                 total: _,
-            } => {
-                return *hits != 0.0;
-            }
+            } => *hits != 0.0,
         }
     }
 
@@ -523,6 +510,7 @@ fn max_f64(a: f64, b: f64) -> f64 {
 }
 
 impl CounterSnapshot {
+    #[allow(unused)]
     pub fn new(
         name: String,
         attributes: &[(String, String)],
@@ -545,6 +533,7 @@ impl CounterSnapshot {
         }
     }
 
+    #[allow(unused)]
     pub fn hasdata(&self) -> bool {
         self.ctype.hasdata()
     }

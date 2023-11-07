@@ -87,11 +87,6 @@ impl MetricProxyValue {
 
         Ok(())
     }
-
-    fn reset(&self) {
-        let mut value = self.value.lock().unwrap();
-        value.reset();
-    }
 }
 
 pub struct MetricProxyClient {

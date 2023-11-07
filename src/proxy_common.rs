@@ -144,6 +144,7 @@ pub fn concat_slices(slices: [&'static [u8]; 3]) -> Vec<u8> {
     concatenated_data
 }
 
+#[allow(unused)]
 pub fn get_proxy_path() -> String {
     let uid = users::get_current_uid();
     format!("/tmp/metric-proxy-{}.socket", uid)
