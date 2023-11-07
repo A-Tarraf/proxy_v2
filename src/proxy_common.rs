@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{error::Error, path::PathBuf};
 
@@ -96,6 +97,18 @@ pub(crate) fn list_files_with_ext_in(
     }
 
     Ok(ret)
+}
+
+#[allow(unused)]
+pub(crate) fn create_dir_or_fail(path: &PathBuf) {
+    if let Err(e) = std::fs::create_dir(path) {
+        log::error!(
+            "Failed to create directory at {} : {}",
+            path.to_str().unwrap_or(""),
+            e
+        );
+        exit(1);
+    }
 }
 
 #[allow(unused)]

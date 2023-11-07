@@ -39,7 +39,7 @@ struct Args {
     #[arg(short, long, default_value_t = false)]
     inhibit_profile_agreggation: bool,
 
-    /// Subservers to be scrapped (optionnal comma separated list) use ADDR[@PERIOD in ms] to set the scraping period
+    /// Subservers to be scrapped (optionnal comma separated list) use ADDR\@[PERIOD in ms] to set the scraping period
     #[arg(short, long, value_delimiter = ',')]
     sub_proxies: Option<Vec<String>>,
 

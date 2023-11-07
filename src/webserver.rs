@@ -490,17 +490,17 @@ impl Web {
     }
 
     fn handle_list_profiles(&self, _: &Request) -> WebResponse {
-        if let Err(e) = self.factory.saved_profiles.refresh_profiles() {
+        if let Err(e) = self.factory.profile_store.refresh_profiles() {
             return WebResponse::BadReq(format!("Failed to refresh profiles : {}", e));
         }
 
-        let prof = self.factory.saved_profiles.get_profile_list();
+        let prof = self.factory.profile_store.get_profile_list();
         WebResponse::Native(Response::json(&prof))
     }
 
     fn handle_get_profiles(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
-            if let Ok(prof) = self.factory.saved_profiles.get_profile(&jobid) {
+            if let Ok(prof) = self.factory.profile_store.get_profile(&jobid) {
                 return WebResponse::Native(Response::json(&prof));
             }
             return WebResponse::BadReq(format!("Failed to get {}", jobid));
@@ -509,11 +509,11 @@ impl Web {
     }
 
     fn handle_list_profiles_per_cmd(&self, _: &Request) -> WebResponse {
-        if let Err(e) = self.factory.saved_profiles.refresh_profiles() {
+        if let Err(e) = self.factory.profile_store.refresh_profiles() {
             return WebResponse::BadReq(format!("Failed to refresh profiles : {}", e));
         }
 
-        let prof = self.factory.saved_profiles.gather_by_command();
+        let prof = self.factory.profile_store.gather_by_command();
         WebResponse::Native(Response::json(&prof))
     }
 

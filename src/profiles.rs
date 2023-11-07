@@ -1,9 +1,10 @@
 use super::proxywireprotocol::{JobDesc, JobProfile};
-use crate::proxy_common::list_files_with_ext_in;
+use crate::proxy_common::{create_dir_or_fail, list_files_with_ext_in};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
+use std::process::exit;
 use std::sync::RwLock;
 
 pub(crate) struct ProfileView {
@@ -63,7 +64,53 @@ impl ProfileView {
             .collect()
     }
 
+    pub(crate) fn saveprofile(
+        &self,
+        snap: JobProfile,
+        desc: &JobDesc,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut target_dir = self.profdir.clone();
+
+        let fname = format!("{}.profile", desc.jobid);
+
+        target_dir.push(fname);
+
+        log::debug!(
+            "Saving profile for {} in {}",
+            desc.jobid,
+            target_dir.to_str().unwrap_or("")
+        );
+
+        let file = fs::File::create(target_dir)?;
+
+        serde_json::to_writer(file, &snap)?;
+
+        Ok(())
+    }
+
+    fn check_profile_dir(path: &PathBuf) {
+        // Main directory
+        if !path.exists() {
+            create_dir_or_fail(path);
+        } else if !path.is_dir() {
+            log::error!(
+                "{} is not a directory cannot use it as per job profile prefix",
+                path.to_str().unwrap_or("")
+            );
+            exit(1);
+        }
+
+        // Profile subdirectory
+        let mut profile_dir = path.clone();
+        profile_dir.push("profiles");
+
+        if !profile_dir.exists() {
+            create_dir_or_fail(&profile_dir);
+        }
+    }
+
     pub(crate) fn new(profdir: PathBuf) -> ProfileView {
+        ProfileView::check_profile_dir(&profdir);
         let mut profdir = profdir.clone();
         profdir.push("profiles");
 

@@ -1,9 +1,7 @@
 use retry::{delay::Fixed, retry};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
 use std::path::PathBuf;
-use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -22,6 +20,9 @@ use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
  * PROMETHEUS EXPORTER *
  ***********************/
 
+/// This is a refcounted reference to a counter and
+/// its documentation this allows to lock at counter
+/// granularity if needed
 struct ExporterEntry {
     value: Arc<RwLock<CounterSnapshot>>,
 }
@@ -34,13 +35,31 @@ impl ExporterEntry {
     }
 }
 
+/// This is a group of values used to have counters with the
+/// same prefix stored in the same list. This is important when generating
+/// the prometheus output as the format requires counters of the
+/// same prefix to be listed with only one TYPE header for example:
+///
+/// ```
+/// # HELP proxy_network_receive_packets_error_total Total number of erroneous  packets received on the given device
+/// # TYPE proxy_network_receive_packets_error_total counter
+/// proxy_network_receive_packets_error_total{interface="enp3s0"} 0
+/// proxy_network_receive_packets_error_total{interface="lo"} 0
+/// proxy_network_receive_packets_error_total{interface="docker0"} 0
+/// ```
+///
+/// The basename is the prefix here : proxy_network_receive_packets_error_total
 struct ExporterEntryGroup {
+    /// Common basename
     basename: String,
+    /// Common documentation
     doc: String,
+    /// List of values (stored with their full name including the {XXX})
     ht: RwLock<HashMap<String, ExporterEntry>>,
 }
 
 impl ExporterEntryGroup {
+    /// Create a new ExporterEntryGroup
     fn new(basename: String, doc: String) -> ExporterEntryGroup {
         ExporterEntryGroup {
             basename,
@@ -49,11 +68,13 @@ impl ExporterEntryGroup {
         }
     }
 
+    /// Get the basename of the ExporterEntryGroup
     fn basename(name: String) -> String {
         let spl: Vec<&str> = name.split('{').collect();
         spl[0].to_string()
     }
 
+    /// Set a value in the ExporterEntryGroup
     fn set(&self, value: CounterSnapshot) -> Result<(), ProxyErr> {
         match self.ht.write().unwrap().get_mut(&value.name) {
             Some(v) => {
@@ -65,6 +86,9 @@ impl ExporterEntryGroup {
         }
     }
 
+    /// Accumulate a value
+    ///
+    /// This will sum up data
     fn accumulate(&self, snapshot: &CounterSnapshot, merge: bool) -> Result<(), ProxyErr> {
         match self.ht.write().unwrap().get_mut(&snapshot.name) {
             Some(v) => {
@@ -82,6 +106,7 @@ impl ExporterEntryGroup {
         }
     }
 
+    /// Get a reference to a value
     fn get(&self, metric: &String) -> Result<Arc<RwLock<CounterSnapshot>>, ProxyErr> {
         let ret = self
             .ht
@@ -95,6 +120,7 @@ impl ExporterEntryGroup {
         Ok(ret)
     }
 
+    /// Insert a new value in the counter list
     fn push(&self, snapshot: CounterSnapshot) -> Result<(), ProxyErr> {
         let name = snapshot.name.to_string();
         if self.ht.read().unwrap().contains_key(&name) {
@@ -112,6 +138,7 @@ impl ExporterEntryGroup {
         Ok(())
     }
 
+    /// Generate the prometheus data from the couter list
     fn serialize(&self) -> Result<String, ProxyErr> {
         let mut ret: String = String::new();
 
@@ -127,6 +154,7 @@ impl ExporterEntryGroup {
         Ok(ret)
     }
 
+    /// Clone the current the counter list as a vector of CounterSnapshot
     fn snapshot(&self, full: bool) -> Result<Vec<CounterSnapshot>, ProxyErr> {
         let mut ret: Vec<CounterSnapshot> = Vec::new();
 
@@ -142,8 +170,16 @@ impl ExporterEntryGroup {
     }
 }
 
+/// An exporter is the central metric storage structure
+/// It holds a hasmap of ExporterEntryGroup which themselves
+/// store the various counter values.
+///
+/// It is also host for the alarms which are applied to the
+/// various metrics using the `check_alarms` call.
 pub(crate) struct Exporter {
+    /// List of metrics stored by basename in ExporterEntryGroup
     ht: RwLock<HashMap<String, ExporterEntryGroup>>,
+    /// List of alarms each refering to a counter
     alarms: RwLock<HashMap<String, ValueAlarm>>,
 }
 
@@ -290,11 +326,20 @@ impl Exporter {
     }
 }
 
+/// This structure is used to manage the job refcounting
+/// It creates an exporter for each new job and keeps
+/// track of the number of references onto itself
 struct PerJobRefcount {
+    /// Description of the job as retrieved from remote
     desc: JobDesc,
+    /// Number of references to the job
     counter: i32,
+    /// Exporter storing job counters
     exporter: Arc<Exporter>,
-    saveprofile: bool,
+    /// This is true only when the job is local (connected from proxy.rs)
+    /// A job from a scrapper is not a local one
+    /// It is used to only blame node-local metrics to local jobs
+    islocal: bool,
 }
 
 impl Drop for PerJobRefcount {
@@ -309,49 +354,37 @@ impl PerJobRefcount {
     }
 }
 
+/// This is the central pivot for metric and job management
+/// in the metric proxy all operations pass trough here
+/// and they are then dispatched to individual exporter instances
+
 pub(crate) struct ExporterFactory {
+    /// The main exporter summing contributions
+    /// from all others
     main: Arc<Exporter>,
+    /// The pernode exporter storing all node-local
+    /// Contributions
     pernode: Arc<Exporter>,
+    /// An hashtable on each PerJob instance
+    /// Each of those instance contains the
+    /// corresponding exporter
     perjob: Mutex<HashMap<String, PerJobRefcount>>,
-    prefix: PathBuf,
+    /// List of scrapres to be run a dedicated thread
+    /// will run them according to their polling
+    /// frequency
     scrapes: Mutex<HashMap<String, ProxyScraper>>,
-    pub saved_profiles: Arc<ProfileView>,
+    /// Instance of the profile manager
+    /// in charge of listing and loading profiles
+    pub profile_store: Arc<ProfileView>,
+    /// Sets this Proxy as aggregator meaning that it
+    /// is in charge of storing profiles
+    /// the -i option to the proxy sets this to false
     aggregator: bool,
 }
 
-fn create_dir_or_fail(path: &PathBuf) {
-    if let Err(e) = std::fs::create_dir(path) {
-        log::error!(
-            "Failed to create directory at {} : {}",
-            path.to_str().unwrap_or(""),
-            e
-        );
-        exit(1);
-    }
-}
-
 impl ExporterFactory {
-    fn check_profile_dir(path: &PathBuf) {
-        // Main directory
-        if !path.exists() {
-            create_dir_or_fail(path);
-        } else if !path.is_dir() {
-            log::error!(
-                "{} is not a directory cannot use it as per job profile prefix",
-                path.to_str().unwrap_or("")
-            );
-            exit(1);
-        }
-
-        // Profile subdirectory
-        let mut profile_dir = path.clone();
-        profile_dir.push("profiles");
-
-        if !profile_dir.exists() {
-            create_dir_or_fail(&profile_dir);
-        }
-    }
-
+    /// This function if the mainloop of the scrapting thread
+    /// It runs infinitely every 1 second checking all scrapes
     fn run_scrapping(&self) {
         loop {
             let mut to_delete: Vec<String> = Vec::new();
@@ -373,6 +406,7 @@ impl ExporterFactory {
         }
     }
 
+    /// Add a new scrape to the scrape list
     pub(crate) fn add_scrape(
         factory: Arc<ExporterFactory>,
         url: &String,
@@ -387,6 +421,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    /// List all scrapes in the scrape list
     pub(crate) fn list_scrapes(&self) -> Vec<ProxyScraperSnapshot> {
         let ret: Vec<ProxyScraperSnapshot> = self
             .scrapes
@@ -398,6 +433,11 @@ impl ExporterFactory {
         ret
     }
 
+    /// This function is called when joining another proxy
+    ///
+    /// It will first request the target address from the root server
+    /// and then it will register itself in the returned address
+    /// This function is used to dynamically build the reduction tree
     pub(crate) fn join(
         root_server: &String,
         my_server_address: &String,
@@ -432,15 +472,12 @@ impl ExporterFactory {
     }
 
     pub(crate) fn new(profile_prefix: PathBuf, aggregate: bool) -> Arc<ExporterFactory> {
-        ExporterFactory::check_profile_dir(&profile_prefix);
-
         let ret = Arc::new(ExporterFactory {
             main: Arc::new(Exporter::new()),
             pernode: Arc::new(Exporter::new()),
             perjob: Mutex::new(HashMap::new()),
-            prefix: profile_prefix.clone(),
             scrapes: Mutex::new(HashMap::new()),
-            saved_profiles: Arc::new(ProfileView::new(profile_prefix)),
+            profile_store: Arc::new(ProfileView::new(profile_prefix)),
             aggregator: aggregate,
         });
 
@@ -465,7 +502,7 @@ impl ExporterFactory {
             },
             exporter: ret.main.clone(),
             counter: 1,
-            saveprofile: false,
+            islocal: false,
         };
         ret.perjob
             .lock()
@@ -487,7 +524,7 @@ impl ExporterFactory {
             },
             exporter: ret.pernode.clone(),
             counter: 1,
-            saveprofile: false,
+            islocal: false,
         };
         ret.perjob
             .lock()
@@ -529,7 +566,7 @@ impl ExporterFactory {
                 e.counter += 1;
                 /* Make sure save flags match */
                 if tobesaved {
-                    e.saveprofile = true;
+                    e.islocal = true;
                 }
                 log::debug!(
                     "ACQUIRING Per Job exporter {} has refcount {}",
@@ -544,7 +581,7 @@ impl ExporterFactory {
                     desc: desc.clone(),
                     exporter: Arc::new(Exporter::new()),
                     counter: 1,
-                    saveprofile: tobesaved,
+                    islocal: tobesaved,
                 };
                 let ret = new.exporter.clone();
                 ht.insert(desc.jobid.to_string(), new);
@@ -553,29 +590,6 @@ impl ExporterFactory {
         };
 
         v
-    }
-
-    fn saveprofile(&self, per_job: &PerJobRefcount, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
-        let snap = per_job.exporter.profile(desc, false)?;
-
-        let mut target_dir = self.prefix.clone();
-        target_dir.push("profiles");
-
-        let fname = format!("{}.profile", desc.jobid);
-
-        target_dir.push(fname);
-
-        log::debug!(
-            "Saving profile for {} in {}",
-            desc.jobid,
-            target_dir.to_str().unwrap_or("")
-        );
-
-        let file = fs::File::create(target_dir)?;
-
-        serde_json::to_writer(file, &snap)?;
-
-        Ok(())
     }
 
     pub(crate) fn list_jobs(&self) -> Vec<JobDesc> {
@@ -625,7 +639,8 @@ impl ExporterFactory {
                 /* Serialize */
                 if let Some(perjob) = ht.get(&desc.jobid) {
                     if self.aggregator {
-                        self.saveprofile(perjob, desc)?;
+                        let snap = perjob.exporter.profile(desc, false)?;
+                        self.profile_store.saveprofile(snap, desc)?;
                     }
                     /* Delete */
                     ht.remove(&desc.jobid);
@@ -740,7 +755,7 @@ impl ExporterFactory {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, v)| v.saveprofile)
+            .filter(|(_, v)| v.islocal)
             .map(|(_, v)| v.exporter.clone())
             .collect()
     }
