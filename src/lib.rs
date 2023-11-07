@@ -278,12 +278,25 @@ impl MetricProxyClient {
     }
 }
 
+/// This intanciates the metric client
+///
+/// # Return
+///
+/// An opaque object representing the metric client
 #[no_mangle]
 pub extern "C" fn metric_proxy_init() -> *mut MetricProxyClient {
     let client = MetricProxyClient::new();
     Arc::into_raw(client) as *mut MetricProxyClient
 }
 
+/// Release the metric proxy
+///
+/// # Arguments
+///
+/// - pclient: a pointer to the metric client as returned by `metric_proxy_init`
+/// # Safety
+///
+/// Only pointer returned by `metric_proxy_init` should be passed.
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_release(pclient: *mut MetricProxyClient) -> std::ffi::c_int {
     let zero: std::ffi::c_int = 0;
@@ -314,6 +327,22 @@ fn unwrap_c_string(pcstr: *const std::os::raw::c_char) -> Result<String, Box<dyn
 
 /* Counters */
 
+/// Create a new Cointer from the metric client
+///
+/// # Arguments
+///
+/// - pclient: a pointer to the metric client as returned by `metric_proxy_init`
+/// - name : name of the counter
+/// - doc: documentation of the counter
+///
+/// # Returns
+///
+/// - Opaque pointer to a Counter instance
+///
+/// # Safety
+///
+/// Only correct pointers are returned by previous functions should be returned.
+/// Doing otherwise may crash.
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_counter_new(
     pclient: *mut MetricProxyClient,
@@ -343,6 +372,16 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
     std::ptr::null_mut()
 }
 
+/// This Increments the value of a Counter in the proxy
+/// This refers to a value previously created with `metric_proxy_gauge_new`
+///
+/// # Arguments
+///
+/// - pcounter: the gauge to update (as returned by `metric_proxy_gauge_new`)
+/// - value: the value to add to current value
+///
+/// # Safety
+/// If a wrong pointer is passed behavior is undefined (and may crash)
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_counter_inc(
     pcounter: *mut MetricProxyValue,
@@ -366,6 +405,22 @@ pub unsafe extern "C" fn metric_proxy_counter_inc(
 
 /* Gauges  */
 
+/// Create a new Gauge from the metric client
+///
+/// # Arguments
+///
+/// - pclient: a pointer to the metric client as returned by `metric_proxy_init`
+/// - name : name of the gauge
+/// - doc: documentation of the gauge
+///
+/// # Returns
+///
+/// - Opaque pointer to a Gauge instance
+///
+/// # Safety
+///
+/// Only correct pointers are returned by previous functions should be returned.
+/// Doing otherwise may crash.
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_gauge_new(
     pclient: *mut MetricProxyClient,
@@ -395,6 +450,16 @@ pub unsafe extern "C" fn metric_proxy_gauge_new(
     std::ptr::null_mut()
 }
 
+/// This set the value of a Gauge in the proxy
+/// This refers to a value previously created with `metric_proxy_gauge_new`
+///
+/// # Arguments
+///
+/// - pcounter: the gauge to update (as returned by `metric_proxy_gauge_new`)
+/// - value: the value to set
+///
+/// # Safety
+/// If a wrong pointer is passed behavior is undefined (and may crash)
 #[no_mangle]
 pub unsafe extern "C" fn metric_proxy_gauge_set(
     pcounter: *mut MetricProxyValue,
