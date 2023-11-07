@@ -68,8 +68,8 @@ nav a {
 
 /* Button Hover Effect */
 nav a:hover {
-	background-color: #fff;
-	color: #1f8996;
+	background-color: #0a2c30; 
+	color: #fff;
 }
 
 /* Links inside the nav element */
@@ -127,7 +127,7 @@ th {
 
 /* Alternating Row Background Colors */
 tr:nth-child(even) {
-	background-color: #1f88967b;
+	background-color: #1f889613;
 }
 
 /* Hover effect for table rows */
