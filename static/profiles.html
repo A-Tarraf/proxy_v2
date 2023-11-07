@@ -38,9 +38,14 @@
                     // Create a link for the jobid
                     if (key === 'jobid') {
                         const link = document.createElement('a');
-                        link.href = `/profiles/get?jobid=${entry[key]}`;
+                        link.href = `/job_view.html?profile=${entry[key]}`;
                         link.textContent = entry[key];
+                        link.style.marginRight = '10px'; // Add margin to create spacing
                         cell.appendChild(link);
+                        const rawlink = document.createElement('a');
+                        rawlink.href = `/profiles/get?jobid=${entry[key]}`;
+                        rawlink.textContent = "(JSON)";
+                        cell.appendChild(rawlink);
                     } else {
                         cell.textContent = entry[key];
                     }

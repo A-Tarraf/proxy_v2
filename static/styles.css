@@ -53,13 +53,6 @@ nav li {
 	margin: 0 10px;
 }
 
-a:visited {
-	color: inherit;
-}
-
-a {
-	color: #fff;
-}
 
 /* Navigation Buttons */
 nav a {
@@ -77,6 +70,21 @@ nav a:hover {
 	background-color: #fff;
 	color: #1f8996;
 }
+
+/* Links inside the nav element */
+nav a,
+nav a:visited {
+	color: #fff; /* Set the color specifically for links inside the nav element */
+}
+
+a {
+	color: #143e44;
+}
+
+a:visited {
+	color: #143e44;
+}
+
 
 /* Main content */
 main {

@@ -32,9 +32,14 @@
 			}
 
 			// Function to fetch and display JSON data
-			function fetchAndDisplayData(jobId) {
+			function fetchAndDisplayData(jobid, is_profile) {
+				let url = `/job?job=${jobid}`;
+				if (is_profile)
+				{
+					url = `profiles/get?jobid=${jobid}`;
+				}
 				// Fetch JSON data from the endpoint with the specified JOBID
-				fetch(`/job?job=${jobId}`)
+				fetch(url)
 					.then(response => {
 						if (!response.ok) {
 							throw new Error(`Failed to fetch job information (status: ${response.status})`);
@@ -110,16 +115,20 @@
 
 			// Get the JOBID from the URL parameter and fetch data
 			const jobId = getQueryParam("job");
-			if (jobId) {
-				fetchAndDisplayData(jobId);
+			const profileId = getQueryParam("profile");
 
-				// Refresh data every 5 seconds
+			if (jobId) {
+				fetchAndDisplayData(jobId, false);
 				setInterval(function () {
-					fetchAndDisplayData(jobId);
+					fetchAndDisplayData(jobId, false);
 				}, 1000);
-			} else {
+			} else if (profileId) {
+				fetchAndDisplayData(profileId, true);
+			}
+			else
+			{
 				const errorMessage = document.getElementById("error-message");
-				errorMessage.textContent = "Error: JOBID parameter not found in the URL.";
+				errorMessage.textContent = "Error: job / profile parameter not found in the URL.";
 			}
 		</script>
 	</section>
