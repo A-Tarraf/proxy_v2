@@ -59,6 +59,12 @@ else
 	error_out "Rust not found in environment"
 fi
 
+if locate_bin "cbindgen"; then
+	echo "cbindgen found in path"
+else
+	error_out "Failed to locate cbindgen consider running 'cargo install cbindgen'"
+fi
+
 header "Build Project"
 
 
@@ -67,7 +73,7 @@ DIRNAME=$(dirname "$0")
 SOURCE_ROOT="$(readlink -f "${DIRNAME}")"
 export SOURCE_ROOT
 
-cargo build || error_out "Failed to build package see previous errors"
+cargo build --release || error_out "Failed to build package see previous errors"
 cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to install rust package"
 
 # The Build Directory
@@ -95,12 +101,6 @@ check_dir "${PREFIX}/include/"
 
 assert_is_file "${BUILD_SOURCE_ROOT}/libproxyclient.so"
 cp "${BUILD_SOURCE_ROOT}/libproxyclient.so" "${PREFIX}/lib/libproxyclient.so" || error_out "Failed to install client library"
-
-if locate_bin "cbindgen"; then
-	echo "cbindgen found in path"
-else
-	error_out "Failed to locate cbindgen consider running 'cargo install cbindgen'"
-fi
 
 PROXY_HEADER="${PREFIX}/include/metric_proxy_client.h"
 
