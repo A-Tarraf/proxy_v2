@@ -176,7 +176,7 @@ assert_is_file "$MPI_WRAPPER_SOURCES"
 
 MPI_WRAPPERS_C="${BUILDTEMP}/mpi_wrappers.c"
 
-"${MPIWRAP}"  -f "${MPI_WRAPPER_SOURCES}" > "${MPI_WRAPPERS_C}"
+"${PYTHON}" "${MPIWRAP}"  -f "${MPI_WRAPPER_SOURCES}" > "${MPI_WRAPPERS_C}" || error_out "Failed to generate MPI wrappers"
 
 if test -f "${MPI_WRAPPERS_C}"; then
 	echo "Successfully generated MPI wrapper sources"
