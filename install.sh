@@ -137,9 +137,9 @@ header "Detecting build dependencies"
 PYTHON=""
 
 if test -z "$PYTHON"; then
-	if locate_bin "python"; then
-		PYTHON="python"
-	elif locate_bin "python3"; then
+	if locate_bin "python3"; then
+		PYTHON="python3"
+	elif locate_bin "python"; then
 		PYTHON="python"
 	else
 		error_out "Failed to locate python consider setting the PYTHON environment variable to your interpreter"
