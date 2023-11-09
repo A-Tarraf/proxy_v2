@@ -301,6 +301,25 @@ impl Web {
         }
     }
 
+    fn handle_tracelist(&self, _req: &Request) -> WebResponse {
+        let traces = self.factory.trace_store.list();
+        WebResponse::Native(Response::json(&traces))
+    }
+
+    fn handle_traceread(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("job") {
+            match self.factory.trace_store.read(jobid, None) {
+                Ok(data) => {
+                    return WebResponse::Native(Response::json(&data));
+                }
+                Err(e) => {
+                    return WebResponse::BadReq(format!("Failed to generate data {}", e));
+                }
+            }
+        }
+        WebResponse::BadReq("No job GET parameter passed".to_string())
+    }
+
     fn handle_join_list(&self, _req: &Request) -> WebResponse {
         let scrapes = self.factory.list_scrapes();
         WebResponse::Native(Response::json(&scrapes))
@@ -600,6 +619,11 @@ impl Web {
                 "job" => match resource.as_str() {
                     "list" => self.handle_joblist(request),
                     "" => self.handle_job(request),
+                    _ => WebResponse::BadReq(url),
+                },
+                "trace" => match resource.as_str() {
+                    "list" => self.handle_tracelist(request),
+                    "read" => self.handle_traceread(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "profiles" => match resource.as_str() {

@@ -1,6 +1,5 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{error::Error, path::PathBuf};
 
@@ -100,15 +99,40 @@ pub(crate) fn list_files_with_ext_in(
 }
 
 #[allow(unused)]
-pub(crate) fn create_dir_or_fail(path: &PathBuf) {
+pub(crate) fn create_dir_or_fail(path: &PathBuf) -> Result<(), ProxyErr> {
     if let Err(e) = std::fs::create_dir(path) {
-        log::error!(
+        return Err(ProxyErr::new(format!(
             "Failed to create directory at {} : {}",
             path.to_str().unwrap_or(""),
             e
-        );
-        exit(1);
+        )));
     }
+
+    Ok(())
+}
+
+#[allow(unused)]
+pub(crate) fn check_prefix_dir(prefix: &PathBuf, dirname: &str) -> Result<PathBuf, ProxyErr> {
+    // Main directory
+    if !prefix.exists() {
+        create_dir_or_fail(prefix)?;
+    } else if !prefix.is_dir() {
+        return Err(ProxyErr::new(format!(
+            "{} is not a directory cannot use it as {} prefix",
+            dirname,
+            prefix.to_str().unwrap_or("")
+        )));
+    }
+
+    // Profile subdirectory
+    let mut target_dir = prefix.clone();
+    target_dir.push(dirname);
+
+    if !target_dir.exists() {
+        create_dir_or_fail(&target_dir)?;
+    }
+
+    Ok(target_dir)
 }
 
 #[allow(unused)]

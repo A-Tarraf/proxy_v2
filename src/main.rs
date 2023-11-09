@@ -18,6 +18,7 @@ mod profiles;
 mod proxywireprotocol;
 mod scrapper;
 mod systemmetrics;
+mod trace;
 
 extern crate clap;
 
@@ -76,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     profile_prefix.push(".proxyprofiles");
 
     // The central storage is the exporter
-    let factory = ExporterFactory::new(profile_prefix, !args.inhibit_profile_agreggation);
+    let factory = ExporterFactory::new(profile_prefix, !args.inhibit_profile_agreggation)?;
 
     if let Some(urls) = args.sub_proxies {
         for url in urls.iter() {

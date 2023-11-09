@@ -2,6 +2,7 @@ use crate::exporter::Exporter;
 use crate::proxy_common::is_url_live;
 use crate::proxy_common::{unix_ts_us, ProxyErr};
 use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
+use crate::trace::Trace;
 use crate::ExporterFactory;
 use core::fmt;
 use reqwest::blocking::Client;
@@ -16,7 +17,13 @@ use crate::systemmetrics::SystemMetrics;
 enum ScraperType {
     Proxy,
     Prometheus,
-    SystemMetrics { sys: Box<SystemMetrics> },
+    SystemMetrics {
+        sys: Box<SystemMetrics>,
+    },
+    Trace {
+        exporter: Arc<Exporter>,
+        trace: Arc<Trace>,
+    },
 }
 
 impl fmt::Display for ScraperType {
@@ -25,13 +32,16 @@ impl fmt::Display for ScraperType {
             ScraperType::Proxy => write!(f, "Proxy"),
             ScraperType::Prometheus => write!(f, "Prometheus"),
             ScraperType::SystemMetrics { .. } => write!(f, "System"),
+            ScraperType::Trace { exporter: _, trace } => {
+                write!(f, "Trace job {} in {}", trace.desc().jobid, trace.path())
+            }
         }
     }
 }
 pub struct ProxyScraper {
     target_url: String,
     state: HashMap<String, JobProfile>,
-    factory: Arc<ExporterFactory>,
+    factory: Option<Arc<ExporterFactory>>,
     period: u64,
     last_scrape: u128,
     ttype: ScraperType,
@@ -90,10 +100,24 @@ impl ProxyScraper {
         Ok(ProxyScraper {
             target_url: url,
             state: HashMap::new(),
-            factory,
+            factory: Some(factory),
             period,
             last_scrape: 0,
             ttype,
+        })
+    }
+
+    pub(crate) fn newtrace(
+        exporter: Arc<Exporter>,
+        trace: Arc<Trace>,
+    ) -> Result<ProxyScraper, ProxyErr> {
+        Ok(ProxyScraper {
+            target_url: format!("/trace.{}", trace.desc().jobid),
+            state: HashMap::new(),
+            factory: None,
+            period: 1,
+            last_scrape: 0,
+            ttype: ScraperType::Trace { exporter, trace },
         })
     }
 
@@ -127,7 +151,11 @@ impl ProxyScraper {
                 if !new_keys.contains(k) {
                     /* Key has been dropped save name in list for notify */
                     deleted.push(v.desc.clone());
-                    self.factory.relax_job(&v.desc)?;
+                    if let Some(factory) = &self.factory {
+                        factory.relax_job(&v.desc)?;
+                    } else {
+                        unreachable!("Proxy scrapes should have a factory");
+                    }
                 }
             }
 
@@ -137,6 +165,11 @@ impl ProxyScraper {
             }
 
             /* Now Update Values */
+            let factory = if let Some(factory) = &self.factory {
+                factory
+            } else {
+                unreachable!("Proxy scrapes should have a factory");
+            };
 
             for p in profiles.iter_mut() {
                 log::trace!("Scraping {} from {}", p.desc.jobid, self.target_url);
@@ -147,11 +180,11 @@ impl ProxyScraper {
                     p.substract(previous)?;
                 } else {
                     /* New Job Register in Job List */
-                    let _ = self.factory.resolve_job(&p.desc, false);
+                    let _ = factory.resolve_job(&p.desc, false);
                     cur = p.to_owned();
                 }
 
-                if let Some(exporter) = self.factory.resolve_by_id(&p.desc.jobid) {
+                if let Some(exporter) = factory.resolve_by_id(&p.desc.jobid) {
                     for cnt in p.counters.iter() {
                         exporter.push(cnt)?;
                         exporter.accumulate(cnt, true)?;
@@ -214,10 +247,15 @@ impl ProxyScraper {
                 _ => None,
             };
 
+            let factory = if let Some(factory) = &self.factory {
+                factory
+            } else {
+                unreachable!("Proxy scrapes should have a factory");
+            };
+
             if let Some((name, value, doc)) = entry {
-                self.factory
-                    .push(name.as_str(), doc.as_str(), value.clone(), None)?;
-                self.factory.accumulate(name.as_str(), value, None)?;
+                factory.push(name.as_str(), doc.as_str(), value.clone(), None)?;
+                factory.accumulate(name.as_str(), value, None)?;
             }
         }
 
@@ -232,14 +270,19 @@ impl ProxyScraper {
             }
         };
 
+        let factory = if let Some(factory) = &self.factory {
+            factory
+        } else {
+            unreachable!("Proxy scrapes should have a factory");
+        };
+
         let metrics = sys.scrape()?;
 
         // We push in MAIN, NODE and All exporters which may generate profiles
         // THese exporters are the one attached locally and thus bound to
         // node local performance
-        let mut target_exporters: Vec<Arc<Exporter>> =
-            vec![self.factory.get_main(), self.factory.get_node()];
-        target_exporters.append(&mut self.factory.get_local_job_exporters());
+        let mut target_exporters: Vec<Arc<Exporter>> = vec![factory.get_main(), factory.get_node()];
+        target_exporters.append(&mut factory.get_local_job_exporters());
 
         for e in target_exporters {
             for m in metrics.iter() {
@@ -247,6 +290,17 @@ impl ProxyScraper {
                 e.accumulate(m, false)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn scrape_trace(
+        &self,
+        exporter: Arc<Exporter>,
+        trace: Arc<Trace>,
+    ) -> Result<(), Box<dyn Error>> {
+        let data = exporter.profile(trace.desc(), false)?;
+        trace.push(data)?;
 
         Ok(())
     }
@@ -259,7 +313,7 @@ impl ProxyScraper {
 
         log::debug!("Scraping {}", self.target_url);
 
-        match self.ttype {
+        match &self.ttype {
             ScraperType::Proxy => {
                 self.scrape_proxy()?;
             }
@@ -268,6 +322,9 @@ impl ProxyScraper {
             }
             ScraperType::SystemMetrics { .. } => {
                 self.scrape_system_metrics()?;
+            }
+            ScraperType::Trace { exporter, trace } => {
+                self.scrape_trace(exporter.clone(), trace.clone())?;
             }
         }
 

@@ -560,6 +560,13 @@ impl CounterSnapshot {
     fn delta(&mut self, other: &CounterSnapshot) -> Result<(), ProxyErr> {
         self.ctype.delta(&other.ctype)
     }
+
+    pub(crate) fn value(&self) -> CounterValue {
+        CounterValue {
+            name: self.name.to_string(),
+            value: self.ctype.clone(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

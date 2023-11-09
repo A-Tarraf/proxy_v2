@@ -11,6 +11,7 @@ use crate::proxywireprotocol::{
 };
 
 use crate::profiles::ProfileView;
+use crate::trace::{Trace, TraceView};
 
 use super::proxy_common::{hostname, ProxyErr};
 
@@ -171,7 +172,7 @@ impl ExporterEntryGroup {
 }
 
 /// An exporter is the central metric storage structure
-/// It holds a hasmap of ExporterEntryGroup which themselves
+/// It holds a hashmap of ExporterEntryGroup which themselves
 /// store the various counter values.
 ///
 /// It is also host for the alarms which are applied to the
@@ -376,6 +377,7 @@ pub(crate) struct ExporterFactory {
     /// Instance of the profile manager
     /// in charge of listing and loading profiles
     pub profile_store: Arc<ProfileView>,
+    pub trace_store: Arc<TraceView>,
     /// Sets this Proxy as aggregator meaning that it
     /// is in charge of storing profiles
     /// the -i option to the proxy sets this to false
@@ -471,13 +473,54 @@ impl ExporterFactory {
         }
     }
 
-    pub(crate) fn new(profile_prefix: PathBuf, aggregate: bool) -> Arc<ExporterFactory> {
+    pub(crate) fn new(
+        profile_prefix: PathBuf,
+        aggregate: bool,
+    ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
+        let main_jobdesc = JobDesc {
+            jobid: "main".to_string(),
+            command: "Sum of all Jobs".to_string(),
+            size: 0,
+            nodelist: "".to_string(),
+            partition: "".to_string(),
+            cluster: "".to_string(),
+            run_dir: "".to_string(),
+            start_time: 0,
+            end_time: 0,
+        };
+
+        let nodejob_desc = JobDesc {
+            jobid: format!("Node: {}", hostname()),
+            command: format!("Sum of all Jobs running on {}", hostname()),
+            size: 0,
+            nodelist: hostname(),
+            partition: "".to_string(),
+            cluster: "".to_string(),
+            run_dir: "".to_string(),
+            start_time: 0,
+            end_time: 0,
+        };
+
+        let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
+
+        let (main_job_trace, node_job_trace) = if aggregate {
+            trace_store.clear(&main_jobdesc)?;
+            trace_store.clear(&nodejob_desc)?;
+            (
+                Some(trace_store.get(&main_jobdesc).unwrap()),
+                Some(trace_store.get(&nodejob_desc).unwrap()),
+            )
+        } else {
+            (None, None)
+        };
+
         let ret = Arc::new(ExporterFactory {
             main: Arc::new(Exporter::new()),
             pernode: Arc::new(Exporter::new()),
             perjob: Mutex::new(HashMap::new()),
             scrapes: Mutex::new(HashMap::new()),
-            profile_store: Arc::new(ProfileView::new(profile_prefix)),
+            profile_store: Arc::new(ProfileView::new(&profile_prefix)?),
+            trace_store,
             aggregator: aggregate,
         });
 
@@ -489,17 +532,7 @@ impl ExporterFactory {
 
         /* This creates a job entry for the cumulative job */
         let main_job = PerJobRefcount {
-            desc: JobDesc {
-                jobid: "main".to_string(),
-                command: "Sum of all Jobs".to_string(),
-                size: 0,
-                nodelist: "".to_string(),
-                partition: "".to_string(),
-                cluster: "".to_string(),
-                run_dir: "".to_string(),
-                start_time: 0,
-                end_time: 0,
-            },
+            desc: main_jobdesc,
             exporter: ret.main.clone(),
             counter: 1,
             islocal: false,
@@ -511,17 +544,7 @@ impl ExporterFactory {
 
         /* This creates a job entry for the pernode job */
         let node_job = PerJobRefcount {
-            desc: JobDesc {
-                jobid: format!("Node: {}", hostname()),
-                command: format!("Sum of all Jobs running on {}", hostname()),
-                size: 0,
-                nodelist: hostname(),
-                partition: "".to_string(),
-                cluster: "".to_string(),
-                run_dir: "".to_string(),
-                start_time: 0,
-                end_time: 0,
-            },
+            desc: nodejob_desc,
             exporter: ret.pernode.clone(),
             counter: 1,
             islocal: false,
@@ -537,7 +560,28 @@ impl ExporterFactory {
             ret.scrapes.lock().unwrap().insert(systemurl, sys_metrics);
         }
 
-        ret
+        /* Now insert tracing events */
+        ret.insert_tracing(ret.main.clone(), main_job_trace)?;
+        ret.insert_tracing(ret.pernode.clone(), node_job_trace)?;
+
+        Ok(ret)
+    }
+
+    fn insert_tracing(
+        &self,
+        exporter: Arc<Exporter>,
+        trace: Option<Arc<Trace>>,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Some(trace) = trace {
+            if let Ok(main_trace_scraper) = ProxyScraper::newtrace(exporter, trace) {
+                self.scrapes
+                    .lock()
+                    .unwrap()
+                    .insert(main_trace_scraper.url().to_string(), main_trace_scraper);
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) fn get_main(&self) -> Arc<Exporter> {
@@ -577,14 +621,25 @@ impl ExporterFactory {
             }
             None => {
                 log::debug!("Creating new job exporter for {}", &desc.jobid);
-                let new = PerJobRefcount {
+                let trace = if self.aggregator {
+                    self.trace_store.get(desc).ok()
+                } else {
+                    None
+                };
+
+                let new: PerJobRefcount = PerJobRefcount {
                     desc: desc.clone(),
                     exporter: Arc::new(Exporter::new()),
                     counter: 1,
                     islocal: tobesaved,
                 };
+
+                /* Add the trace scrapping */
+                self.insert_tracing(new.exporter.clone(), trace).unwrap();
+
                 let ret = new.exporter.clone();
                 ht.insert(desc.jobid.to_string(), new);
+
                 ret
             }
         };
@@ -641,6 +696,7 @@ impl ExporterFactory {
                     if self.aggregator {
                         let snap = perjob.exporter.profile(desc, false)?;
                         self.profile_store.saveprofile(snap, desc)?;
+                        self.trace_store.done(desc)?;
                     }
                     /* Delete */
                     ht.remove(&desc.jobid);

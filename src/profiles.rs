@@ -1,10 +1,9 @@
 use super::proxywireprotocol::{JobDesc, JobProfile};
-use crate::proxy_common::{create_dir_or_fail, list_files_with_ext_in};
+use crate::proxy_common::{check_prefix_dir, list_files_with_ext_in};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
-use std::process::exit;
 use std::sync::RwLock;
 
 pub(crate) struct ProfileView {
@@ -88,39 +87,12 @@ impl ProfileView {
         Ok(())
     }
 
-    fn check_profile_dir(path: &PathBuf) {
-        // Main directory
-        if !path.exists() {
-            create_dir_or_fail(path);
-        } else if !path.is_dir() {
-            log::error!(
-                "{} is not a directory cannot use it as per job profile prefix",
-                path.to_str().unwrap_or("")
-            );
-            exit(1);
-        }
+    pub(crate) fn new(profdir: &PathBuf) -> Result<ProfileView, Box<dyn Error>> {
+        let profdir = check_prefix_dir(profdir, "profiles")?;
 
-        // Profile subdirectory
-        let mut profile_dir = path.clone();
-        profile_dir.push("profiles");
-
-        if !profile_dir.exists() {
-            create_dir_or_fail(&profile_dir);
-        }
-    }
-
-    pub(crate) fn new(profdir: PathBuf) -> ProfileView {
-        ProfileView::check_profile_dir(&profdir);
-        let mut profdir = profdir.clone();
-        profdir.push("profiles");
-
-        if !profdir.is_dir() {
-            panic!("{} is not a directory", profdir.to_string_lossy());
-        }
-
-        ProfileView {
+        Ok(ProfileView {
             profdir,
             profiles: RwLock::new(HashMap::new()),
-        }
+        })
     }
 }
