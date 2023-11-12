@@ -155,6 +155,7 @@ impl TraceState {
             for c in buff.iter().take(len) {
                 current_offset += 1;
                 if *c == 0 {
+                    log::debug!("{:?}", data);
                     let frame: TraceFrame = serde_json::from_slice(&data)?;
                     return Ok((Some(frame), current_offset));
                 } else {
@@ -289,13 +290,18 @@ impl TraceState {
             current_counter_id: 0,
         };
 
-        let mut fd = ret.open(true)?;
+        let fd = ret.open(true)?;
 
         // First thing save the jobdesc
-        serde_json::to_writer(&fd, &job)?;
-        // And the first frame marker
-        let off = fd.stream_position()?;
-        fd.write_at(&[0x00], off)?;
+        let desc = TraceFrame::Desc {
+            ts: unix_ts(),
+            desc: job.clone(),
+        };
+
+        let mut json = serde_json::to_vec(&desc)?;
+        json.push(0x0);
+
+        fd.write_all_at(&json, 0)?;
 
         Ok(ret)
     }
