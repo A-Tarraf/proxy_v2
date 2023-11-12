@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, ProxyErr},
-    proxywireprotocol::{CounterSnapshot, CounterValue, JobDesc, JobProfile},
+    proxywireprotocol::{CounterSnapshot, CounterType, CounterValue, JobDesc, JobProfile},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -22,17 +22,58 @@ struct TraceHeader {
 }
 
 #[derive(Serialize, Deserialize)]
-struct TraceFrame {
-    ts: u64,
-    counters: Vec<CounterValue>,
+struct TraceCounter {
+    id: u64,
+    value: CounterType,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct TraceCounterMetadata {
+    id: u64,
+    name: String,
+    doc: String,
+}
+
+#[derive(Serialize, Deserialize)]
+enum TraceFrame {
+    Desc {
+        ts: u64,
+        desc: JobDesc,
+    },
+    CounterMetadata {
+        ts: u64,
+        metadata: TraceCounterMetadata,
+    },
+    Counters {
+        ts: u64,
+        counters: Vec<TraceCounter>,
+    },
+}
+
+impl TraceFrame {
+    fn ts(&self) -> u64 {
+        match *self {
+            TraceFrame::Desc { ts, desc: _ } => ts,
+            TraceFrame::CounterMetadata { ts, metadata: _ } => ts,
+            TraceFrame::Counters { ts, counters: _ } => ts,
+        }
+    }
+
+    fn desc(self) -> Result<JobDesc, ProxyErr> {
+        match self {
+            TraceFrame::Desc { ts: _, desc } => Ok(desc),
+            _ => Err(ProxyErr::new("Frame is not a jobdesc")),
+        }
+    }
 }
 
 #[allow(unused)]
 struct TraceState {
     size: u64,
-    lastprof: Option<Vec<CounterValue>>,
     lastwrite: u64,
     path: PathBuf,
+    counters: HashMap<String, TraceCounterMetadata>,
+    current_counter_id: u64,
 }
 
 impl TraceState {
@@ -56,8 +97,14 @@ impl TraceState {
     fn desc(&mut self) -> Result<JobDesc, Box<dyn Error>> {
         let mut fd = self.open(false)?;
         let (data, _) = Self::read_frame_at(&mut fd, 0)?;
-        let desc: JobDesc = serde_json::from_slice(&data)?;
-        Ok(desc)
+
+        if let Some(frame) = data {
+            return Ok(frame.desc()?);
+        }
+
+        Err(ProxyErr::newboxed(
+            "First frame of the trace is not a trace description",
+        ))
     }
 
     fn offset_of_last_frame_start(fd: &File) -> Result<u64, Box<dyn Error>> {
@@ -90,11 +137,10 @@ impl TraceState {
             return Ok(None);
         }
         let (data, _) = Self::read_frame_at(&mut fd, off + 1)?;
-        let frame: TraceFrame = serde_json::from_slice(&data)?;
-        Ok(Some(frame))
+        Ok(data)
     }
 
-    fn read_frame_at(fd: &mut File, off: u64) -> Result<(Vec<u8>, u64), Box<dyn Error>> {
+    fn read_frame_at(fd: &mut File, off: u64) -> Result<(Option<TraceFrame>, u64), Box<dyn Error>> {
         let mut data: Vec<u8> = Vec::new();
         let mut current_offset = off;
 
@@ -103,13 +149,14 @@ impl TraceState {
             let len = fd.read_at(&mut buff, current_offset)?;
 
             if len == 0 {
-                return Ok((data, current_offset));
+                return Ok((None, current_offset));
             }
 
             for c in buff.iter().take(len) {
                 current_offset += 1;
                 if *c == 0 {
-                    return Ok((data, current_offset));
+                    let frame: TraceFrame = serde_json::from_slice(&data)?;
+                    return Ok((Some(frame), current_offset));
                 } else {
                     data.push(*c);
                 }
@@ -117,21 +164,92 @@ impl TraceState {
         }
     }
 
-    fn push(&mut self, counters: Vec<CounterValue>) -> Result<(), Box<dyn Error>> {
-        let frame = TraceFrame {
+    fn check_counter(&mut self, counters: &Vec<CounterSnapshot>) -> Vec<TraceFrame> {
+        let mut ret: Vec<TraceFrame> = Vec::new();
+        for c in counters.iter() {
+            if !self.counters.contains_key(&c.name) {
+                let metadata = TraceCounterMetadata {
+                    id: self.current_counter_id,
+                    name: c.name.to_string(),
+                    doc: c.doc.to_string(),
+                };
+
+                self.current_counter_id += 1;
+
+                self.counters.insert(c.name.to_string(), metadata.clone());
+
+                let frame = TraceFrame::CounterMetadata {
+                    ts: unix_ts(),
+                    metadata,
+                };
+
+                ret.push(frame)
+            }
+        }
+        ret
+    }
+
+    fn counter_id(&self, counter: &CounterSnapshot) -> Option<u64> {
+        if let Some(c) = self.counters.get(&counter.name) {
+            return Some(c.id);
+        }
+
+        None
+    }
+
+    fn do_write_frame(fd: &mut File, frame: TraceFrame) -> Result<(), Box<dyn Error>> {
+        let mut buff: Vec<u8> = serde_json::to_vec(&frame)?;
+        buff.push(0x0);
+        let endoff: u64 = fd.stream_position()?;
+        fd.write_at(&buff, endoff)?;
+
+        Ok(())
+    }
+
+    fn write_frame(&self, frame: TraceFrame) -> Result<(), Box<dyn Error>> {
+        let mut fd = self.open(false)?;
+
+        Self::do_write_frame(&mut fd, frame)?;
+
+        Ok(())
+    }
+
+    fn write_frames(&mut self, frames: Vec<TraceFrame>) -> Result<(), Box<dyn Error>> {
+        if frames.is_empty() {
+            return Ok(());
+        }
+
+        let mut fd = self.open(false)?;
+
+        for f in frames {
+            Self::do_write_frame(&mut fd, f)?;
+        }
+
+        self.lastwrite = unix_ts();
+        self.size = fd.metadata()?.len();
+
+        Ok(())
+    }
+
+    fn push(&mut self, counters: Vec<CounterSnapshot>) -> Result<(), Box<dyn Error>> {
+        let new_counters: Vec<TraceFrame> = self.check_counter(&counters);
+
+        self.write_frames(new_counters)?;
+
+        let counters = counters
+            .iter()
+            .map(|v| TraceCounter {
+                id: self.counter_id(v).unwrap(),
+                value: v.ctype.clone(),
+            })
+            .collect();
+
+        let frame = TraceFrame::Counters {
             ts: unix_ts(),
             counters,
         };
 
-        let mut fd = self.open(false)?;
-
-        serde_json::to_writer(&fd, &frame)?;
-
-        let endoff = fd.stream_position()?;
-        fd.write_at(&[0x0], endoff)?;
-
-        self.lastwrite = unix_ts();
-        self.size = fd.metadata()?.len();
+        self.write_frame(frame)?;
 
         Ok(())
     }
@@ -142,30 +260,33 @@ impl TraceState {
         let mut fd = self.open(false)?;
 
         /* First frame is the desc */
-        let (mut data, mut current_offset) = Self::read_frame_at(&mut fd, 0)?;
-        let desc: JobDesc = serde_json::from_slice(&data)?;
+        let (mut frame, mut current_offset) = Self::read_frame_at(&mut fd, 0)?;
+
+        if frame.is_none() {
+            return Err(ProxyErr::newboxed("Failed to read first frame"));
+        }
+
+        let desc = frame.unwrap().desc()?;
 
         loop {
-            (data, current_offset) = Self::read_frame_at(&mut fd, current_offset)?;
+            (frame, current_offset) = Self::read_frame_at(&mut fd, current_offset)?;
 
-            if data.is_empty() {
+            if frame.is_none() {
                 return Ok((desc, frames));
             }
 
             /* Full frame */
-            let frame: TraceFrame = serde_json::from_slice(&data)?;
-            frames.push(frame);
-
-            data.clear();
+            frames.push(frame.unwrap());
         }
     }
 
     fn new(path: &Path, job: &JobDesc) -> Result<TraceState, Box<dyn Error>> {
         let ret = TraceState {
             size: 0,
-            lastprof: None,
             lastwrite: 0,
             path: path.to_path_buf(),
+            counters: HashMap::new(),
+            current_counter_id: 0,
         };
 
         let mut fd = ret.open(true)?;
@@ -182,17 +303,17 @@ impl TraceState {
     fn from(path: &Path) -> Result<TraceState, Box<dyn Error>> {
         let mut ret = TraceState {
             size: 0,
-            lastprof: None,
             lastwrite: 0,
             path: path.to_path_buf(),
+            counters: HashMap::new(),
+            current_counter_id: 0,
         };
         let lastframe = ret.read_last()?;
 
         ret.size = ret.len()?;
 
         if let Some(f) = lastframe {
-            ret.lastwrite = f.ts;
-            ret.lastprof = Some(f.counters)
+            ret.lastwrite = f.ts();
         }
 
         Ok(ret)
@@ -265,8 +386,7 @@ impl Trace {
             return Err(ProxyErr::newboxed("Job is done"));
         }
 
-        let values: Vec<CounterValue> = profile.counters.iter().map(|v| v.value()).collect();
-        self.state.lock().unwrap().push(values)?;
+        self.state.lock().unwrap().push(profile.counters)?;
 
         Ok(())
     }
@@ -336,6 +456,7 @@ impl TraceView {
         self.done(desc)?;
         let path = Trace::name(&self.prefix, desc);
         if path.is_file() {
+            log::error!("Removing {}", path.to_string_lossy());
             remove_file(path)?;
         }
         Ok(())
