@@ -1,15 +1,15 @@
 use std::{
-    borrow::BorrowMut,
     collections::HashMap,
     error::Error,
     fs::{remove_file, File, OpenOptions},
-    io::{Seek, SeekFrom},
+    io::Seek,
     os::unix::prelude::FileExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
 
 use serde::{Deserialize, Serialize};
+use serde_binary::binary_stream;
 
 use crate::{
     proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, ProxyErr},
@@ -144,9 +144,22 @@ impl TraceState {
         let mut data: Vec<u8> = Vec::new();
         let mut current_offset = off;
 
+        /* We expect an 8 bytes integer at the start */
+        let mut len_data: [u8; 8] = [0; 8];
+        fd.read_exact_at(&mut len_data, current_offset).unwrap();
+        current_offset += 8;
+
+        let mut left_to_read = u64::from_le_bytes(len_data);
+
         loop {
+            let block_size = if left_to_read < 1024 {
+                left_to_read as usize
+            } else {
+                1024
+            };
+
             let mut buff: [u8; 1024] = [0; 1024];
-            let len = fd.read_at(&mut buff, current_offset)?;
+            let len = fd.read_at(&mut buff[..block_size], current_offset).unwrap();
 
             if len == 0 {
                 return Ok((None, current_offset));
@@ -154,9 +167,10 @@ impl TraceState {
 
             for c in buff.iter().take(len) {
                 current_offset += 1;
-                if *c == 0 {
-                    log::debug!("{:?}", data);
-                    let frame: TraceFrame = serde_json::from_slice(&data)?;
+                left_to_read -= 1;
+                if left_to_read == 0 {
+                    let frame: TraceFrame =
+                        serde_binary::from_slice(&data, binary_stream::Endian::Little)?;
                     return Ok((Some(frame), current_offset));
                 } else {
                     data.push(*c);
@@ -199,9 +213,17 @@ impl TraceState {
     }
 
     fn do_write_frame(fd: &mut File, frame: TraceFrame) -> Result<(), Box<dyn Error>> {
-        let mut buff: Vec<u8> = serde_json::to_vec(&frame)?;
-        buff.push(0x0);
-        let endoff: u64 = fd.stream_position()?;
+        let buff: Vec<u8> = serde_binary::to_vec(&frame, binary_stream::Endian::Little)?;
+
+        // First write length
+        let len: u64 = buff.len() as u64;
+        let len = len.to_le_bytes();
+
+        let endoff = fd.stream_position()?;
+        fd.write_all_at(&len, endoff)?;
+
+        // And then write buff
+        let endoff = fd.stream_position()?;
         fd.write_at(&buff, endoff)?;
 
         Ok(())
