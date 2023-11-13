@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fs::{remove_file, File, OpenOptions},
-    io::Seek,
+    io::{Read, Seek},
     os::unix::prelude::FileExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
@@ -107,36 +107,40 @@ impl TraceState {
         ))
     }
 
-    fn offset_of_last_frame_start(fd: &File) -> Result<u64, Box<dyn Error>> {
-        /* We do -1 as we do not want the last NULL */
-        let mut position = fd.metadata()?.len() - 1;
+    fn offset_of_last_frame_start(fd: &mut File) -> Result<u64, Box<dyn Error>> {
+        let total_size = fd.metadata()?.len();
+        let mut offset = 0;
+        loop {
+            let mut size: [u8; 8] = [0; 8];
+            fd.read_exact_at(&mut size, offset).unwrap();
+            let size = u64::from_le_bytes(size);
 
-        while position > 0 {
-            let read_size = std::cmp::min(1024, position) as usize;
-            let mut buffer = vec![0; read_size];
+            offset += 8;
 
-            position -= read_size as u64;
-
-            fd.read_exact_at(&mut buffer, position)?;
-
-            if let Some(idx) = buffer.iter().rposition(|&b| b == 0) {
-                return Ok(position + idx as u64);
+            match (offset + size).cmp(&total_size) {
+                std::cmp::Ordering::Equal => {
+                    return Ok(offset - 8);
+                }
+                std::cmp::Ordering::Greater => {
+                    return Err(ProxyErr::newboxed(
+                        "Overrun of the file when scanning for EOF",
+                    ));
+                }
+                _ => {}
             }
-        }
 
-        Err(ProxyErr::newboxed(
-            "No null found in tracefile when scanning for last frame",
-        ))
+            offset += size;
+        }
     }
 
     fn read_last(&mut self) -> Result<Option<TraceFrame>, Box<dyn Error>> {
         let mut fd = self.open(false)?;
-        let off = Self::offset_of_last_frame_start(&fd)?;
+        let off = Self::offset_of_last_frame_start(&mut fd)?;
         if off == (fd.metadata()?.len() - 1) {
             /* This is an empty frame */
             return Ok(None);
         }
-        let (data, _) = Self::read_frame_at(&mut fd, off + 1)?;
+        let (data, _) = Self::read_frame_at(&mut fd, off)?;
         Ok(data)
     }
 
@@ -146,7 +150,10 @@ impl TraceState {
 
         /* We expect an 8 bytes integer at the start */
         let mut len_data: [u8; 8] = [0; 8];
-        fd.read_exact_at(&mut len_data, current_offset).unwrap();
+        if fd.read_at(&mut len_data, current_offset)? == 0 {
+            /* EOF */
+            return Ok((None, current_offset));
+        }
         current_offset += 8;
 
         let mut left_to_read = u64::from_le_bytes(len_data);
@@ -159,21 +166,18 @@ impl TraceState {
             };
 
             let mut buff: [u8; 1024] = [0; 1024];
-            let len = fd.read_at(&mut buff[..block_size], current_offset).unwrap();
-
-            if len == 0 {
-                return Ok((None, current_offset));
-            }
+            let len = fd.read_at(&mut buff[..block_size], current_offset)?;
 
             for c in buff.iter().take(len) {
                 current_offset += 1;
                 left_to_read -= 1;
+
+                data.push(*c);
+
                 if left_to_read == 0 {
                     let frame: TraceFrame =
                         serde_binary::from_slice(&data, binary_stream::Endian::Little)?;
                     return Ok((Some(frame), current_offset));
-                } else {
-                    data.push(*c);
                 }
             }
         }
@@ -312,7 +316,7 @@ impl TraceState {
             current_counter_id: 0,
         };
 
-        let fd = ret.open(true)?;
+        let mut fd = ret.open(true)?;
 
         // First thing save the jobdesc
         let desc = TraceFrame::Desc {
@@ -320,10 +324,7 @@ impl TraceState {
             desc: job.clone(),
         };
 
-        let mut json = serde_json::to_vec(&desc)?;
-        json.push(0x0);
-
-        fd.write_all_at(&json, 0)?;
+        TraceState::do_write_frame(&mut fd, desc)?;
 
         Ok(ret)
     }
