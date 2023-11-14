@@ -307,8 +307,9 @@ impl Web {
     }
 
     fn handle_traceread(&self, req: &Request) -> WebResponse {
+        let filter = req.get_param("filter");
         if let Some(jobid) = req.get_param("job") {
-            match self.factory.trace_store.read(jobid, None) {
+            match self.factory.trace_store.read(jobid, filter) {
                 Ok(data) => {
                     return WebResponse::Native(Response::json(&data));
                 }

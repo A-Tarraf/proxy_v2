@@ -21,7 +21,7 @@ struct TraceHeader {
     desc: JobDesc,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct TraceCounter {
     id: u64,
     value: CounterType,
@@ -34,7 +34,7 @@ struct TraceCounterMetadata {
     doc: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 enum TraceFrame {
     Desc {
         ts: u64,
@@ -500,6 +500,37 @@ impl TraceView {
 
         if let Some(trace) = ht.get(&jobid) {
             let (_, frames) = trace.state.lock().unwrap().read_all()?;
+
+            let frames = if let Some(filter) = filter {
+                let mut tmp_frames: Vec<TraceFrame> = Vec::new();
+                let mut filter_id: Option<u64> = None;
+
+                for f in frames.iter() {
+                    match f {
+                        TraceFrame::CounterMetadata { ts: _, metadata } => {
+                            if metadata.name == filter {
+                                tmp_frames.push(f.clone());
+                                filter_id = Some(metadata.id);
+                            }
+                        }
+                        TraceFrame::Desc { ts: _, desc: _ } => {}
+                        TraceFrame::Counters { ts, counters } => {
+                            if let Some(id) = filter_id {
+                                let counters: Vec<TraceCounter> =
+                                    counters.iter().filter(|v| v.id == id).cloned().collect();
+                                if !counters.is_empty() {
+                                    let counterframe = TraceFrame::Counters { ts: *ts, counters };
+                                    tmp_frames.push(counterframe);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                tmp_frames
+            } else {
+                frames
+            };
 
             return Ok(TraceRead {
                 info: TraceInfo::new(trace),
