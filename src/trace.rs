@@ -541,6 +541,41 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
+    pub(crate) fn plot(
+        &self,
+        jobid: String,
+        filter: Option<String>,
+    ) -> Result<Vec<(u64, f64)>, ProxyErr> {
+        let trace = self.read(jobid, filter)?;
+
+        let mut ret: Vec<(u64, f64)> = Vec::new();
+
+        for f in trace.frames.iter() {
+            match f {
+                TraceFrame::Counters { ts, counters } => {
+                    for c in counters {
+                        match c.value {
+                            CounterType::Counter { value } => {
+                                ret.push((*ts, value));
+                            }
+                            CounterType::Gauge {
+                                min: _,
+                                max: _,
+                                hits,
+                                total,
+                            } => {
+                                ret.push((*ts, total / hits));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(ret)
+    }
+
     pub(crate) fn get(&self, jobdesc: &JobDesc) -> Result<Arc<Trace>, Box<dyn Error>> {
         let mut ht = self.traces.write().unwrap();
 
