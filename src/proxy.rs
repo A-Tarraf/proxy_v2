@@ -84,7 +84,7 @@ impl UnixProxy {
             if len == 0 {
                 break;
             }
-
+            //Check Buffread
             for c in buff.iter().take(len) {
                 if *c == 0 {
                     /* Full command */

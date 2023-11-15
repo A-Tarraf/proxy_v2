@@ -115,7 +115,7 @@ impl ProxyScraper {
             target_url: format!("/trace.{}", trace.desc().jobid),
             state: HashMap::new(),
             factory: None,
-            period: 1,
+            period: 1000,
             last_scrape: 0,
             ttype: ScraperType::Trace { exporter, trace },
         })
@@ -302,7 +302,7 @@ impl ProxyScraper {
         let data = exporter.profile(trace.desc(), false)?;
         if let Some(new_sampling) = trace.push(data, self.period)? {
             log::info!(
-                "Lowering sampling period for {} to {}",
+                "Lowering sampling period for {} to {} ms",
                 trace.path(),
                 new_sampling
             );

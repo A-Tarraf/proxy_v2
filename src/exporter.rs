@@ -407,7 +407,7 @@ impl ExporterFactory {
                 self.scrapes.lock().unwrap().remove(&k);
             }
 
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_millis(500));
         }
     }
 
