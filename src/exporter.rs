@@ -377,11 +377,14 @@ pub(crate) struct ExporterFactory {
     /// Instance of the profile manager
     /// in charge of listing and loading profiles
     pub profile_store: Arc<ProfileView>,
-    pub trace_store: Arc<TraceView>,
     /// Sets this Proxy as aggregator meaning that it
     /// is in charge of storing profiles
     /// the -i option to the proxy sets this to false
     aggregator: bool,
+    /// Max trace size defines
+    max_trace_size: usize,
+    /// This is where the traces are stored
+    pub trace_store: Arc<TraceView>,
 }
 
 impl ExporterFactory {
@@ -476,6 +479,7 @@ impl ExporterFactory {
     pub(crate) fn new(
         profile_prefix: PathBuf,
         aggregate: bool,
+        max_trace_size: usize,
     ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
         let main_jobdesc = JobDesc {
             jobid: "main".to_string(),
@@ -507,8 +511,8 @@ impl ExporterFactory {
             trace_store.clear(&main_jobdesc)?;
             trace_store.clear(&nodejob_desc)?;
             (
-                Some(trace_store.get(&main_jobdesc).unwrap()),
-                Some(trace_store.get(&nodejob_desc).unwrap()),
+                Some(trace_store.get(&main_jobdesc, max_trace_size).unwrap()),
+                Some(trace_store.get(&nodejob_desc, max_trace_size).unwrap()),
             )
         } else {
             (None, None)
@@ -522,6 +526,7 @@ impl ExporterFactory {
             profile_store: Arc::new(ProfileView::new(&profile_prefix)?),
             trace_store,
             aggregator: aggregate,
+            max_trace_size,
         });
 
         let scrape_ref = ret.clone();
@@ -622,7 +627,7 @@ impl ExporterFactory {
             None => {
                 log::debug!("Creating new job exporter for {}", &desc.jobid);
                 let trace = if self.aggregator {
-                    self.trace_store.get(desc).ok()
+                    self.trace_store.get(desc, self.max_trace_size).ok()
                 } else {
                     None
                 };

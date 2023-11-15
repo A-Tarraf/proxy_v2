@@ -498,7 +498,7 @@ impl fmt::Display for CounterSnapshot {
     }
 }
 
-fn min_f64(a: f64, b: f64) -> f64 {
+pub fn min_f64(a: f64, b: f64) -> f64 {
     if a < b {
         a
     } else {
@@ -506,7 +506,7 @@ fn min_f64(a: f64, b: f64) -> f64 {
     }
 }
 
-fn max_f64(a: f64, b: f64) -> f64 {
+pub fn max_f64(a: f64, b: f64) -> f64 {
     if a < b {
         b
     } else {

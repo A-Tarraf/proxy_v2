@@ -47,6 +47,10 @@ struct Args {
     /// Address of the proxy to pivot on to build a proxy tree
     #[arg(short, long)]
     root_proxy: Option<String>,
+
+    /// Maximum trace size to maintain in the file-system in MB
+    #[arg(short, long)]
+    max_trace_size: Option<f64>,
 }
 
 fn parse_period(arg: &String) -> (String, u64) {
@@ -76,8 +80,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut profile_prefix = dirs::home_dir().unwrap();
     profile_prefix.push(".proxyprofiles");
 
+    let max_trace_size = if let Some(max_size) = args.max_trace_size {
+        max_size * 1024.0 * 1024.0
+    } else {
+        // Default is 32 Mb
+        1024.0 * 1024.0 * 32.0
+    };
+
+    log::info!(
+        "Max trace size is {} MB",
+        max_trace_size / (1024.0 * 1024.0)
+    );
+
     // The central storage is the exporter
-    let factory = ExporterFactory::new(profile_prefix, !args.inhibit_profile_agreggation)?;
+    let factory = ExporterFactory::new(
+        profile_prefix,
+        !args.inhibit_profile_agreggation,
+        max_trace_size as usize,
+    )?;
 
     if let Some(urls) = args.sub_proxies {
         for url in urls.iter() {

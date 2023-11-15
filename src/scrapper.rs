@@ -295,12 +295,19 @@ impl ProxyScraper {
     }
 
     fn scrape_trace(
-        &self,
+        &mut self,
         exporter: Arc<Exporter>,
         trace: Arc<Trace>,
     ) -> Result<(), Box<dyn Error>> {
         let data = exporter.profile(trace.desc(), false)?;
-        trace.push(data)?;
+        if let Some(new_sampling) = trace.push(data, self.period)? {
+            log::info!(
+                "Lowering sampling period for {} to {}",
+                trace.path(),
+                new_sampling
+            );
+            self.period = new_sampling;
+        }
 
         Ok(())
     }
