@@ -1,3 +1,4 @@
+use crate::proxy_common::ProxyErr;
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType};
 use crate::{
     exporter::{Exporter, ExporterFactory},
@@ -543,6 +544,26 @@ impl Web {
         WebResponse::BadReq("A GET parameter jobid must be passed".to_string())
     }
 
+    fn handle_jsonl(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            // First assume it is a profile
+            let prof = if let Ok(prof) = self.factory.profile_store.get_profile(&jobid) {
+                /* Found */
+                prof
+            } else if let Ok(prof) = self.factory.profile_of(&jobid, false) {
+                prof
+            } else {
+                return WebResponse::BadReq("No such jobid".to_string());
+            };
+
+            if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&prof.desc) {
+                return WebResponse::Native(Response::text(jsonl));
+            }
+            return WebResponse::BadReq(format!("Failed to get {}", jobid));
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
     fn handle_list_profiles_per_cmd(&self, _: &Request) -> WebResponse {
         if let Err(e) = self.factory.profile_store.refresh_profiles() {
             return WebResponse::BadReq(format!("Failed to refresh profiles : {}", e));
@@ -647,6 +668,7 @@ impl Web {
                     "" => self.handle_list_profiles(request),
                     "get" => self.handle_get_profiles(request),
                     "percmd" => self.handle_list_profiles_per_cmd(request),
+                    "extrap" => self.handle_jsonl(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

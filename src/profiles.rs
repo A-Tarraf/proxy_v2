@@ -1,9 +1,10 @@
 use super::proxywireprotocol::{JobDesc, JobProfile};
 use crate::extrap::ExtrapModel;
-use crate::proxy_common::{check_prefix_dir, list_files_with_ext_in};
+use crate::proxy_common::{check_prefix_dir, list_files_with_ext_in, ProxyErr};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -19,10 +20,35 @@ impl ProfileView {
         Ok(content)
     }
 
+    fn extrap_filename(&self, desc: &JobDesc) -> Option<PathBuf> {
+        let digest = md5::compute(&desc.command);
+        let mut path = self.profdir.clone();
+        path.push(format!("{:x}.jsonl", digest));
+
+        if path.is_file() {
+            return Some(path.to_path_buf());
+        }
+
+        None
+    }
+
     pub(crate) fn get_profile(&self, jobid: &String) -> Result<JobProfile, Box<dyn Error>> {
         let mut path = self.profdir.clone();
         path.push(format!("{}.profile", jobid));
         ProfileView::_get_profile(&path.to_string_lossy().to_string())
+    }
+
+    pub(crate) fn get_jsonl(&self, desc: &JobDesc) -> Result<String, Box<dyn Error>> {
+        if let Some(path) = self.extrap_filename(desc) {
+            let mut fd = fs::File::open(path)?;
+            let mut data: Vec<u8> = Vec::new();
+            fd.read_to_end(&mut data)?;
+
+            let data = String::from_utf8(data)?;
+            return Ok(data);
+        } else {
+            return Err(ProxyErr::newboxed("No model for this profile"));
+        }
     }
 
     pub(crate) fn refresh_profiles(&self) -> Result<(), Box<dyn Error>> {
