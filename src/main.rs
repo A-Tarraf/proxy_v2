@@ -14,6 +14,7 @@ use proxy::UnixProxy;
 mod webserver;
 use webserver::Web;
 
+mod extrap;
 mod profiles;
 mod proxywireprotocol;
 mod scrapper;

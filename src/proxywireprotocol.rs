@@ -567,6 +567,18 @@ impl CounterSnapshot {
             value: self.ctype.clone(),
         }
     }
+
+    pub(crate) fn float_value(&self) -> f64 {
+        match self.ctype {
+            CounterType::Counter { value } => value,
+            CounterType::Gauge {
+                min: _,
+                max: _,
+                hits,
+                total,
+            } => total / hits,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -640,6 +652,26 @@ impl JobProfile {
         self.counters = map.values().cloned().collect();
 
         Ok(())
+    }
+
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        for c in self.counters.iter() {
+            if c.name == name {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub(crate) fn get(&self, name: &String) -> Option<CounterSnapshot> {
+        for c in self.counters.iter() {
+            if c.name == *name {
+                return Some(c.clone());
+            }
+        }
+
+        None
     }
 }
 

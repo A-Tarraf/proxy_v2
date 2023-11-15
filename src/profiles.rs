@@ -1,4 +1,5 @@
 use super::proxywireprotocol::{JobDesc, JobProfile};
+use crate::extrap::ExtrapModel;
 use crate::proxy_common::{check_prefix_dir, list_files_with_ext_in};
 use std::collections::HashMap;
 use std::error::Error;
@@ -63,6 +64,29 @@ impl ProfileView {
             .collect()
     }
 
+    fn generate_extrap_model(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
+        self.refresh_profiles()?;
+        let gather_by_cmd = self.gather_by_command();
+
+        if let Some(myjob) = gather_by_cmd.get(&desc.command) {
+            let profiles: Vec<JobProfile> = myjob
+                .iter()
+                .filter_map(|v| self.get_profile(&v.jobid).ok())
+                .collect();
+
+            let model = ExtrapModel::new(profiles);
+
+            let cmd_hash = md5::compute(&desc.command);
+
+            let mut target_dir = self.profdir.clone();
+            let fname = format!("{:x}.jsonl", cmd_hash);
+            target_dir.push(fname);
+            model.serialize(target_dir)?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn saveprofile(
         &self,
         snap: JobProfile,
@@ -83,6 +107,8 @@ impl ProfileView {
         let file = fs::File::create(target_dir)?;
 
         serde_json::to_writer(file, &snap)?;
+
+        self.generate_extrap_model(desc)?;
 
         Ok(())
     }
