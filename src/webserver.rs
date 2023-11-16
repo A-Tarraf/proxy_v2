@@ -322,14 +322,48 @@ impl Web {
         WebResponse::BadReq("No job GET parameter passed".to_string())
     }
 
+    fn handle_tracemetrics(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("job") {
+            match self.factory.trace_store.metrics(jobid) {
+                Ok(data) => {
+                    return WebResponse::Native(Response::json(&data));
+                }
+                Err(e) => {
+                    return WebResponse::BadReq(format!("Failed to generate data {}", e));
+                }
+            }
+        }
+        WebResponse::BadReq("No job GET parameter passed".to_string())
+    }
+
     fn handle_traceplot(&self, req: &Request) -> WebResponse {
-        let filter = req.get_param("filter");
+        #[derive(Deserialize)]
+        struct Plotdef {
+            jobid: String,
+            filter: String,
+        }
+
+        let (jobid, filter) = match req.method() {
+            "GET" => (req.get_param("jobid"), req.get_param("filter")),
+            "POST" => {
+                let sel: Result<Plotdef, JsonError> = rouille::input::json_input(req);
+                match sel {
+                    Ok(e) => (Some(e.jobid), Some(e.filter)),
+                    Err(_) => {
+                        return WebResponse::BadReq(
+                            "Failed to parse plot POST request".to_string(),
+                        );
+                    }
+                }
+            }
+            _ => (None, None),
+        };
 
         if filter.is_none() {
             return WebResponse::BadReq("No filter GET parameter passed".to_string());
         }
 
-        if let Some(jobid) = req.get_param("job") {
+        if let Some(jobid) = jobid {
             match self.factory.trace_store.plot(jobid, filter) {
                 Ok(data) => {
                     return WebResponse::Native(Response::json(&data));
@@ -667,6 +701,7 @@ impl Web {
                     "list" => self.handle_tracelist(request),
                     "read" => self.handle_traceread(request),
                     "plot" => self.handle_traceplot(request),
+                    "metrics" => self.handle_tracemetrics(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "profiles" => match resource.as_str() {

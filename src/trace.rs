@@ -667,6 +667,22 @@ impl TraceView {
         Ok(())
     }
 
+    pub(crate) fn metrics(&self, jobid: String) -> Result<Vec<String>, ProxyErr> {
+        let metrics = self.read(jobid, None)?;
+
+        let metrics: Vec<String> = metrics
+            .frames
+            .iter()
+            .filter(|v| v.is_metadata())
+            .map(|v| match v {
+                TraceFrame::CounterMetadata { ts: _, metadata } => metadata.name.to_string(),
+                _ => unreachable!(),
+            })
+            .collect();
+
+        Ok(metrics)
+    }
+
     pub(crate) fn read(
         &self,
         jobid: String,

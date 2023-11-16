@@ -1,0 +1,203 @@
+<main>
+    <section>
+        <h2>Create New Alarm</h2>
+        <form id="traceSelect">
+            <label for="target">Target:</label>
+            <select id="target" name="target" required>
+                <!-- Options for selecting the target will be added dynamically using JavaScript -->
+            </select><br><br>
+
+            <label for="metric">Metric:</label>
+            <select id="metric" name="metric" required>
+                <!-- Options for selecting the metric will be added dynamically using JavaScript -->
+            </select><br><br>
+
+            <input type="submit" value="Add Plot">
+        </form>
+    </section>
+    <section>
+        <h2>Visualizations</h2>
+
+        <!-- Active Alarms -->
+        <canvas id="myChart"></canvas>
+
+    </section>
+
+    <script src="/chart.js"></script>
+
+
+    <script>
+        // Function to populate the Metric select element based on the selected Target
+        async function populateMetricSelect() {
+            const targetSelect = document.getElementById('target');
+            const metricSelect = document.getElementById('metric');
+            const selectedTarget = targetSelect.value;
+
+            // Clear existing options
+            metricSelect.innerHTML = '';
+
+            try {
+                const response = await fetch("/trace/metrics?job=" + selectedTarget);
+                if (response.ok) {
+                    const data = await response.json();
+
+                    for (const v of data) {
+                        const option = document.createElement('option');
+                        option.value = v;
+                        option.text = v;
+                        metricSelect.appendChild(option);
+                    }
+                } else {
+                    console.error(`Failed to fetch data from ${endpoint}`);
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        async function populateJobSelect() {
+            // Fetch data from the /job endpoint
+            fetch('/trace/list')  // Replace with the actual endpoint URL
+                .then(response => response.json())
+                .then(data => {
+                    const comboBox = document.getElementById('target');
+                    data.forEach(item => {
+                        // Create an option element for each "jobid"
+                        const option = document.createElement('option');
+                        option.value = item.desc.jobid;
+                        option.textContent = item.desc.jobid;
+                        comboBox.appendChild(option);
+                    });
+
+                    // Set the value to the first option
+                    comboBox.value = comboBox.options[0].value;
+                    // Create a new event
+                    const event = new Event('change');
+                    // Dispatch the event to trigger the event listener
+                    comboBox.dispatchEvent(event);
+                })
+                .catch(error => console.error('Error fetching data:', error));
+        }
+
+
+        function update_data(chart) {
+
+
+            const target = document.getElementById('target').value;
+            const metric = document.getElementById('metric').value;
+            // Create the JSON request object
+            const request = {
+                jobid: target,
+                filter: metric,
+            };
+
+            // Send the request using fetch
+            fetch('/trace/plot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request)
+            }).then(response => response.json())
+                .then(data => {
+                    // Handle the response as needed
+                    console.log(data);
+
+
+                    let labels = [];
+                    let datapoint = [];
+
+                    data.forEach(function (v) {
+                        labels.push(v[0]);
+                        datapoint.push(v[1]);
+                    });
+
+
+                    chart.data.labels = labels;
+                    chart.data.datasets[0].data = datapoint;
+                    chart.data.datasets[0].label = metric;
+                    chart.update();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+
+        }
+
+        document.getElementById('traceSelect').addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            const target = document.getElementById('target').value;
+            const metric = document.getElementById('metric').value;
+            // Create the JSON request object
+            const request = {
+                jobid: target,
+                filter: metric,
+            };
+
+            // Send the request using fetch
+            fetch('/trace/plot', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(request)
+            }).then(response => response.json())
+                .then(data => {
+                    // Handle the response as needed
+                    console.log(data);
+
+                    const ctx = document.getElementById('myChart');
+
+
+                    let labels = [];
+                    let datapoint = [];
+
+                    data.forEach(function (v) {
+                        labels.push(v[0]);
+                        datapoint.push(v[1]);
+                    });
+
+                    let chart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: metric,
+                                data: datapoint,
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    });
+
+
+                    setInterval(function () {
+                        update_data(chart);
+                    }, 500);
+
+
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+
+        });
+
+        // Event listener to populate the Metric select element when the Target changes
+        document.getElementById('target').addEventListener('change', populateMetricSelect);
+
+        // Initialize the Metric select options based on the default Target
+        populateJobSelect();
+
+
+        //        setInterval(function () {
+        //       }, 1000);
+    </script>
+</main>
