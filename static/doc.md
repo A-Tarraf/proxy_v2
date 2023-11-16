@@ -269,3 +269,71 @@ It consists in such JSON:
 			"last_scrape": 1699010032
 		}
 	]
+
+## Trace Interface
+
+### Listing Available Traces 
+
+You can get a list of available traces using [http://localhost:1337/trace/list](http://localhost:1337/trace/list):
+
+Format is the following:
+```
+[
+ {
+    "desc": {
+      "jobid": "1957560321",
+      "command": " ./app1 ",
+      "size": 15,
+      "nodelist": "",
+      "partition": "",
+      "cluster": "",
+      "run_dir": "/home/jbbesnard",
+      "start_time": 1700152180,
+      "end_time": 1700152218
+    },
+    "size": 164886,
+    "lastwrite": 1700152218
+  }
+]
+```
+
+### Listing Metrics in a Trace
+
+You can scan a trace to list all the metrics it contains by doing [http://localhost:1337/trace/list?jobid=main](http://localhost:1337/trace/metrics?jobid=main)
+
+With the following output:
+```
+[
+  "proxy_disk_usage_percent{kind=\"SSD\",device=\"/dev/sda2\",fs=\"ext4\",mountpoint=\"/\"}",
+  "proxy_disk_usage_percent{kind=\"SSD\",device=\"/dev/sda1\",fs=\"vfat\",mountpoint=\"/boot/efi\"}",
+  "proxy_scrape_total{os=\"Debian GNU/Linux\",osversion=\"11\",kernel=\"5.10.0-26-amd64\",hostname=\"aldebaran\"}",
+  "proxy_swap_total_bytes",
+  "proxy_swap_used_bytes",
+  (...)
+]
+```
+
+### Getting Data from a Trace
+
+You can extract a time serie from the trace using for example:
+[http://127.0.0.1:1337/trace/plot/?jobid=main&filter=proxy_cpu_load_average_percent](http://127.0.0.1:1337/trace/plot/?jobid=main&filter=proxy_cpu_load_average_percent) note that by design if the data-point does not change, the value is not stored.
+
+This yields a time serie as:
+
+```
+[
+  [
+    1700173584,
+    44.671379804611206
+  ],
+  [
+    1700173586,
+    39.711349964141846
+  ]
+  (...)
+]
+```
+
+X axis is the UNIX timestamp and Y axis is the counter value.
+
+

@@ -3,8 +3,10 @@
         <h2 id="listing-jobs">Listing Jobs</h2>
         <p>Job management offers the following endpoints:</p>
         <ul>
-        <li><p>A list of current jobs and their metadata at <a href="http://127.0.0.1:1337/job/list">http://127.0.0.1:1337/job/list</a></p>
-        <pre><code>  [
+            <li>
+                <p>A list of current jobs and their metadata at <a
+                        href="http://127.0.0.1:1337/job/list">http://127.0.0.1:1337/job/list</a></p>
+                <pre><code>  [
               {
                   &quot;jobid&quot;: &quot;main&quot;,
                   &quot;command&quot;: &quot;Sum of all Jobs&quot;,
@@ -27,9 +29,13 @@
                   &quot;start_time&quot;: 0,
                   &quot;end_time&quot;: 0
               }
-          ]</code></pre></li>
-        <li><p>A global view of all jobs all at once <a href="http://localhost:1337/job">http://localhost:1337/job</a> it includes <strong>all</strong> the data (metadata and counters)</p>
-        <pre><code>  [
+          ]</code></pre>
+            </li>
+            <li>
+                <p>A global view of all jobs all at once <a
+                        href="http://localhost:1337/job">http://localhost:1337/job</a> it includes <strong>all</strong>
+                    the data (metadata and counters)</p>
+                <pre><code>  [
           {
               &quot;desc&quot;: {
                   &quot;jobid&quot;: &quot;main&quot;,
@@ -83,16 +89,31 @@
                   ...
               ]
           }
-          ]</code></pre></li>
-        <li><p>A JSON export of jobs <a href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a> it filters only the job of interest instead of returning the full array of jobs. It extracts the jobfrom the array given by <a href="http://localhost:1337/job">http://localhost:1337/job</a> and has the same structure.</p></li>
-        <li><p>A prometheus export for each job <a href="http://localhost:1337/metrics/?job=testjob">http://localhost:1337/metrics/?job=testjob</a>. Note <a href="http://localhost:1337/metrics">http://localhost:1337/metrics</a> is the export of the main job and thus equivalent to <a href="http://localhost:1337/metrics/?job=main">http://localhost:1337/metrics/?job=main</a></p></li>
+          ]</code></pre>
+            </li>
+            <li>
+                <p>A JSON export of jobs <a
+                        href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a> it filters
+                    only the job of interest instead of returning the full array of jobs. It extracts the jobfrom the
+                    array given by <a href="http://localhost:1337/job">http://localhost:1337/job</a> and has the same
+                    structure.</p>
+            </li>
+            <li>
+                <p>A prometheus export for each job <a
+                        href="http://localhost:1337/metrics/?job=testjob">http://localhost:1337/metrics/?job=testjob</a>.
+                    Note <a href="http://localhost:1337/metrics">http://localhost:1337/metrics</a> is the export of the
+                    main job and thus equivalent to <a
+                        href="http://localhost:1337/metrics/?job=main">http://localhost:1337/metrics/?job=main</a></p>
+            </li>
         </ul>
         <h2 id="managing-alarms">Managing Alarms</h2>
         <p>See the <a href="/alarms.html">Alarm Example GUI</a> for reference.</p>
         <p>We propose the following endpoints for alarms:</p>
         <ul>
-        <li><p><a href="http://127.0.0.1:1337/alarms">http://127.0.0.1:1337/alarms</a> : list current raised alarms</p>
-        <pre><code>      {
+            <li>
+                <p><a href="http://127.0.0.1:1337/alarms">http://127.0.0.1:1337/alarms</a> : list current raised alarms
+                </p>
+                <pre><code>      {
               &quot;main&quot;: [
                   {
                   &quot;name&quot;: &quot;My Alarm&quot;,
@@ -105,9 +126,12 @@
                   &quot;pretty&quot;: &quot;My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 51.56660318374634 (Min: 51.56660318374634, Max : 51.56660318374634, Hits: 1, Total : 51.56660318374634) GAUGE &gt; 33&quot;
                   }
               ]
-              }</code></pre></li>
-        <li><p><a href="http://127.0.0.1:1337/alarms/list">http://127.0.0.1:1337/alarms/list</a> : list all registered alarms</p>
-        <pre><code>  {
+              }</code></pre>
+            </li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/alarms/list">http://127.0.0.1:1337/alarms/list</a> : list all
+                    registered alarms</p>
+                <pre><code>  {
           &quot;main&quot;: [
               {
               &quot;name&quot;: &quot;My Other Alarm&quot;,
@@ -130,103 +154,184 @@
               &quot;pretty&quot;: &quot;My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 6.246700286865234 (Min: 6.246700286865234, Max : 6.246700286865234, Hits: 1, Total : 6.246700286865234) GAUGE &gt; 33&quot;
               }
           ]
-          }</code></pre></li>
-        <li><p><a href="http://127.0.0.1:1337/alarms/add">http://127.0.0.1:1337/alarms/add</a> : add a new alarm</p>
-        <p>Takes a JSON object</p>
-        <pre><code>  {
+          }</code></pre>
+            </li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/alarms/add">http://127.0.0.1:1337/alarms/add</a> : add a new alarm</p>
+                <p>Takes a JSON object</p>
+                <pre><code>  {
               &quot;name&quot;: &quot;My Alarm&quot;,
               &quot;target&quot;: &quot;main&quot;,
               &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;,
               &quot;operation&quot;: &quot;&gt;&quot;,
               &quot;value&quot;: 33
           }</code></pre>
-        <p>You can make it with curl:</p>
-        <pre><code>  curl -s http://localhost:1337/alarms/add\
+                <p>You can make it with curl:</p>
+                <pre><code>  curl -s http://localhost:1337/alarms/add\
           -H &quot;Content-Type: application/json&quot; \
           -d &#39;{ &quot;name&quot;: &quot;My Alarm&quot;, &quot;target&quot;: &quot;main&quot;, &quot;metric&quot;: &quot;proxy_cpu_load_average_percent&quot;, &quot;operation&quot;: &quot;&gt;&quot;, &quot;value&quot;: 33 }&#39;</code></pre>
-        <p>Operation can be “&lt;” “&gt;” and “=” to w.r.t. value.</p></li>
-        <li><p><a href="http://127.0.0.1:1337/alarms/del">http://127.0.0.1:1337/alarms/del</a> : delete an existing alarm</p>
-        <ul>
-        <li><p>Using the GET protocol:</p>
-        <ul>
-        <li><strong>targetjob</strong> : name of the job</li>
-        <li><strong>name</strong> : name of the alarm</li>
-        </ul>
-        <p>Example with Curl</p>
-        <pre><code>  # Be careful with the &amp; in bash/sh
-          curl &quot;http://localhost:1337/alarms/del?targetjob=main&amp;name=My%20Alarm&quot;</code></pre></li>
-        <li><p>Using the POST protocol:</p>
-        <p>Send the following JSON:</p>
-        <pre><code>  {
+                <p>Operation can be “&lt;” “&gt;” and “=” to w.r.t. value.</p>
+            </li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/alarms/del">http://127.0.0.1:1337/alarms/del</a> : delete an existing
+                    alarm</p>
+                <ul>
+                    <li>
+                        <p>Using the GET protocol:</p>
+                        <ul>
+                            <li><strong>targetjob</strong> : name of the job</li>
+                            <li><strong>name</strong> : name of the alarm</li>
+                        </ul>
+                        <p>Example with Curl</p>
+                        <pre><code>  # Be careful with the &amp; in bash/sh
+          curl &quot;http://localhost:1337/alarms/del?targetjob=main&amp;name=My%20Alarm&quot;</code></pre>
+                    </li>
+                    <li>
+                        <p>Using the POST protocol:</p>
+                        <p>Send the following JSON:</p>
+                        <pre><code>  {
                   &quot;target&quot;: &quot;main&quot;,
                   &quot;name&quot;: &quot;My Alarm&quot;,
           }</code></pre>
-        <p>Example with Curl:</p>
-        <pre><code>  curl -s http://localhost:1337/alarms/del \
+                        <p>Example with Curl:</p>
+                        <pre><code>  curl -s http://localhost:1337/alarms/del \
           -H &quot;Content-Type: application/json&quot; \
-          -d &#39;{&quot;target&quot;: &quot;main&quot;, &quot;name&quot;: &quot;My Alarm&quot;}&#39;</code></pre></li>
-        </ul></li>
+          -d &#39;{&quot;target&quot;: &quot;main&quot;, &quot;name&quot;: &quot;My Alarm&quot;}&#39;</code></pre>
+                    </li>
+                </ul>
+            </li>
         </ul>
-<h2 id="scanning-finished-jobs-profiles">Scanning Finished Jobs (Profiles)</h2>
-<p>As exposed in the <a href="/profiles.html">example GUI</a>, for manipulating profiles (final snapshot of jobs) the folowing JSON endpoints are provided:</p>
-<ul>
-<li><p><a href="http://127.0.0.1:1337/profiles">http://127.0.0.1:1337/profiles</a> a list of profiles on the system, data layout is a job description as shown in <a href="http://127.0.0.1:1337/job/list">http://127.0.0.1:1337/job/list</a></p></li>
-<li><p><a href="http://127.0.0.1:1337/percmd">http://127.0.0.1:1337/percmd</a> a list of profiles gathered by launch command to ease procesing by command</p>
-<pre><code>  {
-  &quot;./command_a &quot;: [
-          {
-              &quot;jobid&quot;: &quot;test2&quot;,
-              &quot;command&quot;: &quot;./command_a &quot;,
-              &quot;size&quot;: 1,
-              &quot;nodelist&quot;: &quot;&quot;,
-              &quot;partition&quot;: &quot;&quot;,
-              &quot;cluster&quot;: &quot;&quot;,
-              &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
-              &quot;start_time&quot;: 1699020416,
-              &quot;end_time&quot;: 1699020421
-          }
-      ],
-  &quot;./command_b &quot;: [
-          {
-              &quot;jobid&quot;: &quot;test1&quot;,
-              &quot;command&quot;: &quot;./command_b &quot;,
-              &quot;size&quot;: 1,
-              &quot;nodelist&quot;: &quot;&quot;,
-              &quot;partition&quot;: &quot;&quot;,
-              &quot;cluster&quot;: &quot;&quot;,
-              &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
-              &quot;start_time&quot;: 1699020317,
-              &quot;end_time&quot;: 1699020398
-          }
-      ]
-  }</code></pre></li>
-<li><p><a href="http://127.0.0.1:1337/get?jobid=XXX">http://127.0.0.1:1337/get?jobid=XXX</a> allows to get a given profile, layout is identical to a job JSON snapshot as exposed in <a href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a>.</p></li>
-</ul>
-        <h2 id="adding-new-scrapes-using-join">Adding New Scrapes using /join</h2>
-        <p>It is possible to request a proxy to scrape a given target. Currently the following targets are supported:</p>
+        <h2 id="scanning-finished-jobs-profiles">Scanning Finished Jobs (Profiles)</h2>
+        <p>As exposed in the <a href="/profiles.html">example GUI</a>, for manipulating profiles (final snapshot of
+            jobs) the folowing JSON endpoints are provided:</p>
         <ul>
-        <li>Another proxy meaning you may pass the url to another proxy to have it collected by the current proxt</li>
-        <li>A prometheus exporter, meaning the <code>/metric</code> endpoint will be harvested, currently only counters and gauges are handled. In the case of prometheus scrapes, they are aggregated only in “main” and inside the “node” specific job.</li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/profiles">http://127.0.0.1:1337/profiles</a> a list of profiles on the
+                    system, data layout is a job description as shown in <a
+                        href="http://127.0.0.1:1337/joblist">http://127.0.0.1:1337/joblist</a></p>
+            </li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/percmd">http://127.0.0.1:1337/percmd</a> a list of profiles gathered
+                    by launch command to ease procesing by command</p>
+                <pre><code>  {
+          &quot;./command_a &quot;: [
+                  {
+                      &quot;jobid&quot;: &quot;test2&quot;,
+                      &quot;command&quot;: &quot;./command_a &quot;,
+                      &quot;size&quot;: 1,
+                      &quot;nodelist&quot;: &quot;&quot;,
+                      &quot;partition&quot;: &quot;&quot;,
+                      &quot;cluster&quot;: &quot;&quot;,
+                      &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
+                      &quot;start_time&quot;: 1699020416,
+                      &quot;end_time&quot;: 1699020421
+                  }
+              ],
+          &quot;./command_b &quot;: [
+                  {
+                      &quot;jobid&quot;: &quot;test1&quot;,
+                      &quot;command&quot;: &quot;./command_b &quot;,
+                      &quot;size&quot;: 1,
+                      &quot;nodelist&quot;: &quot;&quot;,
+                      &quot;partition&quot;: &quot;&quot;,
+                      &quot;cluster&quot;: &quot;&quot;,
+                      &quot;run_dir&quot;: &quot;/XXX/proxy_v2/client&quot;,
+                      &quot;start_time&quot;: 1699020317,
+                      &quot;end_time&quot;: 1699020398
+                  }
+              ]
+          }</code></pre>
+            </li>
+            <li>
+                <p><a href="http://127.0.0.1:1337/get?jobid=XXX">http://127.0.0.1:1337/get?jobid=XXX</a> allows to get a
+                    given profile, layout is identical to a job JSON snapshot as exposed in <a
+                        href="http://localhost:1337/job/?job=main">http://localhost:1337/job/?job=main</a>.</p>
+            </li>
+        </ul>
+        <h2 id="adding-new-scrapes-using-join">Adding New Scrapes using /join</h2>
+        <p>It is possible to request a proxy to scrape a given target. Currently the following targets are supported:
+        </p>
+        <ul>
+            <li>Another proxy meaning you may pass the url to another proxy to have it collected by the current proxt
+            </li>
+            <li>A prometheus exporter, meaning the <code>/metric</code> endpoint will be harvested, currently only
+                counters and gauges are handled. In the case of prometheus scrapes, they are aggregated only in “main”
+                and inside the “node” specific job.</li>
         </ul>
         <p>Only the GET requests are supported using the <code>to</code> argument, for example:</p>
-        <p><a href="http://localhost:1337/join?to=localhost:9100">http://localhost:1337/join?to=localhost:9100</a> will add the <a href="https://github.com/prometheus/node_exporter">node exporter</a> running on localhost (classically on <a href="http://localhost:9100">http://localhost:9100</a>) and the proxy is able to scrape such metrics.</p>        
-        <p>You can get the list of current scrapes at <a href="http://localhost:1337/join/list">http://localhost:1337/join/list</a></p>
+        <p><a href="http://localhost:1337/join?to=localhost:9100">http://localhost:1337/join?to=localhost:9100</a> will
+            add the <a href="https://github.com/prometheus/node_exporter">node exporter</a> running on localhost
+            (classically on <a href="http://localhost:9100">http://localhost:9100</a>) and the proxy is able to scrape
+            such metrics.</p>
+        <p>You can get the list of current scrapes at <a
+                href="http://localhost:1337/join/list">http://localhost:1337/join/list</a></p>
         <p>It consists in such JSON:</p>
-        <pre><code>
-        [
-        {
-            &quot;target_url&quot;: &quot;http://localhost:9100/metrics&quot;,
-            &quot;ttype&quot;: &quot;Prometheus&quot;,
-            &quot;period&quot;: 5,
-            &quot;last_scrape&quot;: 1699010032
-        },
-        {
-            &quot;target_url&quot;: &quot;/system&quot;,
-            &quot;ttype&quot;: &quot;System&quot;,
-            &quot;period&quot;: 5,
-            &quot;last_scrape&quot;: 1699010032
-        }
-        ]
-        </code></pre>
+        <pre><code>[
+            {
+                &quot;target_url&quot;: &quot;http://localhost:9100/metrics&quot;,
+                &quot;ttype&quot;: &quot;Prometheus&quot;,
+                &quot;period&quot;: 5,
+                &quot;last_scrape&quot;: 1699010032
+            },
+            {
+                &quot;target_url&quot;: &quot;/system&quot;,
+                &quot;ttype&quot;: &quot;System&quot;,
+                &quot;period&quot;: 5,
+                &quot;last_scrape&quot;: 1699010032
+            }
+        ]</code></pre>
+        <h2 id="trace-interface">Trace Interface</h2>
+        <h3 id="listing-available-traces">Listing Available Traces</h3>
+        <p>You can get a list of available traces using <a
+                href="http://localhost:1337/trace/list">http://localhost:1337/trace/list</a>:</p>
+        <p>Format is the following:</p>
+        <pre><code>[
+         {
+            &quot;desc&quot;: {
+              &quot;jobid&quot;: &quot;1957560321&quot;,
+              &quot;command&quot;: &quot; ./app1 &quot;,
+              &quot;size&quot;: 15,
+              &quot;nodelist&quot;: &quot;&quot;,
+              &quot;partition&quot;: &quot;&quot;,
+              &quot;cluster&quot;: &quot;&quot;,
+              &quot;run_dir&quot;: &quot;/home/jbbesnard&quot;,
+              &quot;start_time&quot;: 1700152180,
+              &quot;end_time&quot;: 1700152218
+            },
+            &quot;size&quot;: 164886,
+            &quot;lastwrite&quot;: 1700152218
+          }
+        ]</code></pre>
+        <h3 id="listing-metrics-in-a-trace">Listing Metrics in a Trace</h3>
+        <p>You can scan a trace to list all the metrics it contains by doing <a
+                href="http://localhost:1337/trace/metrics?jobid=main">http://localhost:1337/trace/list?jobid=main</a>
+        </p>
+        <p>With the following output:</p>
+        <pre><code>[
+          &quot;proxy_disk_usage_percent{kind=\&quot;SSD\&quot;,device=\&quot;/dev/sda2\&quot;,fs=\&quot;ext4\&quot;,mountpoint=\&quot;/\&quot;}&quot;,
+          &quot;proxy_disk_usage_percent{kind=\&quot;SSD\&quot;,device=\&quot;/dev/sda1\&quot;,fs=\&quot;vfat\&quot;,mountpoint=\&quot;/boot/efi\&quot;}&quot;,
+          &quot;proxy_scrape_total{os=\&quot;Debian GNU/Linux\&quot;,osversion=\&quot;11\&quot;,kernel=\&quot;5.10.0-26-amd64\&quot;,hostname=\&quot;aldebaran\&quot;}&quot;,
+          &quot;proxy_swap_total_bytes&quot;,
+          &quot;proxy_swap_used_bytes&quot;,
+          (...)
+        ]</code></pre>
+        <h3 id="getting-data-from-a-trace">Getting Data from a Trace</h3>
+        <p>You can extract a time serie from the trace using for example: <a
+                href="http://127.0.0.1:1337/trace/plot/?jobid=main&amp;filter=proxy_cpu_load_average_percent">http://127.0.0.1:1337/trace/plot/?jobid=main&amp;filter=proxy_cpu_load_average_percent</a>
+            note that by design if the data-point does not change, the value is not stored.</p>
+        <p>This yields a time serie as:</p>
+        <pre><code>[
+          [
+            1700173584,
+            44.671379804611206
+          ],
+          [
+            1700173586,
+            39.711349964141846
+          ]
+          (...)
+        ]</code></pre>
+        <p>X axis is the UNIX timestamp and Y axis is the counter value.</p>
+
     </section>
 </main>
