@@ -324,6 +324,11 @@ impl Web {
 
     fn handle_traceplot(&self, req: &Request) -> WebResponse {
         let filter = req.get_param("filter");
+
+        if filter.is_none() {
+            return WebResponse::BadReq("No filter GET parameter passed".to_string());
+        }
+
         if let Some(jobid) = req.get_param("job") {
             match self.factory.trace_store.plot(jobid, filter) {
                 Ok(data) => {
