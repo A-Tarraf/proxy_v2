@@ -811,14 +811,15 @@ impl ExporterFactory {
         ret
     }
 
-    pub(crate) fn get_local_job_exporters(&self) -> Vec<Arc<Exporter>> {
-        self.perjob
-            .lock()
-            .unwrap()
-            .iter()
+    pub(crate) fn get_local_job_exporters(
+        &self,
+    ) -> Result<Vec<Arc<Exporter>>, Box<dyn Error + '_>> {
+        let e = self.perjob.try_lock()?;
+
+        Ok(e.iter()
             .filter(|(_, v)| v.islocal)
             .map(|(_, v)| v.exporter.clone())
-            .collect()
+            .collect())
     }
 
     pub(crate) fn delete_alarm(

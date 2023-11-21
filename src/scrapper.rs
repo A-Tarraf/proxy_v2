@@ -282,12 +282,15 @@ impl ProxyScraper {
         // THese exporters are the one attached locally and thus bound to
         // node local performance
         let mut target_exporters: Vec<Arc<Exporter>> = vec![factory.get_main(), factory.get_node()];
-        target_exporters.append(&mut factory.get_local_job_exporters());
 
-        for e in target_exporters {
-            for m in metrics.iter() {
-                e.push(m)?;
-                e.accumulate(m, false)?;
+        if let Ok(mut locals) = factory.get_local_job_exporters() {
+            target_exporters.append(&mut locals);
+
+            for e in target_exporters {
+                for m in metrics.iter() {
+                    e.push(m)?;
+                    e.accumulate(m, false)?;
+                }
             }
         }
 
