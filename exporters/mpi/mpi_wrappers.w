@@ -100,7 +100,7 @@ static inline void __define_counter(mpi_wrapper_metrics_t slot,
 
   tolower_in_buff(fn_name, lower_fn_name, 128);
 
-  snprintf(tmp_buff, 1024, "%s_total{function=\"%s\"}",counter_suffix, lower_fn_name);
+  snprintf(tmp_buff, 1024, "mpi___%s___%s",counter_suffix, lower_fn_name);
   snprintf(doc_tmp_buff, 1024, "%s for %s", doc, fn_name);
   __counters[slot] = metric_proxy_counter_new(__client, tmp_buff, doc_tmp_buff);
 }
@@ -129,11 +129,11 @@ void mpi_wrapper_initialize(void)
   }
 
 
-  __counters[TAU_MPI_TIME] = metric_proxy_counter_new(__client, "mpi_total{metric=\"time\"}", "Aggregated MPI metrics");
-  __counters[TAU_MPI_HITS] = metric_proxy_counter_new(__client, "mpi_total{metric=\"hits\"}", "Aggregated MPI metrics");
-  __counters[TAU_MPI_SIZE] = metric_proxy_counter_new(__client, "mpi_total{metric=\"size\"}", "Aggregated MPI metrics");
-  __counters[TAU_MPI_SIZE_IN] = metric_proxy_counter_new(__client, "mpi_total{metric=\"size_in\"}", "Aggregated MPI metrics");
-  __counters[TAU_MPI_SIZE_OUT] = metric_proxy_counter_new(__client, "mpi_total_size{metric=\"size_out\"}", "Aggregated MPI metrics");
+  __counters[TAU_MPI_TIME] = metric_proxy_counter_new(__client, "total___mpi___time___total", "Aggregated MPI metrics");
+  __counters[TAU_MPI_HITS] = metric_proxy_counter_new(__client, "total___mpi___hits___total", "Aggregated MPI metrics");
+  __counters[TAU_MPI_SIZE] = metric_proxy_counter_new(__client, "total___mpi___size_total", "Aggregated MPI metrics");
+  __counters[TAU_MPI_SIZE_IN] = metric_proxy_counter_new(__client, "total___mpi___size___total_in", "Aggregated MPI metrics");
+  __counters[TAU_MPI_SIZE_OUT] = metric_proxy_counter_new(__client, "total___mpi___size___total_out", "Aggregated MPI metrics");
 
 
 {{forallfn foo}}

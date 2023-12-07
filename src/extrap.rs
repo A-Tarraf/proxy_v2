@@ -1,3 +1,4 @@
+use bincode::Options;
 use serde::Serialize;
 use std::fs::File;
 
@@ -68,35 +69,18 @@ struct ExtrapSample {
     metric: String,
     callpath: Option<String>,
     size: i32,
-    value: CounterSnapshot,
+    value: f64,
+    child: Vec<ExtrapSample>,
 }
 
 impl ExtrapSample {
-    fn new(metric: &str, size: i32, value: CounterSnapshot) -> ExtrapSample {
-        let mut spl = metric.split('{');
-        let name_without_params = spl.next().unwrap().to_string();
-
-        let group_name = if let Some(options) = spl.next() {
-            format!("{{{}", options)
-        } else {
-            name_without_params.to_string()
-        };
-
-        let metric = if name_without_params.contains("time_") {
-            "time"
-        } else if name_without_params.contains("hits_") {
-            "hits"
-        } else if name_without_params.contains("size_") {
-            "size"
-        } else {
-            name_without_params.as_str()
-        };
-
+    fn new(metric: &str, size: i32, value: f64, callpath: Option<String>) -> ExtrapSample {
         ExtrapSample {
             metric: metric.to_string(),
-            callpath: Some(group_name),
+            callpath,
             size,
             value,
+            child: Vec::new(),
         }
     }
 
@@ -105,7 +89,7 @@ impl ExtrapSample {
             params: HashMap::new(),
             metric: self.metric.to_string(),
             callpath: self.callpath.clone(),
-            value: self.value.float_value(),
+            value: self.value,
         };
 
         ret.push_param("size", self.size as f64);
@@ -149,10 +133,33 @@ impl ExtrapModel {
 
         let common_metrics = ret._get_transversal_metrics();
 
+        /* Here we only add the final leaf in the tree
+        we will need to rebuild the parent nodes afterwards
+        by construction these have no child being leaves */
         for cm in common_metrics.iter() {
             for p in ret.profiles.iter() {
                 let v = p.get(cm).unwrap();
-                let sample = ExtrapSample::new(cm, p.desc.size, v);
+
+                let mut metric = "various".to_string();
+                let callpath;
+
+                if cm.contains("___") {
+                    /* Leaf has full callpath */
+                    let callpath_vec: Vec<&str> = cm.split("___").collect();
+
+                    if callpath_vec.len() >= 3 {
+                        metric = match callpath_vec[1] {
+                            "hits" | "time" | "size" => callpath_vec[1].to_string(),
+                            _ => "various".to_string(),
+                        };
+                    }
+
+                    callpath = Some(cm.to_string().replace("___", "->").to_string());
+                } else {
+                    callpath = Some(cm.to_string());
+                }
+
+                let sample = ExtrapSample::new(&metric, p.desc.size, v.float_value(), callpath);
                 ret.samples.push(sample);
             }
         }
@@ -160,9 +167,9 @@ impl ExtrapModel {
         ret
     }
 
-    fn metric_is_transversal(&self, metric: &String) -> bool {
+    fn metric_is_transversal(&self, metric: &str) -> bool {
         for p in &self.profiles {
-            if !p.contains(metric.as_str()) {
+            if !p.contains(metric) {
                 return false;
             }
         }

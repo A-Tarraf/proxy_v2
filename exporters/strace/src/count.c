@@ -136,11 +136,11 @@ metric_proxy_metric_handle_ios(struct tcb *tcp)
 	{
 		scall_array_size = xcalloc(nsyscalls, sizeof(struct MetricProxyValue *));
 
-		snprintf(key, 128, "strace_read_size_total");
+		snprintf(key, 128, "total___strace___size___read");
 		snprintf(doc, 128, "Total read size");
 		total_read = metric_proxy_counter_new(metric_proxy_get_client(), key, doc);
 
-		snprintf(key, 128, "strace_write_size_total");
+		snprintf(key, 128, "total___strace___size___write");
 		snprintf(doc, 128, "Total write size");
 		total_write = metric_proxy_counter_new(metric_proxy_get_client(), key, doc);
 	}
@@ -195,7 +195,7 @@ metric_proxy_metric_handle_ios(struct tcb *tcp)
 		if(!target_scal_size)
 		{
 			const char * scall_name = tcp_sysent(tcp)->sys_name;
-			snprintf(key, 128, "strace_size_total{scall=\"%s\"}", scall_name);
+			snprintf(key, 128, "strace___size___%s", scall_name);
 			snprintf(doc, 128, "Total bytes size for %s", scall_name);
 			scall_array_size[tcp->scno] = target_scal_size = metric_proxy_counter_new(metric_proxy_get_client(), key, doc);
 		}
@@ -248,10 +248,10 @@ metric_proxy_metric_proxy_handler(struct tcb *tcp, const struct timespec *wts)
 		const char * scall_name = tcp_sysent(tcp)->sys_name;
 		char key[128];
 		char doc[256];
-		snprintf(key, 128, "strace_hits_total{scall=\"%s\"}", scall_name);
+		snprintf(key, 128, "strace___hits___%s", scall_name);
 		snprintf(doc, 128, "Number of calls for syscall");
 		scall_array_hits[tcp->scno] = metric_proxy_counter_new(metric_proxy_get_client(), key, doc);
-		snprintf(key, 128, "strace_time_total{scall=\"%s\"}", scall_name);
+		snprintf(key, 128, "strace___time___%s", scall_name);
 		snprintf(doc, 128, "Time spent in syscall");
 		scall_array_time[tcp->scno] = metric_proxy_counter_new(metric_proxy_get_client(), key, doc);
 
@@ -264,9 +264,6 @@ metric_proxy_metric_proxy_handler(struct tcb *tcp, const struct timespec *wts)
 	metric_proxy_counter_inc(target_syscall_time, wts->tv_sec + 1e-9*wts->tv_nsec);
 
 	metric_proxy_metric_handle_ios(tcp);
-
-	//fprintf(stderr, "LOL %s (%ld/%d)\n", tcp_sysent(tcp)->sys_name, tcp->scno, nsyscalls);
-
 }
 #endif /* METRIC_PROXY_ENABLED */
 
