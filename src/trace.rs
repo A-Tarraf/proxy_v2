@@ -733,12 +733,8 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
-    pub(crate) fn plot(
-        &self,
-        jobid: String,
-        filter: Option<String>,
-    ) -> Result<Vec<(u64, f64)>, ProxyErr> {
-        let trace = self.read(jobid, filter)?;
+    pub(crate) fn plot(&self, jobid: String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
+        let trace = self.read(jobid, Some(filter))?;
 
         let mut ret: Vec<(u64, f64)> = Vec::new();
 
@@ -790,7 +786,7 @@ impl TraceView {
             *j.done.write().unwrap() = true;
         }
 
-        self.traces.write().unwrap().remove(&job.jobid);
+        //self.traces.write().unwrap().remove(&job.jobid);
         Ok(())
     }
 

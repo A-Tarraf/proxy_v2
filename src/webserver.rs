@@ -2,7 +2,7 @@ use crate::proxy_common::ProxyErr;
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType};
 use crate::{
     exporter::{Exporter, ExporterFactory},
-    proxy_common::{concat_slices, hostname},
+    proxy_common::{concat_slices, derivate_time_serie, hostname, parse_bool},
 };
 
 use colored::Colorize;
@@ -341,14 +341,22 @@ impl Web {
         struct Plotdef {
             jobid: String,
             filter: String,
+            derivate: bool,
         }
 
-        let (jobid, filter) = match req.method() {
-            "GET" => (req.get_param("jobid"), req.get_param("filter")),
+        let (jobid, filter, derivate) = match req.method() {
+            "GET" => (
+                req.get_param("jobid"),
+                req.get_param("filter"),
+                match req.get_param("derivate") {
+                    Some(e) => parse_bool(e.as_str()),
+                    None => false,
+                },
+            ),
             "POST" => {
                 let sel: Result<Plotdef, JsonError> = rouille::input::json_input(req);
                 match sel {
-                    Ok(e) => (Some(e.jobid), Some(e.filter)),
+                    Ok(e) => (Some(e.jobid), Some(e.filter), e.derivate),
                     Err(_) => {
                         return WebResponse::BadReq(
                             "Failed to parse plot POST request".to_string(),
@@ -356,7 +364,7 @@ impl Web {
                     }
                 }
             }
-            _ => (None, None),
+            _ => (None, None, false),
         };
 
         if filter.is_none() {
@@ -364,9 +372,15 @@ impl Web {
         }
 
         if let Some(jobid) = jobid {
-            match self.factory.trace_store.plot(jobid, filter) {
+            match self.factory.trace_store.plot(jobid, filter.unwrap()) {
                 Ok(data) => {
-                    return WebResponse::Native(Response::json(&data));
+                    /* Do we need to derivate ? */
+                    let fdata = if derivate {
+                        derivate_time_serie(data)
+                    } else {
+                        data
+                    };
+                    return WebResponse::Native(Response::json(&fdata));
                 }
                 Err(e) => {
                     return WebResponse::BadReq(format!("Failed to generate data {}", e));

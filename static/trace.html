@@ -11,6 +11,8 @@
             <select id="metric" name="metric" required>
                 <!-- Options for selecting the metric will be added dynamically using JavaScript -->
             </select><br><br>
+            <label for="derivatebox">Derivate data:</label>
+            <input type="checkbox" id="derivatebox" name="derivatebox">
         </form>
     </section>
     <section>
@@ -36,6 +38,9 @@
                 if (response.ok) {
                     const data = await response.json();
 
+                    // Sort the data before creating and appending options
+                    data.sort((a, b) => a.localeCompare(b));
+
                     for (const v of data) {
                         const option = document.createElement('option');
                         option.value = v;
@@ -50,14 +55,22 @@
             }
         }
 
+
         async function populateJobSelect() {
-            // Fetch data from the /job endpoint
-            fetch('/trace/list')  // Replace with the actual endpoint URL
+            // Fetch data from the /trace/list endpoint
+            fetch('/trace/list') // Replace with the actual endpoint URL
                 .then(response => response.json())
                 .then(data => {
                     const comboBox = document.getElementById('target');
+
+                    // Sort data based on jobid
+                    data.sort((a, b) => a.desc.jobid.localeCompare(b.desc.jobid));
+
+                    // Remove existing options from the select element
+                    comboBox.innerHTML = "";
+
+                    // Create an option element for each "jobid" and append to the select element
                     data.forEach(item => {
-                        // Create an option element for each "jobid"
                         const option = document.createElement('option');
                         option.value = item.desc.jobid;
                         option.textContent = item.desc.jobid;
@@ -66,6 +79,7 @@
 
                     // Set the value to the first option
                     comboBox.value = comboBox.options[0].value;
+
                     // Create a new event
                     const event = new Event('change');
                     // Dispatch the event to trigger the event listener
@@ -82,10 +96,13 @@
 
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
+            const derivate = document.getElementById('derivatebox').checked;
+
             // Create the JSON request object
             const request = {
                 jobid: target,
                 filter: metric,
+                derivate: derivate
             };
 
             // Send the request using fetch

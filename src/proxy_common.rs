@@ -186,3 +186,20 @@ pub fn get_proxy_path() -> String {
     let uid = users::get_current_uid();
     format!("/tmp/metric-proxy-{}.socket", uid)
 }
+
+#[allow(unused)]
+pub fn parse_bool(sbool: &str) -> bool {
+    matches!(sbool, "1" | "true")
+}
+
+#[allow(unused)]
+pub fn derivate_time_serie(data: Vec<(u64, f64)>) -> Vec<(u64, f64)> {
+    let mut ret: Vec<(u64, f64)> = vec![(data[0].0, 0.0)];
+
+    for i in (1..data.len()) {
+        let deltax = (data[i].0 as f64) - (data[i - 1].0 as f64);
+        ret.push((data[i].0, (data[i].1 - data[i - 1].1) / deltax))
+    }
+
+    ret
+}
