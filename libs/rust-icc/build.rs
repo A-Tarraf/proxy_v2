@@ -11,11 +11,20 @@ fn main() {
     let admireic_includes: Vec<String> = admireic
         .include_paths
         .iter()
-        .map(|path: &PathBuf| String::from("-I") + path.to_str().or(Some("")).unwrap())
+        .map(|path| format!("-I{}", path.to_string_lossy()))
         .collect();
 
     // Tell cargo to tell rustc to link the admireic shared library.
     println!("cargo:rustc-link-lib=icc");
+    for p in admireic.link_paths {
+        // Seems to still be an open issue https://github.com/rust-lang/cargo/issues/5077
+        println!("cargo:rustc-link-arg=-Wl,-rpath={}", p.to_string_lossy());
+        println!("cargo:rustc-link-search=native={}", p.to_string_lossy());
+        println!(
+            "rustc-flags='-C link-arg=-Wl,-rpath={}'",
+            p.to_string_lossy()
+        );
+    }
 
     println!("cargo:rerun-if-changed=wrapper.h");
 

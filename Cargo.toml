@@ -7,10 +7,8 @@ build = "build.rs"
 [build-dependencies]
 static-files = "0.2.3"
 
-[dependencies.rust-icc]
-path = "libs/rust-icc"
-
 [dependencies]
+rust-icc={path = "libs/rust-icc/"}
 bincode = "1.3.3"
 clap = { version = "4.4.6", features = ["derive"] }
 colored = "2.0.4"

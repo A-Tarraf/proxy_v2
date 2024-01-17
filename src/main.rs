@@ -15,6 +15,7 @@ mod webserver;
 use webserver::Web;
 
 mod extrap;
+mod icc;
 mod profiles;
 mod proxywireprotocol;
 mod scrapper;
@@ -24,6 +25,8 @@ mod trace;
 extern crate clap;
 
 use clap::Parser;
+
+use crate::icc::IccClient;
 
 /// ADMIRE project Instrumentation Proxy
 #[derive(Parser, Debug)]
@@ -139,6 +142,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
+
+    unsafe {
+        let mut icc = IccClient::new();
+        for i in 0..64 {
+            log::error!("Send Test RPC {} return is {}", i, icc.test(i));
+        }
+    }
 
     web.run_blocking();
 
