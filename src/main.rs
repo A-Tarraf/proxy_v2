@@ -26,7 +26,7 @@ extern crate clap;
 
 use clap::Parser;
 
-use crate::icc::IccClient;
+use crate::icc::IccInterface;
 
 /// ADMIRE project Instrumentation Proxy
 #[derive(Parser, Debug)]
@@ -39,6 +39,10 @@ struct Args {
     // Path of the UNIX proxy for the gateway
     #[arg(short, long)]
     unix: Option<String>,
+
+    /// If set the proxy will attempt to connect to the ADMIRE intelligent controller
+    #[arg(short, long, default_value_t = false)]
+    connect_to_intelligent_controller: bool,
 
     /// Should profile aggregation be deactivated
     #[arg(short, long, default_value_t = false)]
@@ -143,11 +147,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    unsafe {
-        let mut icc = IccClient::new();
-        for i in 0..64 {
-            log::error!("Send Test RPC {} return is {}", i, icc.test(i));
-        }
+    if args.connect_to_intelligent_controller {
+        IccInterface::new(factory.clone());
+    } else {
+        log::info!("Not connecting to the ADMIRE intelligent controller");
     }
 
     web.run_blocking();

@@ -325,7 +325,7 @@ impl SystemMetrics {
             },
         ));
 
-        let used_swp = self.sys.used_memory() as f64;
+        let used_swp = self.sys.used_swap() as f64;
         counters.push(CounterSnapshot::new(
             "proxy_swap_used_bytes".to_string(),
             &[],

@@ -233,7 +233,7 @@ impl CounterType {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 pub(crate) enum AlarmOperator {
     #[allow(unused)]
     Equal(f64),
@@ -265,14 +265,14 @@ impl fmt::Display for AlarmOperator {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub(crate) struct ValueAlarmTrigger {
-    name: String,
-    metric: String,
-    operator: AlarmOperator,
-    current: f64,
-    active: bool,
-    pretty: String,
+    pub(crate) name: String,
+    pub(crate) metric: String,
+    pub(crate) operator: AlarmOperator,
+    pub(crate) current: f64,
+    pub(crate) active: bool,
+    pub(crate) pretty: String,
 }
 
 pub(crate) struct ValueAlarm {

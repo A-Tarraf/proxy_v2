@@ -20,6 +20,7 @@ fn main() {
         // Seems to still be an open issue https://github.com/rust-lang/cargo/issues/5077
         println!("cargo:rustc-link-arg=-Wl,-rpath={}", p.to_string_lossy());
         println!("cargo:rustc-link-search=native={}", p.to_string_lossy());
+        println!(r"cargo:rustc-link-search={}", p.to_string_lossy());
         println!(
             "rustc-flags='-C link-arg=-Wl,-rpath={}'",
             p.to_string_lossy()
