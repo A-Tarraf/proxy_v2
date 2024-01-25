@@ -34,6 +34,19 @@ impl IccClient {
         Ok(IccClient { handle })
     }
 
+    pub unsafe fn close(&mut self) -> Result<(), ProxyErr> {
+        let ret = icc_fini(self.handle);
+
+        if ret != icc_retcode_ICC_SUCCESS {
+            return Err(ProxyErr::new(format!(
+                "Failed to connect to ICC rc {}",
+                ret
+            )));
+        }
+
+        Ok(())
+    }
+
     pub unsafe fn test(&mut self, value: u8) -> Result<i32, ProxyErr> {
         let mut retcode = 0;
         let ret = icc_rpc_test(
@@ -141,7 +154,7 @@ impl IccInterface {
                 let mut notify_alarm = false;
 
                 if let Some(prev_state) = states.get_mut(&al_key) {
-                    if *prev_state == false {
+                    if !*prev_state {
                         notify_alarm = true;
                         *prev_state = true
                     }
@@ -196,7 +209,11 @@ impl IccInterface {
             as we can surive any crash and retry
             due to the unsafe nature of the C code */
 
-            IccInterface::notify_alarms(&mut client, &exporter, &mut notify_state)?;
+            if let Err(e) = IccInterface::notify_alarms(&mut client, &exporter, &mut notify_state) {
+                log::error!("Error sending alarm {}", e);
+                unsafe { client.close()? };
+                return Err(e);
+            }
 
             thread::sleep(Duration::from_secs(1));
         }
