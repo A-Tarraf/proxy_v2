@@ -73,9 +73,10 @@ impl ProxyScraper {
         };
 
         /* Now determine the type first as a Proxy Exporter */
-        let joburl = url.to_string() + "/job";
-        if is_url_live(&joburl, false).is_ok() {
+        let test_page_url = url.clone() + "/is_admire_proxy.html";
+        if is_url_live(&test_page_url, true).is_ok() {
             log::info!("{} is a Proxy Exporter", url);
+            let joburl = url.clone() + "/job";
             return Ok((joburl, ScraperType::Proxy));
         }
 
@@ -97,6 +98,7 @@ impl ProxyScraper {
         factory: Arc<ExporterFactory>,
     ) -> Result<ProxyScraper, ProxyErr> {
         let (url, ttype) = ProxyScraper::detect_type(target_url)?;
+        log::info!("Creating a scrapper to {} for a period of {}", url, period);
         Ok(ProxyScraper {
             target_url: url,
             state: HashMap::new(),
@@ -115,7 +117,7 @@ impl ProxyScraper {
             target_url: format!("/trace.{}", trace.desc().jobid),
             state: HashMap::new(),
             factory: None,
-            period: 1000,
+            period: 1,
             last_scrape: 0,
             ttype: ScraperType::Trace { exporter, trace },
         })
@@ -125,7 +127,7 @@ impl ProxyScraper {
         ProxyScraperSnapshot {
             target_url: self.target_url.to_string(),
             ttype: self.ttype.to_string(),
-            period: self.period / 1000,
+            period: self.period,
             last_scrape: (self.last_scrape / 1000000) as u64,
         }
     }
@@ -316,7 +318,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts_us() - self.last_scrape < (self.period * 1000) as u128 {
+        if unix_ts_us() - self.last_scrape < (self.period * 1000000) as u128 {
             /* Not to be scraped yet */
             return Ok(());
         }
