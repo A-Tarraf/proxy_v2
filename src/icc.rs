@@ -1,6 +1,7 @@
 // This is the intelligent controller interface
 use crate::proxy_common::ProxyErr;
 use crate::proxywireprotocol::ValueAlarmTrigger;
+#[cfg(feature = "admire")]
 use rust_icc::*;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -11,9 +12,13 @@ use std::time::Duration;
 
 use crate::exporter::ExporterFactory;
 
+#[cfg(feature = "admire")]
+
 pub struct IccClient {
     handle: *mut icc_context,
 }
+
+#[cfg(feature = "admire")]
 
 impl IccClient {
     pub unsafe fn new() -> Result<IccClient, ProxyErr> {
@@ -100,9 +105,13 @@ impl IccClient {
     }
 }
 
+#[cfg(feature = "admire")]
+
 pub struct IccInterface {
     watcher_thread: JoinHandle<()>,
 }
+
+#[cfg(feature = "admire")]
 
 impl IccInterface {
     pub fn new(exporter: Arc<ExporterFactory>) -> IccInterface {
