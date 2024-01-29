@@ -99,9 +99,9 @@ impl TraceExporter {
             out.clone()
         } else {
             Path::new(&format!(
-                "./{}.{}.trace.json",
+                "./{}.{}procs.trace.json",
                 infos.desc.command.replace("./", "").trim(),
-                infos.desc.jobid
+                infos.desc.size
             ))
             .to_path_buf()
         };
