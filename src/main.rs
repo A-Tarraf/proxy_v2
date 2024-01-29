@@ -69,7 +69,7 @@ fn parse_period(arg: &String) -> (String, u64) {
     let stime = spl.next();
 
     if url.is_none() || stime.is_none() {
-        return (arg.to_string(), 1000);
+        return (arg.to_string(), 1);
     }
 
     match str::parse::<u64>(stime.unwrap()) {

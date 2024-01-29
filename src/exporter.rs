@@ -448,7 +448,11 @@ impl ExporterFactory {
         my_server_address: &String,
         period: u64,
     ) -> Result<(), ProxyErr> {
-        let pivot_url = root_server.to_string() + "/pivot?from=" + my_server_address;
+        let mut pivot_url = root_server.to_string() + "/pivot?from=" + my_server_address;
+
+        if !pivot_url.starts_with("http") {
+            pivot_url = format!("http://{}", pivot_url);
+        }
 
         /* We add some delay as the root server may get smashed */
         let resp = retry(Fixed::from_millis(2000).take(5), || {
