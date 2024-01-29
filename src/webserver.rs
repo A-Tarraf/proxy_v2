@@ -310,7 +310,7 @@ impl Web {
     fn handle_traceread(&self, req: &Request) -> WebResponse {
         let filter = req.get_param("filter");
         if let Some(jobid) = req.get_param("job") {
-            match self.factory.trace_store.read(jobid, filter) {
+            match self.factory.trace_store.read(&jobid, filter) {
                 Ok(data) => {
                     return WebResponse::Native(Response::json(&data));
                 }
@@ -324,7 +324,7 @@ impl Web {
 
     fn handle_tracemetrics(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("job") {
-            match self.factory.trace_store.metrics(jobid) {
+            match self.factory.trace_store.metrics(&jobid) {
                 Ok(data) => {
                     return WebResponse::Native(Response::json(&data));
                 }
@@ -372,7 +372,7 @@ impl Web {
         }
 
         if let Some(jobid) = jobid {
-            match self.factory.trace_store.plot(jobid, filter.unwrap()) {
+            match self.factory.trace_store.plot(&jobid, filter.unwrap()) {
                 Ok(data) => {
                     /* Do we need to derivate ? */
                     let fdata = if derivate {
