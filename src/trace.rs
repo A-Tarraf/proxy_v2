@@ -130,24 +130,15 @@ impl TraceFrame {
     }
 
     fn is_counters(&self) -> bool {
-        match self {
-            TraceFrame::Counters { .. } => true,
-            _ => false,
-        }
+        matches!(self, TraceFrame::Counters { .. })
     }
 
     fn is_desc(&self) -> bool {
-        match self {
-            TraceFrame::Desc { .. } => true,
-            _ => false,
-        }
+        matches!(self, TraceFrame::Desc { .. })
     }
 
     fn is_metadata(&self) -> bool {
-        match self {
-            TraceFrame::CounterMetadata { .. } => true,
-            _ => false,
-        }
+        matches!(self, TraceFrame::CounterMetadata { .. })
     }
 }
 
