@@ -8,10 +8,12 @@ use std::{
 use serde::Serialize;
 use serde_json::to_string_pretty;
 
+use std::sync::Arc;
+
 mod proxywireprotocol;
 mod trace;
 
-use trace::{TraceInfo, TraceView};
+use trace::TraceInfo;
 
 mod proxy_common;
 use proxy_common::{derivate_time_serie, ProxyErr};
@@ -19,6 +21,16 @@ use proxy_common::{derivate_time_serie, ProxyErr};
 use colored::Colorize;
 
 use std::fs::File;
+use std::io::Write;
+
+mod exporter;
+mod extrap;
+mod profiles;
+mod scrapper;
+mod systemmetrics;
+use exporter::ExporterFactory;
+
+use rayon::iter::*;
 
 #[derive(Parser)]
 struct Cli {
@@ -27,9 +39,13 @@ struct Cli {
     #[arg(short, long, default_value_t = false)]
     list: bool,
     #[arg(short, long)]
-    export_trace: Option<String>,
-    #[arg(short, long)]
-    gen_model: Option<String>,
+    job: Option<String>,
+    #[arg(short, long, default_value_t = false)]
+    export_trace: bool,
+    #[arg(short, long, default_value_t = false)]
+    all_jobs: bool,
+    #[arg(short, long, default_value_t = false)]
+    gen_model: bool,
     #[arg(short, long)]
     output: Option<PathBuf>,
 }
@@ -54,18 +70,18 @@ impl TraceExport {
     }
 }
 
-struct ProfileExporter {
-    traceview: TraceView,
+struct TraceExporter {
+    factory: Arc<ExporterFactory>,
 }
 
-impl ProfileExporter {
-    fn new(path: &PathBuf) -> Result<ProfileExporter, ProxyErr> {
-        let traceview = TraceView::new(path)?;
-        Ok(ProfileExporter { traceview })
+impl TraceExporter {
+    fn new(path: &Path) -> Result<TraceExporter, ProxyErr> {
+        let factory = ExporterFactory::new(path.to_path_buf(), false, 1024 * 1024 * 32)?;
+        Ok(TraceExporter { factory })
     }
 
     fn list(&self) -> Result<(), ProxyErr> {
-        let traces = self.traceview.list();
+        let traces = self.factory.trace_store.list();
 
         for tr in traces {
             println!("JOB: {}", tr.desc.jobid.red());
@@ -75,11 +91,76 @@ impl ProfileExporter {
         Ok(())
     }
 
-    fn export(&self, from: String, to: &Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+    fn export(&self, from: &String, to: &Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+        /* Get infos */
+        let infos = self.factory.trace_store.infos(from)?;
+
         let output = if let Some(out) = to {
-            out
+            out.clone()
         } else {
-            return Err(ProxyErr::newboxed("No output file given"));
+            Path::new(&format!(
+                "./{}.{}.trace.json",
+                infos.desc.command.replace("./", "").trim(),
+                infos.desc.jobid
+            ))
+            .to_path_buf()
+        };
+        println!("Creating {}", output.to_string_lossy());
+
+        if output.exists() {
+            return Err(ProxyErr::newboxed(format!(
+                "Output file {} already exists",
+                output.to_string_lossy()
+            )));
+        }
+
+        log::info!("Creating {}", output.to_string_lossy());
+
+        let file = File::create(output)?;
+
+        /* Get metrics */
+        let metrics = self.factory.trace_store.metrics(from)?;
+
+        let mut export = TraceExport::new(infos);
+
+        /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
+        let collected_metrics: Vec<(String, Vec<(u64, f64)>, Vec<(u64, f64)>)> = metrics
+            .par_iter()
+            .filter_map(|m| {
+                let data = if let Ok(d) = self.factory.trace_store.plot(from, m.clone()) {
+                    d
+                } else {
+                    return None;
+                };
+                /* Derivate the data  */
+                let deriv = derivate_time_serie(data.clone());
+
+                Some((m.clone(), data, deriv))
+            })
+            .collect();
+
+        for (m, data, deriv) in collected_metrics {
+            export.set(m.clone(), data)?;
+            export.set(format!("deriv__{}", m), deriv)?;
+        }
+
+        serde_json::to_writer(file, &export)?;
+
+        Ok(())
+    }
+
+    fn extrap(&self, from: &String, to: &Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+        /* Get infos */
+        let infos = self.factory.trace_store.infos(from)?;
+
+        let output = if let Some(out) = to {
+            out.clone()
+        } else {
+            Path::new(&format!(
+                "./{}.model.jsonl",
+                infos.desc.command.replace("./", "").trim()
+            ))
+            .to_path_buf()
         };
 
         if output.exists() {
@@ -89,27 +170,10 @@ impl ProfileExporter {
             )));
         }
 
-        let file = File::create(output)?;
-
-        /* Get infos */
-        let infos = self.traceview.infos(&from)?;
-
-        /* Get metrics */
-        let metrics = self.traceview.metrics(&from)?;
-
-        let mut export = TraceExport::new(infos);
-
-        /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
-        for m in metrics {
-            let data = self.traceview.plot(&from, m.clone())?;
-            /* Derivate the data  */
-            let deriv = derivate_time_serie(data.clone());
-
-            export.set(m.clone(), data)?;
-            export.set(format!("deriv__{}", m), deriv)?;
+        if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&infos.desc) {
+            let mut outf = File::create(output)?;
+            outf.write_all(jsonl.as_bytes())?;
         }
-
-        serde_json::to_writer(file, &export)?;
 
         Ok(())
     }
@@ -126,7 +190,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         profile_prefix.to_path_buf()
     };
 
-    let tv = ProfileExporter::new(&profile_dir)?;
+    if !profile_dir.is_dir() {
+        return Err(ProxyErr::newboxed(format!(
+            "{} is not a directory",
+            profile_dir.to_string_lossy()
+        )));
+    }
+
+    let tv = TraceExporter::new(&profile_dir)?;
 
     if args.list {
         /* List traces */
@@ -134,10 +205,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    if let Some(jobid) = args.export_trace {
-        tv.export(jobid, &args.output)?;
-        return Ok(());
+    /* From there we need a jobid */
+    let mut jobs: Vec<String> = Vec::new();
+
+    if args.all_jobs {
+        for d in tv.factory.trace_store.list().iter() {
+            jobs.push(d.desc.jobid.clone());
+        }
+    } else if let Some(job) = args.job {
+        jobs.push(job);
     }
+
+    if args.export_trace && args.gen_model && args.output.is_some() {
+        return Err(ProxyErr::newboxed(
+            "Exporting both traces and profiles is only possible with auto-naming (no -o)",
+        ));
+    }
+
+    if jobs.is_empty() {
+        return Err(ProxyErr::newboxed("No job to process use either -j or -a"));
+    }
+
+    jobs.par_iter().for_each(|j| {
+        if args.export_trace {
+            if let Err(e) = tv.export(j, &args.output) {
+                println!("Failed to generate trace for {} : {}", j, e);
+            }
+        }
+
+        if args.gen_model {
+            if let Err(e) = tv.extrap(j, &args.output) {
+                println!("Failed to generate model for {} : {}", j, e);
+            }
+        }
+    });
 
     Ok(())
 }

@@ -36,6 +36,7 @@ static-files = "0.2.3"
 sysinfo = "0.29.10"
 url = "2.4.1"
 users = "0.11.0"
+rayon = "1.8.1"
 
 [lib]
 name = "proxyclient"
