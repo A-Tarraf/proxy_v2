@@ -578,9 +578,9 @@ impl Trace {
 
 #[derive(Debug, Serialize)]
 pub(crate) struct TraceInfo {
-    desc: JobDesc,
-    size: u64,
-    lastwrite: u64,
+    pub desc: JobDesc,
+    pub size: u64,
+    pub lastwrite: u64,
 }
 
 #[derive(Serialize)]
@@ -646,7 +646,12 @@ impl TraceView {
         Ok(())
     }
 
-    pub(crate) fn metrics(&self, jobid: String) -> Result<Vec<String>, ProxyErr> {
+    pub(crate) fn infos(&self, jobid: &String) -> Result<TraceInfo, ProxyErr> {
+        let trace = self.read(jobid, None)?;
+        Ok(trace.info)
+    }
+
+    pub(crate) fn metrics(&self, jobid: &String) -> Result<Vec<String>, ProxyErr> {
         let metrics = self.read(jobid, None)?;
 
         let metrics: Vec<String> = metrics
@@ -664,12 +669,12 @@ impl TraceView {
 
     pub(crate) fn read(
         &self,
-        jobid: String,
+        jobid: &String,
         filter: Option<String>,
     ) -> Result<TraceRead, ProxyErr> {
         let ht = self.traces.read().unwrap();
 
-        if let Some(trace) = ht.get(&jobid) {
+        if let Some(trace) = ht.get(jobid) {
             let (_, frames) = trace.state.lock().unwrap().read_all()?;
 
             let frames = if let Some(filter) = filter {
@@ -712,7 +717,7 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
-    pub(crate) fn plot(&self, jobid: String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
+    pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
         let trace = self.read(jobid, Some(filter))?;
 
         let mut ret: Vec<(u64, f64)> = Vec::new();

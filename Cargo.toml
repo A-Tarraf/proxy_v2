@@ -50,3 +50,7 @@ path = "src/main.rs"
 [[bin]]
 name = "proxy_run"
 path = "src/launcher.rs"
+
+[[bin]]
+name = "proxy_trace_exporter"
+path = "src/trace_exporter.rs"
