@@ -1,7 +1,7 @@
 use crate::exporter::Exporter;
 use crate::proxy_common::is_url_live;
 use crate::proxy_common::{unix_ts_us, ProxyErr};
-use crate::proxywireprotocol::{CounterType, JobDesc, JobProfile};
+use crate::proxywireprotocol::{CounterSnapshot, CounterType, JobDesc, JobProfile};
 use crate::trace::Trace;
 use crate::ExporterFactory;
 use core::fmt;
@@ -223,41 +223,52 @@ impl ProxyScraper {
         let lines: Vec<_> = data.lines().map(|s| Ok(s.to_string())).collect();
         let metrics = prometheus_parse::Scrape::parse(lines.into_iter())?;
 
-        for v in metrics.samples {
-            let doc: String = metrics
-                .docs
-                .get(&v.metric)
-                .unwrap_or(&"".to_string())
-                .clone();
+        let factory = if let Some(factory) = &self.factory {
+            factory
+        } else {
+            unreachable!("Proxy scrapes should have a factory");
+        };
 
-            let entry: Option<(String, CounterType, String)> = match v.value {
-                prometheus_parse::Value::Counter(value) => Some((
-                    ProxyScraper::prometheus_sample_name(&v),
-                    CounterType::Counter { value },
-                    doc,
-                )),
-                prometheus_parse::Value::Gauge(value) => Some((
-                    ProxyScraper::prometheus_sample_name(&v),
-                    CounterType::Gauge {
-                        min: 0.0,
-                        max: 0.0,
-                        hits: 1.0,
-                        total: value,
-                    },
-                    doc,
-                )),
-                _ => None,
-            };
+        // We push in MAIN, NODE and All exporters which may generate profiles
+        // THese exporters are the one attached locally and thus bound to
+        // node local performance
+        let mut target_exporters: Vec<Arc<Exporter>> = vec![factory.get_main(), factory.get_node()];
 
-            let factory = if let Some(factory) = &self.factory {
-                factory
-            } else {
-                unreachable!("Proxy scrapes should have a factory");
-            };
+        if let Ok(mut locals) = factory.get_local_job_exporters() {
+            target_exporters.append(&mut locals);
 
-            if let Some((name, value, doc)) = entry {
-                factory.push(name.as_str(), doc.as_str(), value.clone(), None)?;
-                factory.accumulate(name.as_str(), value, None)?;
+            for v in metrics.samples {
+                let doc: String = metrics
+                    .docs
+                    .get(&v.metric)
+                    .unwrap_or(&"".to_string())
+                    .clone();
+
+                let entry: Option<CounterSnapshot> = match v.value {
+                    prometheus_parse::Value::Counter(value) => Some(CounterSnapshot {
+                        name: ProxyScraper::prometheus_sample_name(&v),
+                        ctype: CounterType::Counter { value },
+                        doc,
+                    }),
+                    prometheus_parse::Value::Gauge(value) => Some(CounterSnapshot {
+                        name: ProxyScraper::prometheus_sample_name(&v),
+                        ctype: CounterType::Gauge {
+                            min: 0.0,
+                            max: 0.0,
+                            hits: 1.0,
+                            total: value,
+                        },
+                        doc,
+                    }),
+                    _ => None,
+                };
+
+                for e in target_exporters.iter() {
+                    if let Some(m) = entry.clone() {
+                        e.push(&m)?;
+                        e.accumulate(&m, false)?;
+                    }
+                }
             }
         }
 
