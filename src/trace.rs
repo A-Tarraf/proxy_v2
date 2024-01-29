@@ -411,21 +411,9 @@ impl TraceState {
         /* Filter with respect to previous value */
         let counters = counters
             .iter()
-            .filter(|v| {
-                if let Some(previous_value) = self.last_value.get(&v.id) {
-                    /* Found check the value */
-                    if v.value == *previous_value {
-                        /* Same value do not push */
-                        return false;
-                    }
-                    /* Update with the new value */
-                    self.last_value.insert(v.id, v.value.clone());
-                    true
-                } else {
-                    /* Not found save last value and push in trace */
-                    self.last_value.insert(v.id, v.value.clone());
-                    true
-                }
+            .map(|v| {
+                self.last_value.insert(v.id, v.value.clone());
+                v
             })
             .cloned()
             .collect();
