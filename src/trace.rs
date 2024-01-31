@@ -399,7 +399,7 @@ impl TraceState {
         Ok(())
     }
 
-    fn write_frames(&mut self, frames: Vec<TraceFrame>) -> Result<(), Box<dyn Error>> {
+    fn write_frames(&mut self, frames: &Vec<TraceFrame>) -> Result<(), Box<dyn Error>> {
         if frames.is_empty() {
             return Ok(());
         }
@@ -427,7 +427,7 @@ impl TraceState {
             .cloned()
             .collect();
 
-        let mut counters: Vec<TraceFrame> = self
+        let counters: Vec<TraceFrame> = self
             .trace_data
             .frames
             .iter()
@@ -472,15 +472,16 @@ impl TraceState {
         /* Update in memory state */
         self.trace_data.clear();
         self.trace_data.append_data(&mut meta);
-        self.trace_data.append_data(&mut counters);
+        self.trace_data.append_data(&mut newcounters);
 
         Ok(())
     }
 
     fn push(&mut self, counters: Vec<CounterSnapshot>) -> Result<bool, Box<dyn Error>> {
-        let new_counters: Vec<TraceFrame> = self.check_counter(&counters);
+        let mut new_counters: Vec<TraceFrame> = self.check_counter(&counters);
 
-        self.write_frames(new_counters)?;
+        self.write_frames(&new_counters)?;
+        self.trace_data.append_data(&mut new_counters);
 
         /* Generate all counters */
         let counters: Vec<TraceCounter> = counters
