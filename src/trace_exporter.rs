@@ -125,7 +125,7 @@ impl TraceExporter {
 
         /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
         let collected_metrics: Vec<(String, Vec<(u64, f64)>, Vec<(u64, f64)>)> = metrics
-            .par_iter()
+            .iter()
             .filter_map(|m| {
                 let data = if let Ok(d) = self.factory.trace_store.plot(from, m.clone()) {
                     d

@@ -449,7 +449,7 @@ impl TraceState {
                 if chunk.len() == 2 {
                     let sa = chunk[0].clone();
                     let sb = chunk[1].clone();
-                    sa.sum(&sb).ok()
+                    sa.sum(&chunk[1]).ok()
                 } else {
                     None
                 }
