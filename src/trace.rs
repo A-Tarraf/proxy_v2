@@ -740,12 +740,18 @@ impl TraceView {
     }
 
     pub(crate) fn clear(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
-        self.done(desc)?;
         let path = Trace::name(&self.prefix, desc);
         if path.is_file() {
             log::error!("Removing {}", path.to_string_lossy());
             remove_file(path)?;
         }
+
+        if let Ok(tr) = self.traces.write().as_mut() {
+            if tr.contains_key(&desc.jobid) {
+                tr.remove(&desc.jobid);
+            }
+        }
+
         Ok(())
     }
 
@@ -784,8 +790,6 @@ impl TraceView {
                             if let Some(data) = locked_trace.trace_data.series.get(&metric.id) {
                                 data
                             } else {
-                                log::error!("No such data {} {}", metric_name, metric.id);
-
                                 return Err(ProxyErr::new(format!(
                                     "Failed to retrieve metric data {}",
                                     metric_name
@@ -793,7 +797,6 @@ impl TraceView {
                             };
                         data.clone()
                     } else {
-                        log::error!("No such metric {}", metric_name);
                         return Err(ProxyErr::new(format!("No such metric {}", metric_name)));
                     };
                     time_serie
