@@ -8,6 +8,10 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
+use rayon::{
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
 use serde_binary::binary_stream;
 
@@ -66,59 +70,63 @@ impl TraceFrame {
         }
     }
 
-    fn mergecounters(first: Vec<TraceCounter>, second: Vec<TraceCounter>) -> Vec<TraceCounter> {
+    fn mergecounters(first: Vec<TraceCounter>, second: &Vec<TraceCounter>) -> Vec<TraceCounter> {
         let mut ret: Vec<TraceCounter> = Vec::new();
         let first = first.iter().map(|v| (v.id, v)).collect::<HashMap<_, _>>();
 
-        for v in second {
-            if let Some(prev) = first.get(&v.id) {
-                match v.value {
-                    CounterType::Counter { value } => match prev.value {
-                        CounterType::Counter { value: preval } => ret.push(TraceCounter {
-                            id: v.id,
-                            value: CounterType::Counter { value },
-                        }),
-                        CounterType::Gauge { .. } => {}
-                    },
-                    CounterType::Gauge {
-                        min,
-                        max,
-                        hits,
-                        total,
-                    } => match prev.value {
-                        CounterType::Gauge {
-                            min: min2,
-                            max: max2,
-                            hits: hits2,
-                            total: total2,
-                        } => ret.push(TraceCounter {
-                            id: v.id,
-                            value: CounterType::Gauge {
-                                min: min_f64(min, min2),
-                                max: max_f64(max, max2),
-                                hits: hits + hits2,
-                                total: total + total2,
+        let ret: Vec<TraceCounter> = second
+            .par_iter()
+            .map(|v| {
+                let ret = if let Some(prev) = first.get(&v.id) {
+                    match v.value {
+                        CounterType::Counter { value } => match prev.value {
+                            CounterType::Counter { value: preval } => TraceCounter {
+                                id: v.id,
+                                value: CounterType::Counter { value },
                             },
-                        }),
-                        CounterType::Counter { .. } => {}
-                    },
-                }
-            } else {
-                ret.push(v);
-            }
-        }
+                            CounterType::Gauge { .. } => unreachable!(),
+                        },
+                        CounterType::Gauge {
+                            min,
+                            max,
+                            hits,
+                            total,
+                        } => match prev.value {
+                            CounterType::Gauge {
+                                min: min2,
+                                max: max2,
+                                hits: hits2,
+                                total: total2,
+                            } => TraceCounter {
+                                id: v.id,
+                                value: CounterType::Gauge {
+                                    min: min_f64(min, min2),
+                                    max: max_f64(max, max2),
+                                    hits: hits + hits2,
+                                    total: total + total2,
+                                },
+                            },
+                            CounterType::Counter { .. } => unreachable!(),
+                        },
+                    }
+                } else {
+                    v.clone()
+                };
+                ret
+            })
+            .collect();
 
         ret
     }
 
-    fn sum(self, other: TraceFrame) -> Result<TraceFrame, ProxyErr> {
+    fn sum(self, other: &TraceFrame) -> Result<TraceFrame, ProxyErr> {
         match self {
             TraceFrame::Counters { ts, counters } => match other {
                 TraceFrame::Counters {
                     ts: tsb,
                     counters: countersb,
                 } => Ok(TraceFrame::Counters {
-                    ts: tsb,
+                    ts: *tsb,
                     counters: TraceFrame::mergecounters(counters, countersb),
                 }),
                 _ => unreachable!("This function must take a counter"),
@@ -435,19 +443,18 @@ impl TraceState {
             .cloned()
             .collect();
 
-        let mut newcounters: Vec<TraceFrame> = Vec::new();
-
-        /* We skip the first record to keep TS 0 */
-        let mut i = 1;
-        while i + 1 < counters.len() {
-            let sa = counters[i].clone();
-            let sb = counters[i + 1].clone();
-
-            // Now we only iterate on counters
-            newcounters.push(sa.sum(sb)?);
-
-            i += 2;
-        }
+        let mut newcounters: Vec<TraceFrame> = counters
+            .par_chunks(2)
+            .flat_map(|chunk| {
+                if chunk.len() == 2 {
+                    let sa = chunk[0].clone();
+                    let sb = chunk[1].clone();
+                    sa.sum(&sb).ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         /* Now rewrite it all */
         remove_file(&self.path)?;
