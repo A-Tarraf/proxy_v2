@@ -2,20 +2,18 @@ use std::{
     collections::HashMap,
     error::Error,
     fs::{remove_file, File, OpenOptions},
-    io::{Read, Seek},
+    io::Seek,
     os::unix::prelude::FileExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
 use serde_binary::binary_stream;
 
 use crate::{
     proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, ProxyErr},
-    proxywireprotocol::{
-        max_f64, min_f64, CounterSnapshot, CounterType, CounterValue, JobDesc, JobProfile,
-    },
+    proxywireprotocol::{max_f64, min_f64, CounterSnapshot, CounterType, JobDesc, JobProfile},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -142,15 +140,89 @@ impl TraceFrame {
     }
 }
 
+struct TraceData {
+    counters: HashMap<String, TraceCounterMetadata>,
+    desc: TraceFrame,
+    frames: Vec<TraceFrame>,
+    series: HashMap<u64, Vec<(u64, CounterType)>>,
+}
+
+impl TraceData {
+    fn clear(&mut self) {
+        self.counters.clear();
+        self.series.clear();
+        self.frames = Vec::new();
+    }
+
+    fn push_counters(&mut self, ts: u64, counters: &Vec<TraceCounter>) {
+        for c in counters {
+            let counter_vec = self.series.entry(c.id).or_default();
+            counter_vec.push((ts, c.value.clone()));
+        }
+    }
+
+    fn append_data(&mut self, frames: &mut Vec<TraceFrame>) {
+        for frame in frames.iter() {
+            match frame {
+                TraceFrame::Desc { ts: _, desc: _ } => {
+                    self.desc = frame.clone();
+                }
+                TraceFrame::CounterMetadata { ts: _, metadata } => {
+                    self.counters
+                        .insert(metadata.name.clone(), metadata.clone());
+                }
+                TraceFrame::Counters { ts, counters } => {
+                    self.push_counters(*ts, counters);
+                }
+            }
+        }
+
+        self.frames.append(frames);
+    }
+
+    fn new(desc: TraceFrame, frames: &mut Vec<TraceFrame>) -> TraceData {
+        let mut ret = TraceData::empty(&desc);
+        ret.append_data(frames);
+        ret
+    }
+
+    fn empty(desc: &TraceFrame) -> TraceData {
+        TraceData {
+            counters: HashMap::new(),
+            desc: desc.clone(),
+            frames: Vec::new(),
+            series: HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, frame: TraceFrame) {
+        let mut v = vec![frame];
+        self.append_data(&mut v);
+    }
+}
+
+/// This is the trace state main handle to a trace
+/// when writing to it and when reading from it
+/// The trace is read lazily only and the
+/// TraceData if filled when read_all is called
 #[allow(unused)]
 struct TraceState {
+    /// Was the trace loaded already ?
+    loaded: bool,
+    /// Current size of the trace
     size: u64,
+    /// Maximum size of the trace
     max_size: usize,
+    /// Timestamp of the last write to the trace
     lastwrite: u64,
+    /// Path of the trace
     path: PathBuf,
-    counters: HashMap<String, TraceCounterMetadata>,
-    last_value: HashMap<u64, CounterType>,
+
+    /// Current counter identifier of the trace
     current_counter_id: u64,
+
+    /// Read state
+    trace_data: TraceData,
 }
 
 impl TraceState {
@@ -171,8 +243,8 @@ impl TraceState {
         Ok(fd.metadata()?.len())
     }
 
-    fn desc(&mut self) -> Result<JobDesc, Box<dyn Error>> {
-        let mut fd = self.open(false)?;
+    fn desc_from_file(path: &PathBuf) -> Result<JobDesc, Box<dyn Error>> {
+        let mut fd = File::open(path)?;
         let (data, _) = Self::read_frame_at(&mut fd, 0)?;
 
         if let Some(frame) = data {
@@ -182,6 +254,10 @@ impl TraceState {
         Err(ProxyErr::newboxed(
             "First frame of the trace is not a trace description",
         ))
+    }
+
+    fn desc(&mut self) -> Result<JobDesc, Box<dyn Error>> {
+        TraceState::desc_from_file(&self.path)
     }
 
     fn offset_of_last_frame_start(fd: &mut File) -> Result<u64, Box<dyn Error>> {
@@ -262,8 +338,9 @@ impl TraceState {
 
     fn check_counter(&mut self, counters: &[CounterSnapshot]) -> Vec<TraceFrame> {
         let mut ret: Vec<TraceFrame> = Vec::new();
+
         for c in counters.iter() {
-            if !self.counters.contains_key(&c.name) {
+            if !self.trace_data.counters.contains_key(&c.name) {
                 let metadata = TraceCounterMetadata {
                     id: self.current_counter_id,
                     name: c.name.to_string(),
@@ -272,7 +349,9 @@ impl TraceState {
 
                 self.current_counter_id += 1;
 
-                self.counters.insert(c.name.to_string(), metadata.clone());
+                self.trace_data
+                    .counters
+                    .insert(c.name.to_string(), metadata.clone());
 
                 let frame = TraceFrame::CounterMetadata {
                     ts: unix_ts(),
@@ -286,14 +365,14 @@ impl TraceState {
     }
 
     fn counter_id(&self, counter: &CounterSnapshot) -> Option<u64> {
-        if let Some(c) = self.counters.get(&counter.name) {
+        if let Some(c) = self.trace_data.counters.get(&counter.name) {
             return Some(c.id);
         }
 
         None
     }
 
-    fn do_write_frame(fd: &mut File, frame: TraceFrame) -> Result<(), Box<dyn Error>> {
+    fn do_write_frame(fd: &mut File, frame: &TraceFrame) -> Result<(), Box<dyn Error>> {
         let buff: Vec<u8> = serde_binary::to_vec(&frame, binary_stream::Endian::Little)?;
 
         // First write length
@@ -310,7 +389,7 @@ impl TraceState {
         Ok(())
     }
 
-    fn write_frame(&mut self, frame: TraceFrame) -> Result<(), Box<dyn Error>> {
+    fn write_frame(&mut self, frame: &TraceFrame) -> Result<(), Box<dyn Error>> {
         let mut fd = self.open(false)?;
 
         Self::do_write_frame(&mut fd, frame)?;
@@ -327,7 +406,7 @@ impl TraceState {
 
         let mut fd = self.open(false)?;
 
-        for f in frames {
+        for f in frames.iter() {
             Self::do_write_frame(&mut fd, f)?;
         }
 
@@ -338,15 +417,23 @@ impl TraceState {
     }
 
     fn fold(&mut self) -> Result<(), Box<dyn Error>> {
-        let (desc, data) = self.read_all()?;
+        let desc = self.trace_data.desc.clone();
 
-        let meta: Vec<TraceFrame> = data.iter().filter(|v| v.is_metadata()).cloned().collect();
+        let mut meta: Vec<TraceFrame> = self
+            .trace_data
+            .frames
+            .iter()
+            .filter(|v| v.is_metadata())
+            .cloned()
+            .collect();
 
-        let counters: Vec<TraceFrame> = data.iter().filter(|v| v.is_counters()).cloned().collect();
-
-        // We have extracted all from the trace
-        // We preemptively drop to save some mem
-        drop(data);
+        let mut counters: Vec<TraceFrame> = self
+            .trace_data
+            .frames
+            .iter()
+            .filter(|v| v.is_counters())
+            .cloned()
+            .collect();
 
         let mut newcounters: Vec<TraceFrame> = Vec::new();
 
@@ -370,17 +457,22 @@ impl TraceState {
         drop(fd);
 
         /* Desc first */
-        self.write_frame(desc)?;
+        self.write_frame(&desc)?;
 
         /* Then all metadata */
-        for v in meta {
+        for v in meta.iter() {
             self.write_frame(v)?;
         }
 
         /* And counters */
-        for v in newcounters {
+        for v in newcounters.iter() {
             self.write_frame(v)?;
         }
+
+        /* Update in memory state */
+        self.trace_data.clear();
+        self.trace_data.append_data(&mut meta);
+        self.trace_data.append_data(&mut counters);
 
         Ok(())
     }
@@ -399,22 +491,15 @@ impl TraceState {
             })
             .collect();
 
-        /* Filter with respect to previous value */
-        let counters = counters
-            .iter()
-            .map(|v| {
-                self.last_value.insert(v.id, v.value.clone());
-                v
-            })
-            .cloned()
-            .collect();
-
         let frame = TraceFrame::Counters {
             ts: unix_ts(),
             counters,
         };
 
-        self.write_frame(frame)?;
+        /* Add to file */
+        self.write_frame(&frame)?;
+        /* Add to in-memory state */
+        self.trace_data.push(frame);
 
         if self.size as usize > self.max_size {
             self.fold()?;
@@ -424,25 +509,20 @@ impl TraceState {
         Ok(false)
     }
 
-    fn read_all(&mut self) -> Result<(TraceFrame, Vec<TraceFrame>), Box<dyn Error>> {
+    fn read_all(&mut self) -> Result<Vec<TraceFrame>, Box<dyn Error>> {
         let mut frames = Vec::new();
 
         let mut fd = self.open(false)?;
 
         /* First frame is the desc */
-        let (mut frame, mut current_offset) = Self::read_frame_at(&mut fd, 0)?;
-
-        if frame.is_none() {
-            return Err(ProxyErr::newboxed("Failed to read first frame"));
-        }
-
-        let desc = frame.unwrap();
+        let mut current_offset: u64 = 0;
+        let mut frame: Option<TraceFrame>;
 
         loop {
             (frame, current_offset) = Self::read_frame_at(&mut fd, current_offset)?;
 
             if frame.is_none() {
-                return Ok((desc, frames));
+                return Ok(frames);
             }
 
             /* Full frame */
@@ -451,39 +531,47 @@ impl TraceState {
     }
 
     fn new(path: &Path, job: &JobDesc, max_size: usize) -> Result<TraceState, Box<dyn Error>> {
-        let ret = TraceState {
-            size: 0,
-            max_size,
-            lastwrite: 0,
-            path: path.to_path_buf(),
-            counters: HashMap::new(),
-            last_value: HashMap::new(),
-            current_counter_id: 0,
-        };
-
-        let mut fd = ret.open(true)?;
-
         // First thing save the jobdesc
         let desc = TraceFrame::Desc {
             ts: unix_ts(),
             desc: job.clone(),
         };
 
-        TraceState::do_write_frame(&mut fd, desc)?;
+        let ret = TraceState {
+            loaded: true, // Trace is new thus already loaded
+            size: 0,
+            max_size,
+            lastwrite: 0,
+            path: path.to_path_buf(),
+            current_counter_id: 0,
+            trace_data: TraceData::empty(&desc),
+        };
+
+        let mut fd = ret.open(true)?;
+
+        TraceState::do_write_frame(&mut fd, &desc)?;
 
         Ok(ret)
     }
 
     fn from(path: &Path, max_size: usize) -> Result<TraceState, Box<dyn Error>> {
+        let desc = TraceState::desc_from_file(&path.to_path_buf())?;
+
+        let desc = TraceFrame::Desc {
+            ts: unix_ts(),
+            desc: desc.clone(),
+        };
+
         let mut ret = TraceState {
+            loaded: false, // Trace is not loaded already
             size: 0,
             max_size,
             lastwrite: 0,
             path: path.to_path_buf(),
-            counters: HashMap::new(),
-            last_value: HashMap::new(),
             current_counter_id: 0,
+            trace_data: TraceData::empty(&desc),
         };
+
         let lastframe = ret.read_last()?;
 
         ret.size = ret.len()?;
@@ -493,6 +581,21 @@ impl TraceState {
         }
 
         Ok(ret)
+    }
+
+    fn load(&mut self) -> Result<(), Box<dyn Error>> {
+        if !self.loaded {
+            let mut frames = self.read_all()?;
+            self.trace_data.clear();
+            self.trace_data.append_data(&mut frames);
+            self.loaded = true;
+        }
+        Ok(())
+    }
+
+    fn metrics(&mut self) -> Result<Vec<String>, Box<dyn Error>> {
+        self.load()?;
+        Ok(self.trace_data.counters.keys().cloned().collect())
     }
 }
 
@@ -586,7 +689,7 @@ pub(crate) struct TraceInfo {
 #[derive(Serialize)]
 pub(crate) struct TraceRead {
     info: TraceInfo,
-    frames: Vec<TraceFrame>,
+    time_serie: Vec<(u64, CounterType)>,
 }
 
 impl TraceInfo {
@@ -652,17 +755,11 @@ impl TraceView {
     }
 
     pub(crate) fn metrics(&self, jobid: &String) -> Result<Vec<String>, ProxyErr> {
-        let metrics = self.read(jobid, None)?;
-
-        let metrics: Vec<String> = metrics
-            .frames
-            .iter()
-            .filter(|v| v.is_metadata())
-            .map(|v| match v {
-                TraceFrame::CounterMetadata { ts: _, metadata } => metadata.name.to_string(),
-                _ => unreachable!(),
-            })
-            .collect();
+        let metrics = if let Some(tr) = self.traces.read().unwrap().get(jobid) {
+            tr.state.lock().unwrap().metrics()?
+        } else {
+            return Err(ProxyErr::new("No such jobid"));
+        };
 
         Ok(metrics)
     }
@@ -670,47 +767,49 @@ impl TraceView {
     pub(crate) fn read(
         &self,
         jobid: &String,
-        filter: Option<String>,
+        metric_name: Option<String>,
     ) -> Result<TraceRead, ProxyErr> {
         let ht = self.traces.read().unwrap();
 
         if let Some(trace) = ht.get(jobid) {
-            let (_, frames) = trace.state.lock().unwrap().read_all()?;
+            let time_serie = if let Ok(mut locked_trace) = trace.state.lock() {
+                /* If we are here we need to read */
+                locked_trace.load()?;
 
-            let frames = if let Some(filter) = filter {
-                let mut tmp_frames: Vec<TraceFrame> = Vec::new();
-                let mut filter_id: Option<u64> = None;
+                let time_serie = if let Some(metric_name) = metric_name {
+                    let time_serie = if let Some(metric) =
+                        locked_trace.trace_data.counters.get(&metric_name)
+                    {
+                        let data =
+                            if let Some(data) = locked_trace.trace_data.series.get(&metric.id) {
+                                data
+                            } else {
+                                log::error!("No such data {} {}", metric_name, metric.id);
 
-                for f in frames.iter() {
-                    match f {
-                        TraceFrame::CounterMetadata { ts: _, metadata } => {
-                            if metadata.name == filter {
-                                tmp_frames.push(f.clone());
-                                filter_id = Some(metadata.id);
-                            }
-                        }
-                        TraceFrame::Desc { ts: _, desc: _ } => {}
-                        TraceFrame::Counters { ts, counters } => {
-                            if let Some(id) = filter_id {
-                                let counters: Vec<TraceCounter> =
-                                    counters.iter().filter(|v| v.id == id).cloned().collect();
-                                if !counters.is_empty() {
-                                    let counterframe = TraceFrame::Counters { ts: *ts, counters };
-                                    tmp_frames.push(counterframe);
-                                }
-                            }
-                        }
-                    }
-                }
+                                return Err(ProxyErr::new(format!(
+                                    "Failed to retrieve metric data {}",
+                                    metric_name
+                                )));
+                            };
+                        data.clone()
+                    } else {
+                        log::error!("No such metric {}", metric_name);
+                        return Err(ProxyErr::new(format!("No such metric {}", metric_name)));
+                    };
+                    time_serie
+                } else {
+                    let empty: Vec<(u64, CounterType)> = Vec::new();
+                    empty
+                };
 
-                tmp_frames
+                time_serie
             } else {
-                frames
+                unreachable!();
             };
 
             return Ok(TraceRead {
                 info: TraceInfo::new(trace),
-                frames,
+                time_serie,
             });
         }
 
@@ -722,22 +821,18 @@ impl TraceView {
 
         let mut ret: Vec<(u64, f64)> = Vec::new();
 
-        for f in trace.frames.iter() {
-            if let TraceFrame::Counters { ts, counters } = f {
-                for c in counters {
-                    match c.value {
-                        CounterType::Counter { value } => {
-                            ret.push((*ts, value));
-                        }
-                        CounterType::Gauge {
-                            min: _,
-                            max: _,
-                            hits,
-                            total,
-                        } => {
-                            ret.push((*ts, total / hits));
-                        }
-                    }
+        for c in trace.time_serie.iter() {
+            match c.1 {
+                CounterType::Counter { value } => {
+                    ret.push((c.0, value));
+                }
+                CounterType::Gauge {
+                    min: _,
+                    max: _,
+                    hits,
+                    total,
+                } => {
+                    ret.push((c.0, total / hits));
                 }
             }
         }
