@@ -32,10 +32,10 @@ struct TraceCounter {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct TraceCounterMetadata {
-    id: u64,
-    name: String,
-    doc: String,
+pub(crate) struct TraceCounterMetadata {
+    pub(crate) id: u64,
+    pub(crate) name: String,
+    pub(crate) doc: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -148,11 +148,12 @@ impl TraceFrame {
     }
 }
 
-struct TraceData {
-    counters: HashMap<String, TraceCounterMetadata>,
-    desc: TraceFrame,
-    frames: Vec<TraceFrame>,
-    series: HashMap<u64, Vec<(u64, CounterType)>>,
+#[derive(Clone)]
+pub(crate) struct TraceData {
+    pub(crate) counters: HashMap<String, TraceCounterMetadata>,
+    pub(crate) desc: TraceFrame,
+    pub(crate) frames: Vec<TraceFrame>,
+    pub(crate) series: HashMap<u64, Vec<(u64, CounterType)>>,
 }
 
 impl TraceData {
@@ -448,7 +449,6 @@ impl TraceState {
             .flat_map(|chunk| {
                 if chunk.len() == 2 {
                     let sa = chunk[0].clone();
-                    let sb = chunk[1].clone();
                     sa.sum(&chunk[1]).ok()
                 } else {
                     None
@@ -778,6 +778,21 @@ impl TraceView {
         Ok(metrics)
     }
 
+    pub(crate) fn full_read(&self, jobid: &String) -> Result<TraceData, ProxyErr> {
+        let ht = self.traces.read().unwrap();
+
+        if let Some(trace) = ht.get(jobid) {
+            if let Ok(mut locked_trace) = trace.state.lock() {
+                locked_trace.load()?;
+                return Ok(locked_trace.trace_data.clone());
+            } else {
+                unreachable!("Failed to acquire trace lock");
+            }
+        }
+
+        Err(ProxyErr::new(format!("No such trace with jobid {}", jobid)))
+    }
+
     pub(crate) fn read(
         &self,
         jobid: &String,
@@ -827,12 +842,10 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
-    pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
-        let trace = self.read(jobid, Some(filter))?;
-
+    pub(crate) fn to_time_serie(time_serie: &Vec<(u64, CounterType)>) -> Vec<(u64, f64)> {
         let mut ret: Vec<(u64, f64)> = Vec::new();
 
-        for c in trace.time_serie.iter() {
+        for c in time_serie.iter() {
             match c.1 {
                 CounterType::Counter { value } => {
                     ret.push((c.0, value));
@@ -848,6 +861,12 @@ impl TraceView {
             }
         }
 
+        ret
+    }
+
+    pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
+        let trace = self.read(jobid, Some(filter))?;
+        let ret = TraceView::to_time_serie(&trace.time_serie);
         Ok(ret)
     }
 

@@ -376,7 +376,7 @@ impl Web {
                 Ok(data) => {
                     /* Do we need to derivate ? */
                     let fdata = if derivate {
-                        derivate_time_serie(data)
+                        derivate_time_serie(&data)
                     } else {
                         data
                     };

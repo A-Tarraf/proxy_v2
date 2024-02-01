@@ -193,7 +193,7 @@ pub fn parse_bool(sbool: &str) -> bool {
 }
 
 #[allow(unused)]
-pub fn derivate_time_serie(data: Vec<(u64, f64)>) -> Vec<(u64, f64)> {
+pub fn derivate_time_serie(data: &Vec<(u64, f64)>) -> Vec<(u64, f64)> {
     let mut ret: Vec<(u64, f64)> = vec![(data[0].0, 0.0)];
 
     for i in (1..data.len()) {

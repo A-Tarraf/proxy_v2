@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::{
+    any::Any,
     collections::HashMap,
     error::Error,
     path::{Path, PathBuf},
@@ -31,6 +32,8 @@ mod systemmetrics;
 use exporter::ExporterFactory;
 
 use rayon::iter::*;
+
+use crate::trace::TraceView;
 
 #[derive(Parser)]
 struct Cli {
@@ -119,21 +122,29 @@ impl TraceExporter {
         let file = File::create(output)?;
 
         /* Get metrics */
-        let metrics = self.factory.trace_store.metrics(from)?;
 
         let mut export = TraceExport::new(infos);
+
+        let metrics = self.factory.trace_store.metrics(from)?;
+        let full_data = self.factory.trace_store.full_read(from)?;
 
         /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
         let collected_metrics: Vec<(String, Vec<(u64, f64)>, Vec<(u64, f64)>)> = metrics
             .iter()
             .filter_map(|m| {
-                let data = if let Ok(d) = self.factory.trace_store.plot(from, m.clone()) {
-                    d
+                let id = if let Some(m) = full_data.counters.get(m) {
+                    m.id
+                } else {
+                    unreachable!();
+                };
+
+                let data = if let Some(d) = full_data.series.get(&id) {
+                    TraceView::to_time_serie(d)
                 } else {
                     return None;
                 };
                 /* Derivate the data  */
-                let deriv = derivate_time_serie(data.clone());
+                let deriv = derivate_time_serie(&data);
 
                 Some((m.clone(), data, deriv))
             })
