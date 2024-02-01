@@ -45,9 +45,9 @@ impl ProfileView {
             fd.read_to_end(&mut data)?;
 
             let data = String::from_utf8(data)?;
-            return Ok(data);
+            Ok(data)
         } else {
-            return Err(ProxyErr::newboxed("No model for this profile"));
+            Err(ProxyErr::newboxed("No model for this profile"))
         }
     }
 
@@ -81,6 +81,7 @@ impl ProfileView {
         ret
     }
 
+    #[allow(unused)]
     pub(crate) fn get_profile_list(&self) -> Vec<JobDesc> {
         self.profiles
             .read()

@@ -47,6 +47,7 @@ impl fmt::Display for CounterType {
 }
 
 impl CounterType {
+    #[allow(unused)]
     pub fn newcounter() -> CounterType {
         Self::Counter { value: 0.0 }
     }
@@ -455,7 +456,7 @@ impl JobDesc {
             .map(|v| v.to_string_lossy().to_string())
             .unwrap_or("".to_string());
 
-        let cmdline_bytes = std::fs::read("/proc/self/cmdline").unwrap_or(Vec::new());
+        let cmdline_bytes = std::fs::read("/proc/self/cmdline").unwrap_or_default();
         let command = String::from_utf8(cmdline_bytes).unwrap_or("".to_string());
         let command = command.replace('\0', " ");
         let command = command
@@ -561,6 +562,7 @@ impl CounterSnapshot {
         self.ctype.delta(&other.ctype)
     }
 
+    #[allow(unused)]
     pub(crate) fn value(&self) -> CounterValue {
         CounterValue {
             name: self.name.to_string(),
@@ -568,6 +570,7 @@ impl CounterSnapshot {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn float_value(&self) -> f64 {
         match self.ctype {
             CounterType::Counter { value } => value,
@@ -654,6 +657,7 @@ impl JobProfile {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn contains(&self, name: &str) -> bool {
         for c in self.counters.iter() {
             if c.name == name {
@@ -664,6 +668,7 @@ impl JobProfile {
         false
     }
 
+    #[allow(unused)]
     pub(crate) fn get(&self, name: &String) -> Option<CounterSnapshot> {
         for c in self.counters.iter() {
             if c.name == *name {

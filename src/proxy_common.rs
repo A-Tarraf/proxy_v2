@@ -49,6 +49,7 @@ impl From<retry::Error<Box<dyn std::error::Error>>> for ProxyErr {
     }
 }
 
+#[allow(unused)]
 pub fn init_log() {
     let env = env_logger::Env::new().default_filter_or("info");
     env_logger::init_from_env(env);

@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::{
-    any::Any,
     collections::HashMap,
     error::Error,
     path::{Path, PathBuf},
@@ -141,8 +140,14 @@ impl TraceExporter {
             .min()
             .unwrap_or(0);
 
+        // Define a type alias for the inner tuple
+        type MetricTuple = (u64, f64);
+
+        // Define a type alias for the main vector
+        type CollectedMetrics = Vec<(String, Vec<MetricTuple>, Vec<MetricTuple>)>;
+
         /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
-        let collected_metrics: Vec<(String, Vec<(u64, f64)>, Vec<(u64, f64)>)> = metrics
+        let collected_metrics: CollectedMetrics = metrics
             .iter()
             .filter_map(|m| {
                 let id = if let Some(m) = full_data.counters.get(m) {

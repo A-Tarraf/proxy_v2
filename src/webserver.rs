@@ -1,4 +1,3 @@
-use crate::proxy_common::ProxyErr;
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType};
 use crate::{
     exporter::{Exporter, ExporterFactory},

@@ -75,6 +75,7 @@ impl ExporterEntryGroup {
         spl[0].to_string()
     }
 
+    #[allow(unused)]
     /// Set a value in the ExporterEntryGroup
     fn set(&self, value: CounterSnapshot) -> Result<(), ProxyErr> {
         match self.ht.write().unwrap().get_mut(&value.name) {
@@ -139,6 +140,7 @@ impl ExporterEntryGroup {
         Ok(())
     }
 
+    #[allow(unused)]
     /// Generate the prometheus data from the couter list
     fn serialize(&self) -> Result<String, ProxyErr> {
         let mut ret: String = String::new();
@@ -218,6 +220,7 @@ impl Exporter {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn set(&self, value: CounterSnapshot) -> Result<(), ProxyErr> {
         log::trace!("Exporter set {} {:?}", value.name, value);
 
@@ -251,6 +254,7 @@ impl Exporter {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn serialize(&self) -> Result<String, ProxyErr> {
         let mut ret: String = String::new();
 
@@ -411,6 +415,7 @@ impl ExporterFactory {
         }
     }
 
+    #[allow(unused)]
     /// Add a new scrape to the scrape list
     pub(crate) fn add_scrape(
         factory: Arc<ExporterFactory>,
@@ -426,6 +431,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    #[allow(unused)]
     /// List all scrapes in the scrape list
     pub(crate) fn list_scrapes(&self) -> Vec<ProxyScraperSnapshot> {
         let ret: Vec<ProxyScraperSnapshot> = self
@@ -438,6 +444,7 @@ impl ExporterFactory {
         ret
     }
 
+    #[allow(unused)]
     /// This function is called when joining another proxy
     ///
     /// It will first request the target address from the root server
@@ -656,6 +663,7 @@ impl ExporterFactory {
         v
     }
 
+    #[allow(unused)]
     pub(crate) fn list_jobs(&self) -> Vec<JobDesc> {
         self.perjob
             .lock()
@@ -665,6 +673,7 @@ impl ExporterFactory {
             .collect()
     }
 
+    #[allow(unused)]
     pub(crate) fn profiles(&self, full: bool) -> Vec<JobProfile> {
         let mut ret: Vec<JobProfile> = Vec::new();
 
@@ -679,6 +688,7 @@ impl ExporterFactory {
         ret
     }
 
+    #[allow(unused)]
     pub(crate) fn profile_of(&self, jobid: &String, full: bool) -> Result<JobProfile, ProxyErr> {
         if let Some(elem) = self.perjob.lock().unwrap().get(jobid) {
             return elem.profile(full);
@@ -718,6 +728,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn push(
         &self,
         name: &str,
@@ -740,6 +751,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn accumulate(
         &self,
         name: &str,
@@ -762,6 +774,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn add_alarm(
         &self,
         name: String,
@@ -782,6 +795,7 @@ impl ExporterFactory {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn check_alarms(&self) -> HashMap<String, Vec<ValueAlarmTrigger>> {
         let mut ret: HashMap<String, Vec<ValueAlarmTrigger>> = HashMap::new();
 
@@ -795,6 +809,7 @@ impl ExporterFactory {
         ret
     }
 
+    #[allow(unused)]
     pub(crate) fn list_alarms(&self) -> HashMap<String, Vec<ValueAlarmTrigger>> {
         let mut ret: HashMap<String, Vec<ValueAlarmTrigger>> = HashMap::new();
 
@@ -826,6 +841,7 @@ impl ExporterFactory {
             .collect())
     }
 
+    #[allow(unused)]
     pub(crate) fn delete_alarm(
         &self,
         target_job: &String,

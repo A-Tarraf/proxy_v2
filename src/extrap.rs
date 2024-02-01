@@ -1,4 +1,3 @@
-use bincode::Options;
 use serde::Serialize;
 use std::fs::File;
 
@@ -10,7 +9,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::proxywireprotocol::{CounterSnapshot, JobProfile};
+use crate::proxywireprotocol::JobProfile;
 
 /// This represents a line in the JSONL
 /// output of ExtraP json format is:
@@ -50,6 +49,7 @@ impl fmt::Display for ExtrapJsonlSample {
 }
 
 impl ExtrapJsonlSample {
+    #[allow(unused)]
     fn new(metric: String, callpath: Option<String>, value: f64) -> ExtrapJsonlSample {
         ExtrapJsonlSample {
             params: HashMap::new(),
@@ -70,7 +70,6 @@ struct ExtrapSample {
     callpath: Option<String>,
     size: i32,
     value: f64,
-    child: Vec<ExtrapSample>,
 }
 
 impl ExtrapSample {
@@ -80,7 +79,6 @@ impl ExtrapSample {
             callpath,
             size,
             value,
-            child: Vec::new(),
         }
     }
 
@@ -194,6 +192,7 @@ impl ExtrapModel {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn sizes(&self) -> Vec<i32> {
         self.profiles.iter().map(|v| v.desc.size).collect()
     }

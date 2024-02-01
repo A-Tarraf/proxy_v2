@@ -12,7 +12,7 @@ use rayon::{
     iter::{IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_binary::binary_stream;
 
 use crate::{
@@ -26,7 +26,7 @@ struct TraceHeader {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct TraceCounter {
+pub(crate) struct TraceCounter {
     id: u64,
     value: CounterType,
 }
@@ -39,7 +39,7 @@ pub(crate) struct TraceCounterMetadata {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-enum TraceFrame {
+pub(crate) enum TraceFrame {
     Desc {
         ts: u64,
         desc: JobDesc,
@@ -71,7 +71,6 @@ impl TraceFrame {
     }
 
     fn mergecounters(first: Vec<TraceCounter>, second: &Vec<TraceCounter>) -> Vec<TraceCounter> {
-        let mut ret: Vec<TraceCounter> = Vec::new();
         let first = first.iter().map(|v| (v.id, v)).collect::<HashMap<_, _>>();
 
         let ret: Vec<TraceCounter> = second
@@ -80,7 +79,7 @@ impl TraceFrame {
                 let ret = if let Some(prev) = first.get(&v.id) {
                     match v.value {
                         CounterType::Counter { value } => match prev.value {
-                            CounterType::Counter { value: preval } => TraceCounter {
+                            CounterType::Counter { value: _ } => TraceCounter {
                                 id: v.id,
                                 value: CounterType::Counter { value },
                             },
@@ -121,7 +120,7 @@ impl TraceFrame {
 
     fn sum(self, other: &TraceFrame) -> Result<TraceFrame, ProxyErr> {
         match self {
-            TraceFrame::Counters { ts, counters } => match other {
+            TraceFrame::Counters { ts: _, counters } => match other {
                 TraceFrame::Counters {
                     ts: tsb,
                     counters: countersb,
@@ -139,6 +138,7 @@ impl TraceFrame {
         matches!(self, TraceFrame::Counters { .. })
     }
 
+    #[allow(unused)]
     fn is_desc(&self) -> bool {
         matches!(self, TraceFrame::Desc { .. })
     }
@@ -189,6 +189,7 @@ impl TraceData {
         self.frames.append(frames);
     }
 
+    #[allow(unused)]
     fn new(desc: TraceFrame, frames: &mut Vec<TraceFrame>) -> TraceData {
         let mut ret = TraceData::empty(&desc);
         ret.append_data(frames);
@@ -763,6 +764,7 @@ impl TraceView {
         Ok(())
     }
 
+    #[allow(unused)]
     pub(crate) fn infos(&self, jobid: &String) -> Result<TraceInfo, ProxyErr> {
         let trace = self.read(jobid, None)?;
         Ok(trace.info)
@@ -778,6 +780,7 @@ impl TraceView {
         Ok(metrics)
     }
 
+    #[allow(unused)]
     pub(crate) fn full_read(&self, jobid: &String) -> Result<TraceData, ProxyErr> {
         let ht = self.traces.read().unwrap();
 
@@ -842,7 +845,7 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
-    pub(crate) fn to_time_serie(time_serie: &Vec<(u64, CounterType)>) -> Vec<(u64, f64)> {
+    pub(crate) fn to_time_serie(time_serie: &[(u64, CounterType)]) -> Vec<(u64, f64)> {
         let mut ret: Vec<(u64, f64)> = Vec::new();
 
         for (ts, c) in time_serie.iter() {
@@ -852,6 +855,7 @@ impl TraceView {
         ret
     }
 
+    #[allow(unused)]
     pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
         let trace = self.read(jobid, Some(filter))?;
         let ret = TraceView::to_time_serie(&trace.time_serie);

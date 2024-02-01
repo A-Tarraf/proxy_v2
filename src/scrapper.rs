@@ -123,6 +123,7 @@ impl ProxyScraper {
         })
     }
 
+    #[allow(unused)]
     pub(crate) fn snapshot(&self) -> ProxyScraperSnapshot {
         ProxyScraperSnapshot {
             target_url: self.target_url.to_string(),
