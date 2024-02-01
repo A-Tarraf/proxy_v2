@@ -33,7 +33,7 @@ use exporter::ExporterFactory;
 
 use rayon::iter::*;
 
-use crate::trace::TraceView;
+use crate::{proxy_common::offset_time_serie, trace::TraceView};
 
 #[derive(Parser)]
 struct Cli {
@@ -128,6 +128,19 @@ impl TraceExporter {
         let metrics = self.factory.trace_store.metrics(from)?;
         let full_data = self.factory.trace_store.full_read(from)?;
 
+        /* Get the minimum timestamp on series */
+        let offset: u64 = full_data
+            .series
+            .iter()
+            .filter_map(|(_, counter_vec)| {
+                if let Some((ts, _)) = counter_vec.first() {
+                    return Some(*ts);
+                }
+                None
+            })
+            .min()
+            .unwrap_or(0);
+
         /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
         let collected_metrics: Vec<(String, Vec<(u64, f64)>, Vec<(u64, f64)>)> = metrics
             .iter()
@@ -138,11 +151,15 @@ impl TraceExporter {
                     unreachable!();
                 };
 
-                let data = if let Some(d) = full_data.series.get(&id) {
+                let mut data = if let Some(d) = full_data.series.get(&id) {
                     TraceView::to_time_serie(d)
                 } else {
                     return None;
                 };
+
+                /* Fix temporal offset */
+                offset_time_serie(&mut data, offset);
+
                 /* Derivate the data  */
                 let deriv = derivate_time_serie(&data);
 

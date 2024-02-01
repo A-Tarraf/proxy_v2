@@ -845,20 +845,8 @@ impl TraceView {
     pub(crate) fn to_time_serie(time_serie: &Vec<(u64, CounterType)>) -> Vec<(u64, f64)> {
         let mut ret: Vec<(u64, f64)> = Vec::new();
 
-        for c in time_serie.iter() {
-            match c.1 {
-                CounterType::Counter { value } => {
-                    ret.push((c.0, value));
-                }
-                CounterType::Gauge {
-                    min: _,
-                    max: _,
-                    hits,
-                    total,
-                } => {
-                    ret.push((c.0, total / hits));
-                }
-            }
+        for (ts, c) in time_serie.iter() {
+            ret.push((*ts, c.value()));
         }
 
         ret

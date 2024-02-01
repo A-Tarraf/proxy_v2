@@ -75,7 +75,7 @@ impl CounterType {
     }
 
     #[allow(unused)]
-    fn value(&self) -> f64 {
+    pub fn value(&self) -> f64 {
         match self {
             Self::Counter { value } => *value,
             Self::Gauge {

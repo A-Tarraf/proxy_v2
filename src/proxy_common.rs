@@ -203,3 +203,10 @@ pub fn derivate_time_serie(data: &Vec<(u64, f64)>) -> Vec<(u64, f64)> {
 
     ret
 }
+
+#[allow(unused)]
+pub fn offset_time_serie(data: &mut Vec<(u64, f64)>, offset: u64) {
+    for v in data {
+        v.0 -= offset;
+    }
+}
