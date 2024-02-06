@@ -37,19 +37,26 @@ use crate::{proxy_common::offset_time_serie, trace::TraceView};
 #[derive(Parser)]
 struct Cli {
     #[arg(short, long)]
+    /// Path to the profile directory (default ~/.proxyprofile/)
     profile_path: Option<PathBuf>,
+    /// List traces only
     #[arg(short, long, default_value_t = false)]
     list: bool,
+    /// The name of the job to export
     #[arg(short, long)]
     job: Option<String>,
-    #[arg(short, long, default_value_t = false)]
-    export_trace: bool,
+    /// Export all jobs
     #[arg(short, long, default_value_t = false)]
     all_jobs: bool,
-    #[arg(short, long, default_value_t = false)]
-    gen_model: bool,
+    /// Where to write (cannot be used with -a)
     #[arg(short, long)]
     output: Option<PathBuf>,
+    /// Export a trace for the given job(s)
+    #[arg(short, long, default_value_t = false)]
+    export_trace: bool,
+    /// Export a model for the given job(s)
+    #[arg(short, long, default_value_t = false)]
+    gen_model: bool,
 }
 
 #[derive(Serialize)]
