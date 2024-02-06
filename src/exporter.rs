@@ -378,6 +378,8 @@ pub(crate) struct ExporterFactory {
     /// will run them according to their polling
     /// frequency
     scrapes: Mutex<HashMap<String, ProxyScraper>>,
+    /// Pending scrapes to be backpushed
+    pending_scrapes: Mutex<Vec<(String, ProxyScraper)>>,
     /// Instance of the profile manager
     /// in charge of listing and loading profiles
     pub profile_store: Arc<ProfileView>,
@@ -399,16 +401,25 @@ impl ExporterFactory {
             let mut to_delete: Vec<String> = Vec::new();
 
             /* Scrape all the candidates */
-            for (k, v) in self.scrapes.lock().unwrap().iter_mut() {
-                if let Err(e) = v.scrape() {
-                    log::error!("Failed to scrape {} : {}", k, e);
-                    to_delete.push(k.to_string());
+            if let Ok(scrapes) = self.scrapes.lock().as_mut() {
+                for (k, v) in scrapes.iter_mut() {
+                    if let Err(e) = v.scrape() {
+                        log::error!("Failed to scrape {} : {}", k, e);
+                        to_delete.push(k.to_string());
+                    }
                 }
-            }
 
-            /* Remove failed scrapes */
-            for k in to_delete {
-                self.scrapes.lock().unwrap().remove(&k);
+                /* Now backpush pending scrapes (traces might be added as we run) */
+                if let Ok(pending) = self.pending_scrapes.lock().as_mut() {
+                    for (name, scrape) in pending.drain(..) {
+                        scrapes.insert(name, scrape);
+                    }
+                }
+
+                /* Remove failed scrapes */
+                for k in to_delete {
+                    scrapes.remove(&k);
+                }
             }
 
             sleep(Duration::from_millis(500));
@@ -534,6 +545,7 @@ impl ExporterFactory {
             pernode: Arc::new(Exporter::new()),
             perjob: Mutex::new(HashMap::new()),
             scrapes: Mutex::new(HashMap::new()),
+            pending_scrapes: Mutex::new(Vec::new()),
             profile_store: Arc::new(ProfileView::new(&profile_prefix)?),
             trace_store,
             aggregator: aggregate,
@@ -590,10 +602,10 @@ impl ExporterFactory {
     ) -> Result<(), Box<dyn Error>> {
         if let Some(trace) = trace {
             if let Ok(main_trace_scraper) = ProxyScraper::newtrace(exporter, trace) {
-                self.scrapes
+                self.pending_scrapes
                     .lock()
                     .unwrap()
-                    .insert(main_trace_scraper.url().to_string(), main_trace_scraper);
+                    .push((main_trace_scraper.url().to_string(), main_trace_scraper));
             }
         }
 
