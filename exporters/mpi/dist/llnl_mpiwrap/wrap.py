@@ -111,6 +111,8 @@ f_wrap_suffix = "_fortran_wrapper"
 
 # Initial includes and defines for wrapper files.
 wrapper_includes = '''
+#define _GNU_SOURCE
+
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>

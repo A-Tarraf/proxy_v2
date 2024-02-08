@@ -1,3 +1,5 @@
+#include <dlfcn.h>
+
 #include <mpi.h>
 
 #include <string.h>
@@ -8,6 +10,7 @@
 #include <sys/time.h>
 #include <stdio.h>
 #include <unistd.h>
+
 
 #include "cycle.h"
 
@@ -85,6 +88,56 @@ typedef enum
 {{endforallfn}}
   TAU_METRICS_COUNT
 }mpi_wrapper_metrics_t;
+
+typedef enum
+{
+{{forallfn foo}}
+MPI_FN_{{foo}},
+{{endforallfn}}
+MPI_FN_COUNT
+}mpi_func_t;
+
+
+static const char * MPI_FN_NAMES[MPI_FN_COUNT] =
+{
+{{forallfn foo}}
+"{{foo}}",
+{{endforallfn}}
+};
+
+void * resolve_mpi_func(mpi_func_t func)
+{
+  if(func > MPI_FN_COUNT)
+  {
+    return NULL;
+  }
+
+
+  static void (*function_pointers[MPI_FN_COUNT])() = {0};
+
+
+  if(function_pointers[func])
+  {
+    return function_pointers[func];
+  }
+
+  void * ret = dlsym(RTLD_NEXT, MPI_FN_NAMES[func]);
+  function_pointers[func] = (void (*)()) ret;
+
+  return ret;
+}
+
+#define CONCAT(a,b) a##b
+
+#define RESOLVE(to, func) void (*to)() = NULL; \
+                          (to) = (void (*)())resolve_mpi_func(MPI_FN_ ## func); \
+                          if((to) == NULL) \
+                          { \
+                            (to) = (void (*)()) CONCAT(P , func); \
+                          }
+
+
+
 
 static struct MetricProxyValue * __counters[TAU_METRICS_COUNT] = { 0 };
 pthread_spinlock_t __counters_creation_lock;
@@ -211,35 +264,48 @@ static inline void __ensure_size_counter_is_available(char * func_name,
 {{fn foo MPI_Init MPI_Init_thread}}
   mpi_wrapper_initialize();
 
+  {{ret_type}} ret = 0;
+	{{ret_type}} (*fn_{{foo}})({{types}}) = NULL;
+	RESOLVE(tmp_fn_{{foo}}, {{foo}})
+  fn_{{foo}} = ( {{ret_type}} (*)({{types}})) tmp_fn_{{foo}};
+
   CALL_START(TAU_METRIC_{{foo}}_HITS)
 
-  {{callfn}}
+  ret = (fn_{{foo}})({{args}});
 
   CALL_END(TAU_METRIC_{{foo}}_TIME)
 
+  return ret;
 {{endfn}}
 
 
 /* Handle Finalize */
 {{fn foo MPI_Finalize}}
+  {{ret_type}} ret = 0;
+	{{ret_type}} (*fn_{{foo}})({{types}}) = NULL;
+	RESOLVE(tmp_fn_{{foo}}, {{foo}})
+  fn_{{foo}} = ( {{ret_type}} (*)({{types}})) tmp_fn_{{foo}};
+
   CALL_START(TAU_METRIC_{{foo}}_HITS)
 
-  {{callfn}}
+  ret = (fn_{{foo}})({{args}});
 
   CALL_END(TAU_METRIC_{{foo}}_TIME)
 
   metric_proxy_release(__client);
+
+  return ret;
 {{endfn}}
 
-
-
-/* All functions with no size */
-
-{{fnall foo MPI_Init MPI_Init_thread MPI_Finalize}}
+{{fnall foo MPI_Init MPI_Init_thread MPI_Finalize MPI_Pcontrol PMPI_Status_f082f}}
+  {{ret_type}} ret = 0;
+	{{ret_type}} (*fn_{{foo}})({{types}}) = NULL;
+	RESOLVE(tmp_fn_{{foo}}, {{foo}})
+  fn_{{foo}} = ( {{ret_type}} (*)({{types}})) tmp_fn_{{foo}};
 
   CALL_START(TAU_METRIC_{{foo}}_HITS)
 
-  {{callfn}}
+  ret = (fn_{{foo}})({{args}});
 
   CALL_END(TAU_METRIC_{{foo}}_TIME)
 
@@ -247,4 +313,18 @@ static inline void __ensure_size_counter_is_available(char * func_name,
 
   CALL_SIZE("{{foo}}", TAU_METRIC_{{foo}}_SIZE, TAU_METRIC_{{foo}}_SIZE_IN, TAU_METRIC_{{foo}}_SIZE_OUT)
 
+  return ret;
 {{endfnall}}
+
+
+#pragma weak PMPI_Status_f082f = dummy
+#pragma weak PMPI_Status_f2f08 = dummy
+#pragma weak PMPI_Status_f082c = dummy
+
+
+
+void dummy()
+{
+  fprintf(stderr, "Call to function not implemented in proxy wrapper lib\n");
+  abort();
+}
