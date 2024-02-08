@@ -578,10 +578,6 @@ impl Web {
     }
 
     fn handle_list_profiles(&self, _: &Request) -> WebResponse {
-        if let Err(e) = self.factory.profile_store.refresh_profiles() {
-            return WebResponse::BadReq(format!("Failed to refresh profiles : {}", e));
-        }
-
         let prof = self.factory.profile_store.get_profile_list();
         WebResponse::Native(Response::json(&prof))
     }
@@ -617,10 +613,6 @@ impl Web {
     }
 
     fn handle_list_profiles_per_cmd(&self, _: &Request) -> WebResponse {
-        if let Err(e) = self.factory.profile_store.refresh_profiles() {
-            return WebResponse::BadReq(format!("Failed to refresh profiles : {}", e));
-        }
-
         let prof = self.factory.profile_store.gather_by_command();
         WebResponse::Native(Response::json(&prof))
     }

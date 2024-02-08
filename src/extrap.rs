@@ -1,15 +1,225 @@
 use serde::Serialize;
 use std::fs::File;
+use std::sync::Arc;
 
+use anyhow::{anyhow, Result};
+use rayon::iter::{self, IntoParallelRefIterator, ParallelIterator};
+use regex::Regex;
 use std::io::Write;
+use std::{collections::HashMap, fs, path::PathBuf, str::FromStr, time::UNIX_EPOCH};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     error::Error,
     fmt::{self},
-    path::PathBuf,
 };
 
+use meval::Expr;
+
 use crate::proxywireprotocol::JobProfile;
+
+struct ExtrapProjection {
+    equation: String,
+    expr: Expr,
+    rss: f64,
+}
+
+pub(crate) struct ExtrapEval {
+    path: PathBuf,
+    models: HashMap<String, ExtrapProjection>,
+    last_load_date: Option<u64>,
+}
+
+impl ExtrapEval {
+    fn _run_extrap(path: &PathBuf) -> Result<String> {
+        let out = std::process::Command::new("extrap")
+            .args(["--json", &path.to_string_lossy()])
+            .output()?;
+
+        Ok(String::from_utf8(out.stdout)?)
+    }
+
+    fn _mod_time(&self) -> Result<u64> {
+        // Retrieve metadata for the file
+        let metadata = fs::metadata(&self.path)?;
+        Ok(metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs())
+    }
+
+    fn _replace_logs(input: &str) -> Result<String> {
+        /* we need to replace the logs by LN */
+
+        let pattern = Regex::new(r"log\((.*?)\)")?;
+
+        // Perform the replacement
+        let fix = pattern.replace_all(input, |caps: &regex::Captures| {
+            let x = &caps[1];
+            format!("(ln({})/ln(10))", x)
+        });
+
+        let pattern = Regex::new(r"log([0-9]+)\((.*?)\)")?;
+
+        // Perform the replacement
+        let fix = pattern.replace_all(&fix, |caps: &regex::Captures| {
+            let n = &caps[1];
+            let x = &caps[2];
+            format!("(ln({})/ln({}))", x, n)
+        });
+
+        Ok(fix.to_string())
+    }
+
+    fn _load_extrap(&mut self) -> Result<Vec<(String, Expr)>> {
+        let ret = Vec::new();
+
+        let log = ExtrapEval::_run_extrap(&self.path)?;
+
+        /* Filter lines */
+        let mut lines: Vec<String> = log
+            .split('\n')
+            .filter_map(|l| {
+                if l.contains("Model: ") || l.contains("Metric: ") || l.contains("RSS: ") {
+                    Some(l.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        /* Gather metric and model on the same line */
+        lines = lines
+            .chunks(3)
+            .filter_map(|v| {
+                if v.len() == 3 {
+                    let merged = format!("{} ::: {} ::: {}", v[0], v[1], v[2]);
+                    if merged.contains("Model")
+                        && merged.contains("Metric")
+                        && merged.contains("RSS")
+                    {
+                        Some(merged)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        /* Remove previous models */
+        self.models.clear();
+
+        // Define the regular expression pattern
+        let re = Regex::new(r"\s+Metric: (.*) ::: \s+Model: (.*) ::: \s+RSS: (.*)$").unwrap();
+
+        for l in lines {
+            // Perform the capture
+            if let Some(captures) = re.captures(l.as_str()) {
+                // Extract captured groups
+                if let (Some(metric_value), Some(model_value), Some(rss_value)) =
+                    (captures.get(1), captures.get(2), captures.get(3))
+                {
+                    if let Ok(fix) = ExtrapEval::_replace_logs(model_value.as_str()) {
+                        if fix != "None" {
+                            match Expr::from_str(fix.to_string().as_str()) {
+                                Ok(expr) => {
+                                    if let Ok(rss) = rss_value.as_str().parse::<f64>() {
+                                        log::debug!(
+                                            "Model for {} ({}) RSS: {}",
+                                            fix,
+                                            model_value.as_str(),
+                                            rss
+                                        );
+                                        let eval = ExtrapProjection {
+                                            equation: fix.to_string(),
+                                            expr,
+                                            rss,
+                                        };
+                                        self.models.insert(metric_value.as_str().to_string(), eval);
+                                    }
+                                }
+
+                                Err(e) => println!("Failed to parse expression {} : {}", fix, e),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(ret)
+    }
+
+    fn check_model(&mut self) -> Result<()> {
+        let cur_date = self._mod_time()?;
+
+        if let Some(last_date) = self.last_load_date {
+            /* No need to load it is already last snapshot */
+            if last_date == cur_date {
+                return Ok(());
+            }
+        }
+
+        self._load_extrap()?;
+        self.last_load_date = Some(cur_date);
+
+        Ok(())
+    }
+
+    pub(crate) fn new(path: PathBuf) -> Result<ExtrapEval> {
+        if !path.is_file() {
+            return Err(anyhow!("{} is not a file", path.to_string_lossy()));
+        }
+
+        let models = HashMap::new();
+
+        let mut ret = ExtrapEval {
+            path,
+            models,
+            last_load_date: None,
+        };
+
+        Ok(ret)
+    }
+
+    /* From here we have the accessors we need to check the model is up to date
+    each time as we do not rerun extrap if the model is not changed */
+
+    pub(crate) fn models(&mut self) -> Result<Vec<(String, String, f64)>> {
+        self.check_model()?;
+
+        Ok(self
+            .models
+            .iter()
+            .map(|(k, model)| (k.clone(), model.equation.clone(), model.rss))
+            .collect())
+    }
+
+    pub(crate) fn evaluate(&mut self, metric: &String, value: f64) -> Result<f64> {
+        self.check_model()?;
+        if let Some(model) = self.models.get(metric) {
+            if let Ok(func) = model.expr.clone().bind("size") {
+                Ok(func(value))
+            } else {
+                Err(anyhow!("Failed to bind 'size' to {}", model.equation))
+            }
+        } else {
+            Err(anyhow!("No model for metric {}", metric))
+        }
+    }
+
+    pub(crate) fn plot(&mut self, metric: &String, range: &[f64]) -> Result<Vec<(f64, f64)>> {
+        self.check_model()?;
+
+        if let Some(model) = self.models.get(metric) {
+            if let Ok(func) = model.expr.clone().bind("size") {
+                let vals: Vec<(f64, f64)> = range.iter().map(|v| (*v, (func)(*v))).collect();
+                Ok(vals)
+            } else {
+                Err(anyhow!("Failed to bind 'size' to {}", model.equation))
+            }
+        } else {
+            Err(anyhow!("No model for metric {}", metric))
+        }
+    }
+}
 
 /// This represents a line in the JSONL
 /// output of ExtraP json format is:
@@ -178,7 +388,7 @@ impl ExtrapModel {
         self.samples.iter().map(|v| v.to_jsonl_sample()).collect()
     }
 
-    pub(crate) fn serialize(&self, path: PathBuf) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn serialize(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         let mut fd = File::create(path)?;
 
         let samples = self.to_jsonl();
