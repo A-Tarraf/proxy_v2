@@ -1,4 +1,4 @@
-use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType};
+use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobProfile};
 use crate::{
     exporter::{Exporter, ExporterFactory},
     proxy_common::{concat_slices, derivate_time_serie, hostname, parse_bool},
@@ -592,13 +592,22 @@ impl Web {
         WebResponse::BadReq("A GET parameter jobid must be passed".to_string())
     }
 
-    fn handle_jsonl(&self, req: &Request) -> WebResponse {
+    fn job_id_to_profile(&self, jobid: &String) -> Option<JobProfile> {
+        // First assume it is a profile
+
+        if let Ok(prof) = self.factory.profile_store.get_profile(jobid) {
+            /* Found */
+            Some(prof)
+        } else if let Ok(prof) = self.factory.profile_of(jobid, false) {
+            Some(prof)
+        } else {
+            None
+        }
+    }
+
+    fn handle_extrap_get_jsonl(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
-            // First assume it is a profile
-            let prof = if let Ok(prof) = self.factory.profile_store.get_profile(&jobid) {
-                /* Found */
-                prof
-            } else if let Ok(prof) = self.factory.profile_of(&jobid, false) {
+            let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
                 prof
             } else {
                 return WebResponse::BadReq("No such jobid".to_string());
@@ -609,6 +618,43 @@ impl Web {
             }
             return WebResponse::BadReq(format!("Failed to get {}", jobid));
         }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
+    fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
+                prof
+            } else {
+                return WebResponse::BadReq("No such jobid".to_string());
+            };
+
+            if let Ok(model) = self.factory.profile_store.extrap_model_list(&prof.desc) {
+                return WebResponse::Native(Response::json(&model));
+            }
+            return WebResponse::BadReq(format!("Failed to get {}", jobid));
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
+    fn handle_profile_points(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
+                prof
+            } else {
+                return WebResponse::BadReq("No such jobid".to_string());
+            };
+
+            match self
+                .factory
+                .profile_store
+                .generate_profile_points(&prof.desc)
+            {
+                Ok(ret) => return WebResponse::Native(Response::json(&ret)),
+                Err(e) => return WebResponse::BadReq(e.to_string()),
+            }
+        }
+
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
     }
 
@@ -713,7 +759,13 @@ impl Web {
                     "" => self.handle_list_profiles(request),
                     "get" => self.handle_get_profiles(request),
                     "percmd" => self.handle_list_profiles_per_cmd(request),
-                    "extrap" => self.handle_jsonl(request),
+                    "extrap" => self.handle_extrap_get_jsonl(request),
+                    "points" => self.handle_profile_points(request),
+                    _ => WebResponse::BadReq(url),
+                },
+                "model" => match resource.as_str() {
+                    "download" => self.handle_extrap_get_jsonl(request),
+                    "get" => self.handle_extrap_get_model(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

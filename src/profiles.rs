@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use clap::builder::Str;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::de::value;
 
 use super::proxywireprotocol::{JobDesc, JobProfile};
@@ -18,7 +19,7 @@ use crate::extrap::ExtrapEval;
 
 pub(crate) struct ProfileView {
     profdir: PathBuf,
-    profiles: RwLock<HashMap<String, (String, JobDesc)>>,
+    profiles: RwLock<HashMap<String, JobProfile>>,
     models: Mutex<HashMap<String, ExtrapEval>>,
 }
 
@@ -43,6 +44,10 @@ impl ProfileView {
     }
 
     pub(crate) fn get_profile(&self, jobid: &String) -> Result<JobProfile, Box<dyn Error>> {
+        if let Some(prof) = self.profiles.read().unwrap().get(jobid) {
+            return Ok(prof.clone());
+        }
+
         let mut path = self.profdir.clone();
         path.push(format!("{}.profile", jobid));
         ProfileView::_get_profile(&path.to_string_lossy().to_string())
@@ -73,10 +78,10 @@ impl ProfileView {
                 let content = Self::_get_profile(p)?;
                 let extrap_model = self.extrap_filename(&content.desc);
 
-                ht.insert(content.desc.jobid.clone(), (p.to_string(), content.desc));
+                ht.insert(content.desc.jobid.clone(), content);
 
                 if let (Some(extrap_model), hash) = extrap_model {
-                    if extrap_model.is_file() {
+                    if extrap_model.is_file() && !model_ht.contains_key(&hash) {
                         model_ht.insert(hash, ExtrapEval::new(extrap_model)?);
                     }
                 }
@@ -87,35 +92,44 @@ impl ProfileView {
     }
 
     pub(crate) fn gather_by_command(&self) -> HashMap<String, Vec<JobDesc>> {
-        self.refresh_profiles().unwrap_or_default();
-
         let mut ret: HashMap<String, Vec<JobDesc>> = HashMap::new();
 
         let ht = self.profiles.read().unwrap();
 
-        for (_, v) in ht.values() {
-            if !ret.contains_key(&v.command) {
-                ret.insert(v.command.to_string(), Vec::new());
-            }
-            let vec = ret.get_mut(&v.command).unwrap();
-            vec.push(v.clone());
+        for prof in ht.values() {
+            let cmd_vec = ret.entry(prof.desc.command.clone()).or_default();
+            cmd_vec.push(prof.desc.clone());
         }
 
         ret
     }
 
+    pub(crate) fn filter_by_command(&self, cmd: &String) -> Vec<JobDesc> {
+        self.profiles
+            .read()
+            .unwrap()
+            .par_iter()
+            .filter_map(|(_, p)| {
+                if p.desc.command == *cmd {
+                    Some(p.desc.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     #[allow(unused)]
     pub(crate) fn get_profile_list(&self) -> Vec<JobDesc> {
-        self.refresh_profiles().unwrap_or_default();
         self.profiles
             .read()
             .unwrap()
             .values()
-            .map(|(_, v)| v.clone())
+            .map(|prof| prof.desc.clone())
             .collect()
     }
 
-    fn extrap_model_list(&self, desc: &JobDesc) -> Result<Vec<(String, String, f64)>> {
+    pub(crate) fn extrap_model_list(&self, desc: &JobDesc) -> Result<Vec<(String, String, f64)>> {
         let cmd_hash = md5::compute(&desc.command);
         let hash = format!("{:x}", cmd_hash);
 
@@ -126,7 +140,12 @@ impl ProfileView {
         }
     }
 
-    fn extrap_model_eval(&self, desc: &JobDesc, metric: String, size: f64) -> Result<(f64, f64)> {
+    pub(crate) fn extrap_model_eval(
+        &self,
+        desc: &JobDesc,
+        metric: String,
+        size: f64,
+    ) -> Result<(f64, f64)> {
         let cmd_hash = md5::compute(&desc.command);
         let hash = format!("{:x}", cmd_hash);
 
@@ -138,7 +157,7 @@ impl ProfileView {
         }
     }
 
-    fn extrap_model_plot(
+    pub(crate) fn extrap_model_plot(
         &self,
         desc: &JobDesc,
         metric: String,
@@ -155,8 +174,40 @@ impl ProfileView {
         }
     }
 
-    fn generate_extrap_model(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
-        self.refresh_profiles()?;
+    pub(crate) fn generate_profile_points(
+        &self,
+        desc: &JobDesc,
+    ) -> Result<HashMap<String, Vec<(i32, f64)>>> {
+        let matching_desc = self.filter_by_command(&desc.command);
+
+        if !matching_desc.is_empty() {
+            let mut profiles: Vec<JobProfile> = matching_desc
+                .par_iter()
+                .filter_map(|v| self.get_profile(&v.jobid).ok())
+                .collect();
+
+            profiles.sort_by(|a, b| a.desc.size.cmp(&b.desc.size));
+
+            let mut ret: HashMap<String, Vec<(i32, f64)>> = HashMap::new();
+
+            for p in profiles {
+                let size: i32 = p.desc.size;
+                for m in p.counters {
+                    let val_vec = ret.entry(m.name).or_default();
+                    val_vec.push((size, m.ctype.value()));
+                }
+            }
+
+            return Ok(ret);
+        }
+
+        Err(anyhow!(
+            "Failed to find command {} in previous profiles",
+            desc.command
+        ))
+    }
+
+    pub(crate) fn generate_extrap_model(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
         let gather_by_cmd = self.gather_by_command();
 
         if let Some(myjob) = gather_by_cmd.get(&desc.command) {
@@ -210,6 +261,11 @@ impl ProfileView {
         let file = fs::File::create(target_dir)?;
 
         serde_json::to_writer(file, &snap)?;
+
+        self.profiles
+            .write()
+            .unwrap()
+            .insert(desc.jobid.clone(), snap);
 
         self.generate_extrap_model(desc)?;
 
