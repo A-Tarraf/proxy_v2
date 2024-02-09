@@ -76,7 +76,11 @@ impl ExtrapEval {
         let mut lines: Vec<String> = log
             .split('\n')
             .filter_map(|l| {
-                if l.contains("Model: ") || l.contains("Metric: ") || l.contains("RSS: ") {
+                if l.contains("Model: ")
+                    || l.contains("Metric: ")
+                    || l.contains("RSS: ")
+                    || l.contains("Callpath")
+                {
                     Some(l.to_string())
                 } else {
                     None
@@ -84,25 +88,54 @@ impl ExtrapEval {
             })
             .collect();
 
-        /* Gather metric and model on the same line */
-        lines = lines
-            .chunks(3)
-            .filter_map(|v| {
-                if v.len() == 3 {
-                    let merged = format!("{} ::: {} ::: {}", v[0], v[1], v[2]);
-                    if merged.contains("Model")
-                        && merged.contains("Metric")
-                        && merged.contains("RSS")
-                    {
-                        Some(merged)
+        let lines = lines.join("\n");
+
+        let callpath_re = Regex::new(r"Callpath: (.*)$")?;
+
+        let mut per_callpath: Vec<(String, Vec<String>)> = Vec::new();
+
+        for callpath in lines.split("Callpath: ") {
+            /* Attempt to extract Callpath */
+            let lines: Vec<&str> = callpath.split("\n").collect();
+
+            let (callpath, idx) = if let Some(callpath) = lines.get(0) {
+                if let Some(captures) = callpath_re.captures(*callpath) {
+                    if let Some(call) = captures.get(1) {
+                        (call.as_str(), 1)
+                    } else {
+                        ("", 0)
+                    }
+                } else {
+                    ("", 0)
+                }
+            } else {
+                ("", 0)
+            };
+
+            /* Gather metric and model on the same line */
+            let metrics: Vec<String> = lines[idx..]
+                .chunks(3)
+                .filter_map(|v| {
+                    if v.len() == 3 {
+                        let merged = format!("{} ::: {} ::: {}", v[0], v[1], v[2]);
+                        if merged.contains("Model")
+                            && merged.contains("Metric")
+                            && merged.contains("RSS")
+                        {
+                            Some(merged)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
-                } else {
-                    None
-                }
-            })
-            .collect();
+                })
+                .collect();
+
+            per_callpath.push((callpath.to_string(), metrics));
+        }
+
+        println!("{:?}", per_callpath);
 
         /* Remove previous models */
         self.models.clear();
@@ -110,34 +143,40 @@ impl ExtrapEval {
         // Define the regular expression pattern
         let re = Regex::new(r"\s+Metric: (.*) ::: \s+Model: (.*) ::: \s+RSS: (.*)$").unwrap();
 
-        for l in lines {
-            // Perform the capture
-            if let Some(captures) = re.captures(l.as_str()) {
-                // Extract captured groups
-                if let (Some(metric_value), Some(model_value), Some(rss_value)) =
-                    (captures.get(1), captures.get(2), captures.get(3))
-                {
-                    if let Ok(fix) = ExtrapEval::_replace_logs(model_value.as_str()) {
-                        if fix != "None" {
-                            match Expr::from_str(fix.to_string().as_str()) {
-                                Ok(expr) => {
-                                    if let Ok(rss) = rss_value.as_str().parse::<f64>() {
-                                        log::debug!(
-                                            "Model for {} ({}) RSS: {}",
-                                            fix,
-                                            model_value.as_str(),
-                                            rss
-                                        );
-                                        let eval = ExtrapProjection {
-                                            equation: fix.to_string(),
-                                            expr,
-                                            rss,
-                                        };
-                                        self.models.insert(metric_value.as_str().to_string(), eval);
+        for (callpath, metrics) in per_callpath {
+            for m in metrics {
+                // Perform the capture
+                if let Some(captures) = re.captures(m.as_str()) {
+                    // Extract captured groups
+                    if let (Some(metric_value), Some(model_value), Some(rss_value)) =
+                        (captures.get(1), captures.get(2), captures.get(3))
+                    {
+                        if let Ok(fix) = ExtrapEval::_replace_logs(model_value.as_str()) {
+                            if fix != "None" {
+                                match Expr::from_str(fix.to_string().as_str()) {
+                                    Ok(expr) => {
+                                        if let Ok(rss) = rss_value.as_str().parse::<f64>() {
+                                            let name =
+                                                format!("{}{}", callpath, metric_value.as_str());
+                                            log::debug!(
+                                                "Model for {} ({}) RSS: {}",
+                                                name,
+                                                fix,
+                                                rss
+                                            );
+                                            let eval = ExtrapProjection {
+                                                equation: fix.to_string(),
+                                                expr,
+                                                rss,
+                                            };
+                                            self.models.insert(name, eval);
+                                        }
+                                    }
+
+                                    Err(e) => {
+                                        println!("Failed to parse expression {} : {}", fix, e)
                                     }
                                 }
-
-                                Err(e) => println!("Failed to parse expression {} : {}", fix, e),
                             }
                         }
                     }
