@@ -445,6 +445,7 @@ impl JobDesc {
 
         let size = env::var("SLURM_NTASKS")
             .or_else(|_| env::var("OMPI_COMM_WORLD_SIZE"))
+            .or_else(|_| env::var("PMI_SIZE"))
             .unwrap_or("1".to_string())
             .parse::<i32>()
             .unwrap_or(1);
