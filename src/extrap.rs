@@ -90,24 +90,14 @@ impl ExtrapEval {
 
         let lines = lines.join("\n");
 
-        let callpath_re = Regex::new(r"Callpath: (.*)$")?;
-
         let mut per_callpath: Vec<(String, Vec<String>)> = Vec::new();
 
         for callpath in lines.split("Callpath: ") {
             /* Attempt to extract Callpath */
-            let lines: Vec<&str> = callpath.split("\n").collect();
+            let lines: Vec<&str> = callpath.split('\n').collect();
 
-            let (callpath, idx) = if let Some(callpath) = lines.get(0) {
-                if let Some(captures) = callpath_re.captures(*callpath) {
-                    if let Some(call) = captures.get(1) {
-                        (call.as_str(), 1)
-                    } else {
-                        ("", 0)
-                    }
-                } else {
-                    ("", 0)
-                }
+            let (callpath, idx) = if let Some(callpath) = lines.first() {
+                (*callpath, 1)
             } else {
                 ("", 0)
             };
@@ -135,8 +125,6 @@ impl ExtrapEval {
             per_callpath.push((callpath.to_string(), metrics));
         }
 
-        println!("{:?}", per_callpath);
-
         /* Remove previous models */
         self.models.clear();
 
@@ -156,8 +144,8 @@ impl ExtrapEval {
                                 match Expr::from_str(fix.to_string().as_str()) {
                                     Ok(expr) => {
                                         if let Ok(rss) = rss_value.as_str().parse::<f64>() {
-                                            let name =
-                                                format!("{}{}", callpath, metric_value.as_str());
+                                            /* This is not elegant as we backparse the callpath from extrap .. */
+                                            let name = callpath.replace("->", "___");
                                             log::debug!(
                                                 "Model for {} ({}) RSS: {}",
                                                 name,

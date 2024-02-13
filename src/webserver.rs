@@ -1,9 +1,11 @@
+use crate::proxy_common::{gen_range, ProxyErr};
 use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobProfile};
 use crate::{
     exporter::{Exporter, ExporterFactory},
     proxy_common::{concat_slices, derivate_time_serie, hostname, parse_bool},
 };
 
+use anyhow::anyhow;
 use colored::Colorize;
 use rouille::input::json::JsonError;
 use rouille::{Request, Response};
@@ -637,6 +639,60 @@ impl Web {
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
     }
 
+    fn handle_extrap_plot_model(&self, req: &Request) -> WebResponse {
+        if let (Some(jobid), Some(metric), Some(start), Some(end)) = (
+            req.get_param("jobid"),
+            req.get_param("metric"),
+            req.get_param("start"),
+            req.get_param("end"),
+        ) {
+            let step = if let Some(sstep) = req.get_param("step") {
+                if let Ok(step) = sstep.parse::<f64>() {
+                    step
+                } else {
+                    return WebResponse::BadReq(
+                        "Failed to parse the step parameter as an integer".to_string(),
+                    );
+                }
+            } else {
+                1.0
+            };
+
+            let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
+                prof
+            } else {
+                return WebResponse::BadReq("No such jobid".to_string());
+            };
+
+            let (start, end) =
+                if let (Ok(start), Ok(end)) = (start.parse::<f64>(), end.parse::<f64>()) {
+                    (start, end)
+                } else {
+                    return WebResponse::BadReq(
+                        "Failed to parse the start/end parameter as an integer".to_string(),
+                    );
+                };
+
+            let range: Vec<f64> = match gen_range(start, end, step) {
+                Ok(range) => range,
+                Err(e) => {
+                    return WebResponse::BadReq(format!("Failed to generate range {}", e));
+                }
+            };
+
+            if let Ok(model) = self
+                .factory
+                .profile_store
+                .extrap_model_plot(&prof.desc, metric, &range)
+            {
+                return WebResponse::Native(Response::json(&model));
+            }
+
+            return WebResponse::BadReq(format!("Failed to get {}", jobid));
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
     fn handle_profile_points(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
             let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
@@ -766,6 +822,7 @@ impl Web {
                 "model" => match resource.as_str() {
                     "download" => self.handle_extrap_get_jsonl(request),
                     "get" => self.handle_extrap_get_model(request),
+                    "plot" => self.handle_extrap_plot_model(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

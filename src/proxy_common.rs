@@ -211,3 +211,23 @@ pub fn offset_time_serie(data: &mut Vec<(u64, f64)>, offset: u64) {
         v.0 -= offset;
     }
 }
+
+pub fn gen_range(start: f64, end: f64, step: f64) -> Result<Vec<f64>, ProxyErr> {
+    let mut ret: Vec<f64> = Vec::new();
+    let mut v = start;
+
+    if end < start {
+        return Err(ProxyErr::new("End cannot be smaller than start"));
+    }
+
+    if step <= 0.0 {
+        return Err(ProxyErr::new("End cannot be smaller than start"));
+    }
+
+    while v < end {
+        ret.push(v);
+        v += step;
+    }
+
+    Ok(ret)
+}
