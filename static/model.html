@@ -1,0 +1,297 @@
+<main>
+	<script src="/chart.js"></script>
+
+	<div id="container">
+		<div id="jobSelectContainer">
+			<label for="jobSelect">Select Job:</label>
+			<select id="jobSelect" onchange="getMetrics(this.value)">
+				 <option value="">Select a job...</option>
+			</select>
+	  </div>
+		<div id="metricsTableContainer">
+
+			 <table id="metricsTable">
+				  <thead>
+						<tr>
+							 <th>Metric Name</th>
+							 <th>Metric Model</th>
+							 <th>RSS</th>
+							 <th>Action</th>
+						</tr>
+				  </thead>
+				  <tbody id="metricsBody">
+						<!-- Metrics will be dynamically added here -->
+				  </tbody>
+			 </table>
+		</div>
+		<div id="chartAndSidebar">
+			<canvas id="metricChart"></canvas>
+			<div id="sidebar">
+				 <div id="endSliderContainer">
+					  <label for="endSlider">Model Projection:</label>
+					  <input type="range" id="endSlider" name="endSlider" min="0" max="100" value="0" onchange="updateEndParameter()">
+					  <span id="endValue">0</span> <!-- Display the current value of the slider -->
+				 </div>
+				 <div id="displayModelCheckbox">
+					<label for="displayModel">Display ExtraP Model</label>
+					<input type="checkbox" id="displayModel" name="displayModel" onchange="toggleModelVisibility()" checked>
+			  </div>
+			  <div id="scaleMbCheckbox">
+				<label for="scaleMb">Scale in Megabytes (MB)</label>
+				<input type="checkbox" id="scaleMb" name="scaleMb" onchange="toogleScaleMb()">
+		  </div>
+			</div>
+	  </div>
+  </div>
+  
+	<script>
+
+    // Fetch data from the endpoint
+    fetch('/profiles')
+        .then(response => response.json())
+        .then(data => {
+            const jobSelect = document.getElementById('jobSelect');
+            data.forEach(job => {
+                const option = document.createElement('option');
+                option.value = job.jobid;
+                option.textContent = job.jobid;
+                jobSelect.appendChild(option);
+            });
+        })
+        .catch(error => console.error('Error fetching data:', error));
+
+		var jobId = null;
+
+		function getMetrics(job) {
+			jobId = job;
+			var xhr = new XMLHttpRequest();
+			xhr.open("GET", "/model/get?jobid=" + jobId, true);
+			xhr.onreadystatechange = function () {
+				if (xhr.readyState === 4 && xhr.status === 200) {
+					var metrics = JSON.parse(xhr.responseText);
+					displayMetrics(metrics);
+				}
+			};
+			xhr.send();
+		}
+
+		function displayMetrics(metrics) {
+			var tableBody = document.getElementById("metricsBody");
+			tableBody.innerHTML = ""; // Clear previous data
+
+			metrics.forEach(function (metric) {
+				var row = document.createElement("tr");
+				var metricName = metric[0];
+				var metricModel = metric[1];
+				var rss = metric[2];
+				var button = document.createElement("button");
+				button.textContent = "Display Model";
+				button.onclick = function () {
+					plotMetricData(metricName);
+				};
+
+				var nameCell = document.createElement("td");
+				nameCell.textContent = metricName;
+				row.appendChild(nameCell);
+
+				var modelCell = document.createElement("td");
+				modelCell.textContent = metricModel;
+				row.appendChild(modelCell);
+
+				var rssCell = document.createElement("td");
+				rssCell.textContent = rss;
+				row.appendChild(rssCell);
+
+				var buttonCell = document.createElement("td");
+				buttonCell.appendChild(button);
+				row.appendChild(buttonCell);
+
+				tableBody.appendChild(row);
+			});
+		}
+
+		var current_metric = null;
+
+		function plotMetricData(metricName) {
+			current_metric = metricName;
+			var profileXhr = new XMLHttpRequest();
+			profileXhr.open("GET", "/profiles/points?jobid=" + jobId, true);
+			profileXhr.onreadystatechange = function () {
+				if (profileXhr.readyState === 4 && profileXhr.status === 200) {
+					var profileData = JSON.parse(profileXhr.responseText);
+					var metricData = profileData[metricName];
+					if (metricData) {
+						var plotData = {
+							x: [],
+							y: []
+						};
+						metricData.forEach(function (point) {
+							plotData.x.push(point[0]);
+							plotData.y.push(point[1]);
+						});
+						plotMetricWithRange(jobId, plotData, metricName);
+					} else {
+						alert("No profile data found for metric: " + metricName);
+					}
+				}
+			};
+			profileXhr.send();
+		}
+
+		var add_to_end = 0;
+		function updateEndParameter() {
+			add_to_end = document.getElementById("endSlider").value; // Get the value of the slider
+			document.getElementById("endValue").textContent = add_to_end; // Update the displayed value
+
+			if (current_metric != null) {
+				plotMetricData(current_metric);
+			}
+		}
+
+		var show_model = true;
+
+		function toggleModelVisibility() {
+			var displayModelCheckbox = document.getElementById("displayModel");
+			
+			if (displayModelCheckbox.checked) {
+				// Hide the model or perform any other action
+				show_model = true;
+			} else {
+				// Show the model or perform any other action
+				show_model = false;
+			}
+
+
+			if (current_metric != null) {
+				plotMetricData(current_metric);
+			}
+		}
+
+
+		var scale_mb = false;
+
+		function toogleScaleMb() {
+			var scmb = document.getElementById("scaleMb");
+			
+			if (scmb.checked) {
+				// Hide the model or perform any other action
+				scale_mb = true;
+			} else {
+				// Show the model or perform any other action
+				scale_mb = false;
+			}
+
+
+			if (current_metric != null) {
+				plotMetricData(current_metric);
+			}
+		}
+
+		var chart = null;
+
+		function plotMetricWithRange(jobId, plotData, metricName) {
+			// Clear existing chart
+			if (chart) {
+				chart.destroy();
+				chart = null;
+			}
+
+			var start = plotData.x[0];
+			var end = plotData.x[plotData.x.length - 1] + parseInt(add_to_end) + 1;
+
+			console.log(end);
+
+			var requestData = {
+				jobid: jobId,
+				start: start,
+				end: end,
+				metric: metricName
+			};
+
+			var plotXhr = new XMLHttpRequest();
+			plotXhr.open("POST", "/model/plot", true);
+			plotXhr.setRequestHeader("Content-Type", "application/json");
+			plotXhr.onreadystatechange = function () {
+				if (plotXhr.readyState === 4 && plotXhr.status === 200) {
+					var plotResponse = JSON.parse(plotXhr.responseText);
+
+					var structured_response = {
+						x: [],
+						y: []
+					};
+
+					plotResponse.forEach(function (point) {
+						structured_response.x.push(point[0]);
+						structured_response.y.push(point[1]);
+					});
+
+					var allX = [...new Set([...plotData.x, ...structured_response.x])].sort((a, b) => a - b);
+					// Initialize arrays for merged Y values
+					var mergedPlotDataY = [];
+					var mergedPlotResponseY = [];
+
+					// Populate merged Y values arrays
+					allX.forEach(x => {
+						mergedPlotDataY.push(plotData.x.includes(x) ? plotData.y[plotData.x.indexOf(x)] : null);
+						mergedPlotResponseY.push(structured_response.x.includes(x) ? structured_response.y[structured_response.x.indexOf(x)] : null);
+					});
+
+					if(scale_mb)
+					{
+						for (let i = 0; i < mergedPlotDataY.length; i++) {
+							mergedPlotDataY[i] /= (1024 * 1024);
+						}
+						for (let i = 0; i < mergedPlotDataY.length; i++) {
+							mergedPlotResponseY[i] /= (1024 * 1024);
+						}
+					}
+
+
+					var datasets = [
+								{
+									label: metricName + " (Profile Data)",
+									data: mergedPlotDataY,
+									borderColor: 'rgb(75, 192, 192)',
+									backgroundColor: 'rgba(75, 192, 192, 0.2)', // Background color for the area under the line
+									tension: 0.1,
+									pointRadius: 8, // Set larger point size
+									pointStyle: 'circle', // Set point style to circle
+									pointBackgroundColor: 'rgb(75, 192, 192)' // Set point color
+								}
+							];
+
+					if(show_model)
+					{
+						datasets.push({
+									label: metricName + " (ExtraP Model)",
+									data: mergedPlotResponseY,
+									borderColor: 'rgb(255, 99, 132)',
+									backgroundColor: 'rgba(255, 99, 132, 0.2)', // Background color for the area under the line
+									tension: 0.1,
+									borderDash: [5, 5] // Set dashed line
+								});
+					}
+
+					var ctx = document.getElementById("metricChart").getContext("2d");
+					chart = new Chart(ctx, {
+						type: 'line',
+						data: {
+							labels: allX,
+							datasets: datasets
+						},
+						options: {
+							scales: {
+								x: {
+									type: 'linear',
+									position: 'bottom'
+								}
+							}
+						}
+					});
+				}
+			};
+			plotXhr.send(JSON.stringify(requestData));
+		}
+
+	</script>
+</main>

@@ -640,57 +640,102 @@ impl Web {
     }
 
     fn handle_extrap_plot_model(&self, req: &Request) -> WebResponse {
-        if let (Some(jobid), Some(metric), Some(start), Some(end)) = (
-            req.get_param("jobid"),
-            req.get_param("metric"),
-            req.get_param("start"),
-            req.get_param("end"),
-        ) {
-            let step = if let Some(sstep) = req.get_param("step") {
-                if let Ok(step) = sstep.parse::<f64>() {
-                    step
-                } else {
-                    return WebResponse::BadReq(
-                        "Failed to parse the step parameter as an integer".to_string(),
-                    );
+        let (jobid, metric, start, end, step) = match req.method() {
+            "GET" => match (
+                req.get_param("jobid"),
+                req.get_param("metric"),
+                req.get_param("start"),
+                req.get_param("end"),
+                req.get_param("step"),
+            ) {
+                (Some(jobid), Some(metric), Some(start), Some(end), step) => {
+                    let step = if let Some(sstep) = step {
+                        if let Ok(step) = sstep.parse::<f64>() {
+                            step
+                        } else {
+                            return WebResponse::BadReq(
+                                "Failed to parse the step parameter as an integer".to_string(),
+                            );
+                        }
+                    } else {
+                        1.0
+                    };
+
+                    let (start, end) =
+                        if let (Ok(start), Ok(end)) = (start.parse::<f64>(), end.parse::<f64>()) {
+                            (start, end)
+                        } else {
+                            return WebResponse::BadReq(
+                                "Failed to parse the start/end parameter as an integer".to_string(),
+                            );
+                        };
+
+                    (jobid, metric, start, end, step)
                 }
-            } else {
-                1.0
-            };
-
-            let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
-                prof
-            } else {
-                return WebResponse::BadReq("No such jobid".to_string());
-            };
-
-            let (start, end) =
-                if let (Ok(start), Ok(end)) = (start.parse::<f64>(), end.parse::<f64>()) {
-                    (start, end)
-                } else {
-                    return WebResponse::BadReq(
-                        "Failed to parse the start/end parameter as an integer".to_string(),
-                    );
-                };
-
-            let range: Vec<f64> = match gen_range(start, end, step) {
-                Ok(range) => range,
-                Err(e) => {
-                    return WebResponse::BadReq(format!("Failed to generate range {}", e));
+                _ => {
+                    return WebResponse::BadReq("Missing 'name' GET parameter".to_string());
                 }
-            };
-
-            if let Ok(model) = self
-                .factory
-                .profile_store
-                .extrap_model_plot(&prof.desc, metric, &range)
-            {
-                return WebResponse::Native(Response::json(&model));
+            },
+            "POST" => {
+                #[derive(Deserialize, Debug)]
+                struct ToDel {
+                    jobid: String,
+                    metric: String,
+                    start: f64,
+                    end: f64,
+                    step: Option<f64>,
+                }
+                let al: Result<ToDel, JsonError> = rouille::input::json_input(req);
+                match al {
+                    Ok(v) => {
+                        let step = if let Some(step) = v.step { step } else { 1.0 };
+                        (v.jobid, v.metric, v.start, v.end, step)
+                    }
+                    Err(e) => {
+                        log::error!("Failed to process plot : {}", e);
+                        return WebResponse::BadReq(format!("Failed to parse json {}", e));
+                    }
+                }
             }
+            _ => {
+                return WebResponse::BadReq("No such request type".to_string());
+            }
+        };
 
-            return WebResponse::BadReq(format!("Failed to get {}", jobid));
+        let step = if let Some(sstep) = req.get_param("step") {
+            if let Ok(step) = sstep.parse::<f64>() {
+                step
+            } else {
+                return WebResponse::BadReq(
+                    "Failed to parse the step parameter as an integer".to_string(),
+                );
+            }
+        } else {
+            1.0
+        };
+
+        let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
+            prof
+        } else {
+            return WebResponse::BadReq("No such jobid".to_string());
+        };
+
+        let range: Vec<f64> = match gen_range(start, end, step) {
+            Ok(range) => range,
+            Err(e) => {
+                return WebResponse::BadReq(format!("Failed to generate range {}", e));
+            }
+        };
+
+        if let Ok(model) = self
+            .factory
+            .profile_store
+            .extrap_model_plot(&prof.desc, metric, &range)
+        {
+            return WebResponse::Native(Response::json(&model));
         }
-        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+
+        WebResponse::BadReq(format!("Failed to get {}", jobid))
     }
 
     fn handle_profile_points(&self, req: &Request) -> WebResponse {
