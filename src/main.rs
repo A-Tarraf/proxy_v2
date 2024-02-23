@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::path::PathBuf;
 use std::process::exit;
 use std::thread::{self, sleep};
 use std::time::Duration;
@@ -57,9 +58,13 @@ struct Args {
     #[arg(short, long)]
     root_proxy: Option<String>,
 
-    /// Maximum trace size to maintain in the file-system in MB
+    /// Maximum trace size to maintain in the file-system in MB (default 32MB)
     #[arg(short, long)]
     max_trace_size: Option<f64>,
+
+    /// Root directory for the proxy (optionnal default ~/.proxyprofiles/)
+    #[arg(short, long)]
+    target_prefix: Option<PathBuf>,
 }
 
 fn parse_period(arg: &String) -> (String, u64) {
@@ -86,8 +91,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let args = Args::parse();
 
-    let mut profile_prefix = dirs::home_dir().unwrap();
-    profile_prefix.push(".proxyprofiles");
+    let profile_prefix = if let Some(prefix) = args.target_prefix {
+        prefix
+    } else {
+        let mut d = dirs::home_dir().unwrap();
+        d.push(".proxyprofiles");
+        d
+    };
 
     let max_trace_size = if let Some(max_size) = args.max_trace_size {
         max_size * 1024.0 * 1024.0
