@@ -823,8 +823,8 @@ def write_c_wrapper(out, decl, return_val, write_body):
     """Write the C wrapper for an MPI function."""
     # Write the PMPI prototype here in case mpi.h doesn't define it
     # (sadly the case with some MPI implementaitons)
-    out.write(decl.pmpi_prototype(default_modifiers))
-    out.write(";\n")
+    #out.write(decl.pmpi_prototype(default_modifiers))
+    #out.write(";\n")
 
     # Now write the wrapper function, which will call the PMPI function we declared.
     out.write(decl.prototype(default_modifiers))
