@@ -231,3 +231,29 @@ pub fn gen_range(start: f64, end: f64, step: f64) -> Result<Vec<f64>, ProxyErr> 
 
     Ok(ret)
 }
+
+pub fn getppid() -> Result<u32, Box<dyn Error>> {
+    let id = std::process::id();
+
+    let path_to_status = format!("/proc/{}/task/{}/status", id, id);
+
+    let st = String::from_utf8(std::fs::read(path_to_status)?)?;
+
+    for v in st.split('\n') {
+        if v.starts_with("PPid:") {
+            let sid = v.replace("PPid:", "").trim().to_string();
+            match sid.parse::<u32>() {
+                Ok(v) => {
+                    return Ok(v);
+                }
+                Err(e) => {
+                    return Err(ProxyErr::newboxed(e));
+                }
+            }
+        }
+    }
+
+    Err(ProxyErr::newboxed(
+        "Could not find PPID entry in /proc/self/status",
+    ))
+}

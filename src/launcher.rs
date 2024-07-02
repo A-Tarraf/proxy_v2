@@ -4,7 +4,7 @@ use std::{error::Error, path::PathBuf};
 
 mod proxy_common;
 use proxy_common::init_log;
-use proxy_common::{list_files_with_ext_in, ProxyErr};
+use proxy_common::{getppid, list_files_with_ext_in, ProxyErr};
 
 use std::path::Path;
 
@@ -209,6 +209,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     /* Handle JobID */
     if let Some(jobid) = args.jobid {
         cmd.env("PROXY_JOB_ID", jobid);
+    }
+
+    if let Ok(sppid) = getppid() {
+        cmd.env("METRIC_PROXY_LAUNCHER_PPID", format!("{}", sppid));
     }
 
     /* Handle Proxy Socket */

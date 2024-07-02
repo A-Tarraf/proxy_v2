@@ -430,7 +430,10 @@ impl JobDesc {
         let mut jobid = env::var("PROXY_JOB_ID")
             .or_else(|_| env::var("SLURM_JOBID"))
             .or_else(|_| env::var("PMIX_ID"))
+            .or_else(|_| env::var("METRIC_PROXY_LAUNCHER_PPID"))
             .unwrap_or_else(|_| "".to_string());
+
+        log::info!("JobID is {}", jobid);
 
         /* Concatenate the step id if present  */
         if let Ok(stepid) = env::var("SLURM_STEP_ID") {
