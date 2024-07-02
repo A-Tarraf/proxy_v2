@@ -73,7 +73,7 @@
                     data.forEach(item => {
                         const option = document.createElement('option');
                         option.value = item.desc.jobid;
-                        option.textContent = item.desc.jobid;
+                        option.textContent = item.desc.jobid + " : " + item.desc.command;
                         comboBox.appendChild(option);
                     });
 

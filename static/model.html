@@ -54,7 +54,7 @@
             data.forEach(job => {
                 const option = document.createElement('option');
                 option.value = job.jobid;
-                option.textContent = job.jobid;
+                option.textContent = job.jobid + " : " + job.command;
                 jobSelect.appendChild(option);
             });
         })
