@@ -80,9 +80,9 @@ cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to
 BUILD_SOURCE_ROOT=""
 
 if test -d "$SOURCE_ROOT/target/debug"; then
-	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/release"
-elif test -d "$SOURCE_ROOT/target/release"; then
 	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/debug"
+elif test -d "$SOURCE_ROOT/target/release"; then
+	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/release"
 else
 	error_out "Cannot locate build, did 'cargo build' succeed ?"
 fi
