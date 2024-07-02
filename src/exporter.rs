@@ -404,7 +404,7 @@ impl ExporterFactory {
             if let Ok(scrapes) = self.scrapes.lock().as_mut() {
                 for (k, v) in scrapes.iter_mut() {
                     if let Err(e) = v.scrape() {
-                        log::error!("Failed to scrape {} : {}", k, e);
+                        log::debug!("Failed to scrape {} : {}", k, e);
                         to_delete.push(k.to_string());
                     }
                 }
