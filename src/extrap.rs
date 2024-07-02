@@ -358,6 +358,22 @@ impl ExtrapModel {
     }
 
     pub(crate) fn new(profiles: Vec<JobProfile>) -> ExtrapModel {
+        /* We remove strange entries in which number of counters are  lower than the average to keep a broad model
+        we also do not keep track of failed jobs (using .did_complete()) */
+        let counters = profiles
+            .iter()
+            .map(|v| v.counters.len())
+            .collect::<Vec<usize>>();
+
+        let average_metrics = counters.iter().sum::<usize>() / counters.len();
+
+        /* Now filter input array with average metrics and correct completion of the JOB */
+        let profiles = profiles
+            .iter()
+            .filter(|v| (v.counters.len() > average_metrics) && v.did_complete())
+            .cloned()
+            .collect();
+
         let mut ret = ExtrapModel {
             profiles,
             samples: Vec::new(),
@@ -416,6 +432,10 @@ impl ExtrapModel {
     }
 
     pub(crate) fn serialize(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+        log::info!(
+            "Serializing ExtraP MODEL to {}",
+            path.as_os_str().to_string_lossy()
+        );
         let mut fd = File::create(path)?;
 
         let samples = self.to_jsonl();

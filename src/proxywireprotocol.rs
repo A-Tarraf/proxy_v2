@@ -673,7 +673,7 @@ impl JobProfile {
     }
 
     #[allow(unused)]
-    pub(crate) fn get(&self, name: &String) -> Option<CounterSnapshot> {
+    pub(crate) fn get(&self, name: &str) -> Option<CounterSnapshot> {
         for c in self.counters.iter() {
             if c.name == *name {
                 return Some(c.clone());
@@ -681,6 +681,14 @@ impl JobProfile {
         }
 
         None
+    }
+
+    pub(crate) fn did_complete(&self) -> bool {
+        if let (Some(start), Some(end)) = (self.get("has_started"), self.get("has_finished")) {
+            return start.value().value == end.value().value;
+        }
+
+        false
     }
 }
 
