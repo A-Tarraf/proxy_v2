@@ -286,7 +286,18 @@ impl MetricProxyClient {
 #[no_mangle]
 pub extern "C" fn metric_proxy_init() -> *mut MetricProxyClient {
     let client = MetricProxyClient::new();
-    Arc::into_raw(client) as *mut MetricProxyClient
+    let client = Arc::into_raw(client) as *mut MetricProxyClient;
+
+    let pclient: &mut MetricProxyClient = unsafe { &mut *(client) };
+
+    if let Ok(start) = pclient.new_counter(
+        "has_started".to_string(),
+        "Number of calls to metric_proxy_init".to_string(),
+    ) {
+        start.inc(1.0);
+    }
+
+    client
 }
 
 /// Release the metric proxy
@@ -303,7 +314,14 @@ pub unsafe extern "C" fn metric_proxy_release(pclient: *mut MetricProxyClient) -
     let one: std::ffi::c_int = 1;
 
     /* Get the client back and drop it */
-    let client: Arc<MetricProxyClient> = unsafe { Arc::from_raw(pclient) };
+    let client: &mut MetricProxyClient = unsafe { &mut *(pclient) };
+
+    if let Ok(done) = client.new_counter(
+        "has_finished".to_string(),
+        "Number of calls to metric_proxy_release".to_string(),
+    ) {
+        done.inc(1.0);
+    }
 
     *client.running.lock().unwrap() = false;
 
