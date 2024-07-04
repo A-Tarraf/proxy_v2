@@ -63,6 +63,36 @@ impl CounterType {
     }
 
     #[allow(unused)]
+    pub fn clean_nan(&mut self) {
+        match self {
+            CounterType::Counter { value } => {
+                if value.is_infinite() || value.is_nan() {
+                    *value = 0.0;
+                }
+            }
+            Self::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {
+                if min.is_infinite() || min.is_nan() {
+                    *min = 0.0;
+                }
+                if max.is_infinite() || max.is_nan() {
+                    *max = 0.0;
+                }
+                if hits.is_infinite() || hits.is_nan() {
+                    *hits = 0.0;
+                }
+                if total.is_infinite() || total.is_nan() {
+                    *total = 0.0;
+                }
+            }
+        }
+    }
+
+    #[allow(unused)]
     pub fn hasdata(&self) -> bool {
         match self {
             CounterType::Counter { value } => *value != 0.0,
@@ -433,7 +463,7 @@ impl JobDesc {
             .or_else(|_| env::var("METRIC_PROXY_LAUNCHER_PPID"))
             .unwrap_or_else(|_| "".to_string());
 
-        log::info!("JobID is {}", jobid);
+        log::debug!("JobID is {}", jobid);
 
         /* Concatenate the step id if present  */
         if let Ok(stepid) = env::var("SLURM_STEP_ID") {
@@ -541,6 +571,11 @@ impl CounterSnapshot {
             doc,
             ctype: value,
         }
+    }
+
+    #[allow(unused)]
+    pub fn clean(&mut self) {
+        self.ctype.clean_nan();
     }
 
     #[allow(unused)]

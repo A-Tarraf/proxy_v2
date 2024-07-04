@@ -230,10 +230,7 @@ impl ProfileView {
 
             /* Make sure the model is in the Evaluation list */
             if let Ok(model_ht) = self.models.lock().as_mut() {
-                if !model_ht.contains_key(&hash) {
-                    let model = ExtrapEval::new(target_dir)?;
-                    model_ht.insert(hash, model);
-                }
+                model_ht.entry(hash).or_insert(ExtrapEval::new(target_dir)?);
                 /* Otherwise nothing to do as we use the metadata when pulling from the model */
             }
         }
@@ -243,7 +240,7 @@ impl ProfileView {
 
     pub(crate) fn saveprofile(
         &self,
-        snap: JobProfile,
+        mut snap: JobProfile,
         desc: &JobDesc,
     ) -> Result<(), Box<dyn Error>> {
         let mut target_dir = self.profdir.clone();
@@ -257,6 +254,11 @@ impl ProfileView {
             desc.jobid,
             target_dir.to_str().unwrap_or("")
         );
+
+        // Nan / Infinite values seralize to null and cannot be parsed back
+        // This is why we make this pass on all values to ensure we do not store
+        // invalid data
+        snap.counters.iter_mut().for_each(|c| c.clean());
 
         let file = fs::File::create(target_dir)?;
 
