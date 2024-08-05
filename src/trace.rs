@@ -16,9 +16,97 @@ use serde::{Deserialize, Serialize};
 use serde_binary::binary_stream;
 
 use crate::{
+    exporter::ExporterFactory,
     proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, ProxyErr},
     proxywireprotocol::{max_f64, min_f64, CounterSnapshot, CounterType, JobDesc, JobProfile},
 };
+
+use crate::proxy_common::derivate_time_serie;
+use crate::proxy_common::offset_time_serie;
+
+/**********************
+ * JSON TRACE SUPPORT *
+ **********************/
+#[derive(Serialize)]
+pub struct TraceExport {
+    pub infos: TraceInfo,
+    pub metrics: HashMap<String, Vec<(u64, f64)>>,
+}
+
+impl TraceExport {
+    pub fn new(infos: TraceInfo, traces: &TraceView) -> Result<TraceExport, Box<dyn Error>> {
+        let mut ret = TraceExport {
+            infos,
+            metrics: HashMap::new(),
+        };
+
+        ret.load(traces)?;
+
+        Ok(ret)
+    }
+
+    pub fn set(&mut self, name: String, values: Vec<(u64, f64)>) -> Result<(), ProxyErr> {
+        self.metrics.insert(name, values);
+        Ok(())
+    }
+
+    fn load(&mut self, traces: &TraceView) -> Result<(), Box<dyn Error>> {
+        let metrics = traces.metrics(&self.infos.desc.jobid)?;
+        let full_data = traces.full_read(&self.infos.desc.jobid)?;
+
+        /* Get the minimum timestamp on series */
+        let offset: u64 = full_data
+            .series
+            .par_iter()
+            .filter_map(|(_, counter_vec)| {
+                if let Some((ts, _)) = counter_vec.first() {
+                    return Some(*ts);
+                }
+                None
+            })
+            .min()
+            .unwrap_or(0);
+
+        // Define a type alias for the inner tuple
+        type MetricTuple = (u64, f64);
+
+        // Define a type alias for the main vector
+        type CollectedMetrics = Vec<(String, Vec<MetricTuple>, Vec<MetricTuple>)>;
+
+        /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
+        let collected_metrics: CollectedMetrics = metrics
+            .par_iter()
+            .filter_map(|m| {
+                let id = if let Some(m) = full_data.counters.get(m) {
+                    m.id
+                } else {
+                    unreachable!();
+                };
+
+                let mut data = if let Some(d) = full_data.series.get(&id) {
+                    TraceView::to_time_serie(d)
+                } else {
+                    return None;
+                };
+
+                /* Fix temporal offset */
+                offset_time_serie(&mut data, offset);
+
+                /* Derivate the data  */
+                let deriv = derivate_time_serie(&data);
+
+                Some((m.clone(), data, deriv))
+            })
+            .collect();
+
+        for (m, data, deriv) in collected_metrics {
+            self.set(m.clone(), data)?;
+            self.set(format!("deriv__{}", m), deriv)?;
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct TraceHeader {
@@ -880,6 +968,10 @@ impl TraceView {
         };
 
         Ok(trace)
+    }
+
+    pub(crate) fn export(&self, jobid: &String) -> Result<TraceExport, Box<dyn Error>> {
+        TraceExport::new(self.infos(jobid)?, self)
     }
 
     pub(crate) fn done(&self, job: &JobDesc) -> Result<(), Box<dyn Error>> {

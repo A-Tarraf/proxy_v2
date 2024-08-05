@@ -13,7 +13,7 @@ use std::sync::Arc;
 mod proxywireprotocol;
 mod trace;
 
-use trace::TraceInfo;
+use trace::TraceExport;
 
 mod proxy_common;
 use proxy_common::{derivate_time_serie, ProxyErr};
@@ -57,26 +57,6 @@ struct Cli {
     /// Export a model for the given job(s)
     #[arg(short, long, default_value_t = false)]
     gen_model: bool,
-}
-
-#[derive(Serialize)]
-struct TraceExport {
-    infos: TraceInfo,
-    metrics: HashMap<String, Vec<(u64, f64)>>,
-}
-
-impl TraceExport {
-    fn new(infos: TraceInfo) -> TraceExport {
-        TraceExport {
-            infos,
-            metrics: HashMap::new(),
-        }
-    }
-
-    fn set(&mut self, name: String, values: Vec<(u64, f64)>) -> Result<(), ProxyErr> {
-        self.metrics.insert(name, values);
-        Ok(())
-    }
 }
 
 struct TraceExporter {
@@ -127,62 +107,7 @@ impl TraceExporter {
 
         let file = File::create(output)?;
 
-        /* Get metrics */
-
-        let mut export = TraceExport::new(infos);
-
-        let metrics = self.factory.trace_store.metrics(from)?;
-        let full_data = self.factory.trace_store.full_read(from)?;
-
-        /* Get the minimum timestamp on series */
-        let offset: u64 = full_data
-            .series
-            .iter()
-            .filter_map(|(_, counter_vec)| {
-                if let Some((ts, _)) = counter_vec.first() {
-                    return Some(*ts);
-                }
-                None
-            })
-            .min()
-            .unwrap_or(0);
-
-        // Define a type alias for the inner tuple
-        type MetricTuple = (u64, f64);
-
-        // Define a type alias for the main vector
-        type CollectedMetrics = Vec<(String, Vec<MetricTuple>, Vec<MetricTuple>)>;
-
-        /* Now for all metrics we get the data and its derivate and we store in the output hashtable */
-        let collected_metrics: CollectedMetrics = metrics
-            .iter()
-            .filter_map(|m| {
-                let id = if let Some(m) = full_data.counters.get(m) {
-                    m.id
-                } else {
-                    unreachable!();
-                };
-
-                let mut data = if let Some(d) = full_data.series.get(&id) {
-                    TraceView::to_time_serie(d)
-                } else {
-                    return None;
-                };
-
-                /* Fix temporal offset */
-                offset_time_serie(&mut data, offset);
-
-                /* Derivate the data  */
-                let deriv = derivate_time_serie(&data);
-
-                Some((m.clone(), data, deriv))
-            })
-            .collect();
-
-        for (m, data, deriv) in collected_metrics {
-            export.set(m.clone(), data)?;
-            export.set(format!("deriv__{}", m), deriv)?;
-        }
+        let export = TraceExport::new(infos, &self.factory.trace_store)?;
 
         serde_json::to_writer(file, &export)?;
 
