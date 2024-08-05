@@ -701,7 +701,7 @@ impl ExporterFactory {
     }
 
     #[allow(unused)]
-    pub(crate) fn profile_of(&self, jobid: &String, full: bool) -> Result<JobProfile, ProxyErr> {
+    pub(crate) fn profile_of(&self, jobid: &str, full: bool) -> Result<JobProfile, ProxyErr> {
         if let Some(elem) = self.perjob.lock().unwrap().get(jobid) {
             return elem.profile(full);
         }

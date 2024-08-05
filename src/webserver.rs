@@ -594,7 +594,7 @@ impl Web {
         WebResponse::BadReq("A GET parameter jobid must be passed".to_string())
     }
 
-    fn job_id_to_profile(&self, jobid: &String) -> Option<JobProfile> {
+    fn job_id_to_profile(&self, jobid: &str) -> Option<JobProfile> {
         // First assume it is a profile
 
         if let Ok(prof) = self.factory.profile_store.get_profile(jobid) {
@@ -637,6 +637,35 @@ impl Web {
             return WebResponse::BadReq(format!("Failed to get {}", jobid));
         }
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
+    fn handle_extrap_get_model_for(&self, req: &Request) -> WebResponse {
+        if let Some(jobids) = req.get_param("jobids") {
+            let job_list: Vec<&str> = jobids.split(',').collect();
+
+            let profiles: Vec<JobProfile> = job_list
+                .iter()
+                .filter_map(|v| self.job_id_to_profile(v))
+                .collect();
+
+            /* Make sure we had all the jobids */
+            if job_list.len() != profiles.len() {
+                let profiles_id: Vec<String> =
+                    profiles.iter().map(|v| v.desc.jobid.clone()).collect();
+                return WebResponse::BadReq(format!(
+                    "Requested Jobs {:?} (count = {}) and only retrieved {:?} (count = {})",
+                    job_list,
+                    job_list.len(),
+                    profiles_id,
+                    profiles.len()
+                ));
+            }
+        }
+
+        WebResponse::BadReq(
+            "A GET parameter for a reference jobid (or a comma separated list of) must be passed"
+                .to_string(),
+        )
     }
 
     fn handle_extrap_plot_model(&self, req: &Request) -> WebResponse {
