@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use clap::builder::Str;
+use md5::Digest;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::de::value;
 
@@ -43,7 +44,7 @@ impl ProfileView {
         (None, hash)
     }
 
-    pub(crate) fn get_profile(&self, jobid: &String) -> Result<JobProfile, Box<dyn Error>> {
+    pub(crate) fn get_profile(&self, jobid: &str) -> Result<JobProfile, Box<dyn Error>> {
         if let Some(prof) = self.profiles.read().unwrap().get(jobid) {
             return Ok(prof.clone());
         }
@@ -207,6 +208,30 @@ impl ProfileView {
         ))
     }
 
+    pub(crate) fn generate_extrap_model_for_profiles(
+        &self,
+        profiles: Vec<JobProfile>,
+        hash: Digest,
+    ) -> Result<(), Box<dyn Error>> {
+        let model = ExtrapModel::new(profiles);
+
+        let mut target_dir = self.profdir.clone();
+        let hash: String = format!("{:x}", hash);
+        let fname: String = format!("{}.jsonl", hash);
+        target_dir.push(fname);
+
+        /* Save the new model */
+        model.serialize(&target_dir)?;
+
+        /* Make sure the model is in the Evaluation list */
+        if let Ok(model_ht) = self.models.lock().as_mut() {
+            model_ht.entry(hash).or_insert(ExtrapEval::new(target_dir)?);
+            /* Otherwise nothing to do as we use the metadata when pulling from the model */
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn generate_extrap_model(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
         let gather_by_cmd = self.gather_by_command();
 
@@ -216,23 +241,8 @@ impl ProfileView {
                 .filter_map(|v| self.get_profile(&v.jobid).ok())
                 .collect();
 
-            let model = ExtrapModel::new(profiles);
-
             let cmd_hash = md5::compute(&desc.command);
-
-            let mut target_dir = self.profdir.clone();
-            let hash: String = format!("{:x}", cmd_hash);
-            let fname: String = format!("{}.jsonl", hash);
-            target_dir.push(fname);
-
-            /* Save the new model */
-            model.serialize(&target_dir)?;
-
-            /* Make sure the model is in the Evaluation list */
-            if let Ok(model_ht) = self.models.lock().as_mut() {
-                model_ht.entry(hash).or_insert(ExtrapEval::new(target_dir)?);
-                /* Otherwise nothing to do as we use the metadata when pulling from the model */
-            }
+            self.generate_extrap_model_for_profiles(profiles, cmd_hash)?;
         }
 
         Ok(())
