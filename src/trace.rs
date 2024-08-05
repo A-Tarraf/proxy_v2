@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+use std::process::{Command, ExitStatus, Stdio};
 use std::{
     collections::HashMap,
     error::Error,
@@ -800,9 +802,37 @@ impl TraceInfo {
     }
 }
 
+#[derive(Deserialize, Debug)]
+struct FtioModelTopFreq {
+    freq: Vec<f64>,
+    conf: Vec<f64>,
+    amp: Vec<f64>,
+    phi: Vec<f64>,
+}
+
+#[derive(Deserialize, Debug)]
+struct FtioModel {
+    metric: String,
+    dominant_freq: Vec<f64>,
+    conf: Vec<f64>,
+    amp: Vec<f64>,
+    phi: Vec<f64>,
+    t_start: f64,
+    t_end: f64,
+    total_bytes: usize,
+    ranks: usize,
+    freq: usize,
+    top_freq: FtioModelTopFreq,
+}
+
+struct FtioModelStorage {
+    models: HashMap<String, FtioModel>,
+}
+
 pub(crate) struct TraceView {
     prefix: PathBuf,
     traces: RwLock<HashMap<String, Arc<Trace>>>,
+    freq_models: RwLock<HashMap<String, FtioModelStorage>>,
 }
 
 impl TraceView {
@@ -974,6 +1004,60 @@ impl TraceView {
         TraceExport::new(self.infos(jobid)?, self)
     }
 
+    pub(crate) fn generate_ftio_model(&self, jobid: &String) -> Result<(), Box<dyn Error>> {
+        which::which("admire_proxy_invoke_ftio")?;
+
+        let export = self.export(jobid)?;
+
+        // Convert the Rust value into a string to be piped.
+        let mut cmd = Command::new("admire_proxy_invoke_ftio")
+            .arg("-n")
+            .arg("10")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        let mut child_stdin = cmd.stdin.take().unwrap();
+
+        // The subprocess outputs this string.
+        child_stdin
+            .write_all(serde_json::to_string(&export)?.as_bytes())
+            .unwrap();
+        drop(child_stdin);
+
+        let output = cmd.wait_with_output()?;
+
+        if output.status.success() {
+            println!(
+                "==> {}",
+                String::from_utf8(output.stdout.clone()).unwrap_or("Bad UTF8".to_string())
+            );
+
+            match serde_json::from_slice::<Vec<FtioModel>>(&output.stdout) {
+                Ok(models) => {
+                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+                        let job_storage =
+                            job_model_ht
+                                .entry(jobid.to_string())
+                                .or_insert(FtioModelStorage {
+                                    models: HashMap::new(),
+                                });
+
+                        for m in models {
+                            log::error!("{} == {:?}", m.metric, m);
+                            job_storage.models.insert(m.metric.to_string(), m);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to parse FTIO output: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn done(&self, job: &JobDesc) -> Result<(), Box<dyn Error>> {
         if let Some(j) = self.traces.write().unwrap().get_mut(&job.jobid) {
             *j.done.write().unwrap() = true;
@@ -986,6 +1070,11 @@ impl TraceView {
     pub(crate) fn new(prefix: &PathBuf) -> Result<TraceView, Box<dyn Error>> {
         let prefix = check_prefix_dir(prefix, "traces")?;
         let traces = RwLock::new(Self::load_existing_traces(&prefix)?);
-        Ok(TraceView { prefix, traces })
+        let freq_models = RwLock::new(HashMap::new());
+        Ok(TraceView {
+            prefix,
+            traces,
+            freq_models,
+        })
     }
 }

@@ -547,7 +547,7 @@ impl ExporterFactory {
             scrapes: Mutex::new(HashMap::new()),
             pending_scrapes: Mutex::new(Vec::new()),
             profile_store: Arc::new(ProfileView::new(&profile_prefix)?),
-            trace_store,
+            trace_store: trace_store.clone(),
             aggregator: aggregate,
             max_trace_size,
         });
@@ -557,6 +557,9 @@ impl ExporterFactory {
         std::thread::spawn(move || {
             scrape_ref.run_scrapping();
         });
+
+        ret.insert_ftio_exporter(trace_store.clone(), &main_jobdesc.jobid)?;
+        ret.insert_ftio_exporter(trace_store.clone(), &nodejob_desc.jobid)?;
 
         /* This creates a job entry for the cumulative job */
         let main_job = PerJobRefcount {
@@ -607,6 +610,21 @@ impl ExporterFactory {
                     .unwrap()
                     .push((main_trace_scraper.url().to_string(), main_trace_scraper));
             }
+        }
+
+        Ok(())
+    }
+
+    fn insert_ftio_exporter(
+        &self,
+        exporter: Arc<TraceView>,
+        jobid: &String,
+    ) -> Result<(), Box<dyn Error>> {
+        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid) {
+            self.pending_scrapes
+                .lock()
+                .unwrap()
+                .push((ftio_scrapper.url().to_string(), ftio_scrapper));
         }
 
         Ok(())
@@ -664,6 +682,9 @@ impl ExporterFactory {
 
                 /* Add the trace scrapping */
                 self.insert_tracing(new.exporter.clone(), trace).unwrap();
+
+                self.insert_ftio_exporter(self.trace_store.clone(), &desc.jobid)
+                    .unwrap_or(());
 
                 let ret = new.exporter.clone();
                 ht.insert(desc.jobid.to_string(), new);
