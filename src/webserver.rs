@@ -679,6 +679,16 @@ impl Web {
         )
     }
 
+    fn handle_get_json_trace(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            if let Ok(jsontrace) = self.factory.trace_store.export(&jobid) {
+                return WebResponse::Native(Response::json(&jsontrace));
+            }
+            return WebResponse::BadReq(format!("Failed to get {}", jobid));
+        }
+        WebResponse::BadReq("A GET parameter jobid must be passed".to_string())
+    }
+
     fn handle_extrap_plot_model(&self, req: &Request) -> WebResponse {
         let (jobid, metric, start, end, step) = match req.method() {
             "GET" => match (
@@ -894,6 +904,7 @@ impl Web {
                     "read" => self.handle_traceread(request),
                     "plot" => self.handle_traceplot(request),
                     "metrics" => self.handle_tracemetrics(request),
+                    "json" => self.handle_get_json_trace(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "profiles" => match resource.as_str() {
