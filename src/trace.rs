@@ -210,12 +210,12 @@ impl TraceFrame {
 
     fn sum(self, other: &TraceFrame) -> Result<TraceFrame, ProxyErr> {
         match self {
-            TraceFrame::Counters { ts: _, counters } => match other {
+            TraceFrame::Counters { ts, counters } => match other {
                 TraceFrame::Counters {
                     ts: tsb,
                     counters: countersb,
                 } => Ok(TraceFrame::Counters {
-                    ts: *tsb,
+                    ts: (*tsb + ts) / 2,
                     counters: TraceFrame::mergecounters(counters, countersb),
                 }),
                 _ => unreachable!("This function must take a counter"),
@@ -802,7 +802,7 @@ impl TraceInfo {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct FtioModelTopFreq {
     freq: Vec<f64>,
     conf: Vec<f64>,
@@ -810,7 +810,7 @@ struct FtioModelTopFreq {
     phi: Vec<f64>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct FtioModel {
     metric: String,
     dominant_freq: Vec<f64>,
@@ -825,8 +825,17 @@ struct FtioModel {
     top_freq: FtioModelTopFreq,
 }
 
-struct FtioModelStorage {
+#[derive(Serialize, Clone)]
+pub struct FtioModelStorage {
     models: HashMap<String, FtioModel>,
+}
+
+impl FtioModelStorage {
+    fn new() -> FtioModelStorage {
+        FtioModelStorage {
+            models: HashMap::new(),
+        }
+    }
 }
 
 pub(crate) struct TraceView {
@@ -836,6 +845,18 @@ pub(crate) struct TraceView {
 }
 
 impl TraceView {
+    pub fn get_job_freq_model(&self, jobid: String) -> Option<FtioModelStorage> {
+        let mut models: Option<FtioModelStorage> = None;
+
+        if let Ok(freq_mods) = self.freq_models.read() {
+            if let Some(job_metrics) = freq_mods.get(&jobid) {
+                models = Some(job_metrics.clone());
+            }
+        }
+
+        models
+    }
+
     fn load_existing_traces(
         prefix: &PathBuf,
     ) -> Result<HashMap<String, Arc<Trace>>, Box<dyn Error>> {
@@ -1028,23 +1049,15 @@ impl TraceView {
         let output = cmd.wait_with_output()?;
 
         if output.status.success() {
-            println!(
-                "==> {}",
-                String::from_utf8(output.stdout.clone()).unwrap_or("Bad UTF8".to_string())
-            );
-
             match serde_json::from_slice::<Vec<FtioModel>>(&output.stdout) {
                 Ok(models) => {
                     if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
-                        let job_storage =
-                            job_model_ht
-                                .entry(jobid.to_string())
-                                .or_insert(FtioModelStorage {
-                                    models: HashMap::new(),
-                                });
+                        let job_storage = job_model_ht
+                            .entry(jobid.to_string())
+                            .or_insert(FtioModelStorage::new());
 
                         for m in models {
-                            log::error!("{} == {:?}", m.metric, m);
+                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
                             job_storage.models.insert(m.metric.to_string(), m);
                         }
                     }

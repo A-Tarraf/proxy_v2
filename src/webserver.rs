@@ -623,6 +623,17 @@ impl Web {
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
     }
 
+    fn handle_ftio_get_model(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
+                return WebResponse::Native(Response::json(&model));
+            } else {
+                return WebResponse::BadReq("No such jobid".to_string());
+            }
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+    }
+
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
             let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
@@ -894,6 +905,7 @@ impl Web {
                     _ => WebResponse::BadReq(url),
                 },
                 "model" => match resource.as_str() {
+                    "ftio" => self.handle_ftio_get_model(request),
                     "download" => self.handle_extrap_get_jsonl(request),
                     "get" => self.handle_extrap_get_model(request),
                     "plot" => self.handle_extrap_plot_model(request),
