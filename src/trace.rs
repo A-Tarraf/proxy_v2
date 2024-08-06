@@ -760,8 +760,8 @@ impl Trace {
     pub(crate) fn push(
         &self,
         profile: JobProfile,
-        current_sampling: u64,
-    ) -> Result<Option<u64>, Box<dyn Error>> {
+        current_sampling: f64,
+    ) -> Result<Option<f64>, Box<dyn Error>> {
         let done = self.done.read().unwrap();
 
         if *done {
@@ -769,7 +769,7 @@ impl Trace {
         }
 
         let sampling = if self.state.lock().unwrap().push(profile.counters)? {
-            Some(current_sampling * 2)
+            Some(current_sampling * 2.0)
         } else {
             None
         };

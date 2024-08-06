@@ -411,9 +411,9 @@ impl Web {
             );
         }
 
-        let period: u64 = match req.get_param("period") {
-            Some(e) => e.parse::<u64>().unwrap_or(5),
-            None => 5,
+        let period: f64 = match req.get_param("period") {
+            Some(e) => e.parse::<f64>().unwrap_or(1.0),
+            None => 1.0,
         };
 
         if let Err(e) = ExporterFactory::add_scrape(self.factory.clone(), &to, period) {

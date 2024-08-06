@@ -431,7 +431,7 @@ impl ExporterFactory {
     pub(crate) fn add_scrape(
         factory: Arc<ExporterFactory>,
         url: &String,
-        period: u64,
+        period: f64,
     ) -> Result<(), Box<dyn Error>> {
         let new = ProxyScraper::new(url, period, factory.clone())?;
         factory
@@ -464,7 +464,7 @@ impl ExporterFactory {
     pub(crate) fn join(
         root_server: &String,
         my_server_address: &String,
-        period: u64,
+        period: f64,
     ) -> Result<(), ProxyErr> {
         let mut pivot_url = root_server.to_string() + "/pivot?from=" + my_server_address;
 
@@ -587,7 +587,7 @@ impl ExporterFactory {
 
         /* Now insert the default system scrape */
         let systemurl = "/system".to_string();
-        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 1, ret.clone()) {
+        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 1.0, ret.clone()) {
             ret.scrapes.lock().unwrap().insert(systemurl, sys_metrics);
         }
 

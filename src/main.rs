@@ -54,7 +54,7 @@ struct Args {
     #[arg(short, long, value_delimiter = ',')]
     sub_proxies: Option<Vec<String>>,
 
-    /// Address of the proxy to pivot on to build a proxy tree
+    /// Address of the proxy to pivot on to build a proxy tree use ADDR\@[PERIOD in ms] to set the scraping period
     #[arg(short, long)]
     root_proxy: Option<String>,
 
@@ -67,21 +67,21 @@ struct Args {
     target_prefix: Option<PathBuf>,
 }
 
-fn parse_period(arg: &String) -> (String, u64) {
+fn parse_period(arg: &String) -> (String, f64) {
     let mut spl = arg.split('@');
 
     let url = spl.next();
     let stime = spl.next();
 
     if url.is_none() || stime.is_none() {
-        return (arg.to_string(), 1);
+        return (arg.to_string(), 1.0);
     }
 
-    match str::parse::<u64>(stime.unwrap()) {
+    match str::parse::<f64>(stime.unwrap()) {
         Ok(v) => (url.unwrap().to_string(), v),
         Err(e) => {
             log::error!("Failed to parse scrape time in {} : {}", arg, e);
-            (arg.to_string(), 5)
+            (arg.to_string(), 1.0)
         }
     }
 }

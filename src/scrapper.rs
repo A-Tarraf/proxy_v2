@@ -51,7 +51,7 @@ pub struct ProxyScraper {
     target_url: String,
     state: HashMap<String, JobProfile>,
     factory: Option<Arc<ExporterFactory>>,
-    period: u64,
+    period: f64,
     last_scrape: u128,
     ttype: ScraperType,
 }
@@ -60,7 +60,7 @@ pub struct ProxyScraper {
 pub struct ProxyScraperSnapshot {
     target_url: String,
     ttype: String,
-    period: u64,
+    period: f64,
     last_scrape: u64,
 }
 
@@ -103,7 +103,7 @@ impl ProxyScraper {
 
     pub(crate) fn new(
         target_url: &String,
-        period: u64,
+        period: f64,
         factory: Arc<ExporterFactory>,
     ) -> Result<ProxyScraper, ProxyErr> {
         let (url, ttype) = ProxyScraper::detect_type(target_url)?;
@@ -126,7 +126,7 @@ impl ProxyScraper {
             target_url: format!("/trace.{}", trace.desc().jobid),
             state: HashMap::new(),
             factory: None,
-            period: 60,
+            period: 0.5,
             last_scrape: 0,
             ttype: ScraperType::Trace { exporter, trace },
         })
@@ -140,7 +140,7 @@ impl ProxyScraper {
             target_url: format!("/FTIO/{}", jobid),
             state: HashMap::new(),
             factory: None,
-            period: 5,
+            period: 30.0,
             last_scrape: 0,
             ttype: ScraperType::Ftio {
                 traces,
@@ -361,7 +361,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts_us() - self.last_scrape < (self.period * 1000000) as u128 {
+        if unix_ts_us() - self.last_scrape < (self.period * 1000000.0) as u128 {
             /* Not to be scraped yet */
             return Ok(());
         }
