@@ -7,7 +7,7 @@ use crate::{
 
 pub struct SystemMetrics {
     sys: System,
-    last_scrape: u64,
+    last_scrape: f64,
 }
 
 impl SystemMetrics {
@@ -97,7 +97,7 @@ impl SystemMetrics {
                 vec![("interface".to_string(), interface_name.to_string())];
 
             if now != self.last_scrape {
-                let transmitted = (data.transmitted() / (now - self.last_scrape)) as f64;
+                let transmitted = data.transmitted() as f64 / (now - self.last_scrape);
                 counters.push(CounterSnapshot::new(
                     "proxy_network_transmit_bandwidth_bytes".to_string(),
                     attrs.as_slice(),
@@ -111,7 +111,7 @@ impl SystemMetrics {
                     },
                 ));
 
-                let received = (data.received() / (now - self.last_scrape)) as f64;
+                let received = data.received() as f64 / (now - self.last_scrape);
                 counters.push(CounterSnapshot::new(
                     "proxy_network_receive_bandwidth_bytes".to_string(),
                     attrs.as_slice(),
@@ -125,7 +125,7 @@ impl SystemMetrics {
                     },
                 ));
 
-                let transmitted = (data.packets_transmitted() / (now - self.last_scrape)) as f64;
+                let transmitted = data.packets_transmitted() as f64 / (now - self.last_scrape);
                 counters.push(CounterSnapshot::new(
                     "proxy_network_transmit_packet_rate".to_string(),
                     attrs.as_slice(),
@@ -139,7 +139,7 @@ impl SystemMetrics {
                     },
                 ));
 
-                let received = (data.packets_received() / (now - self.last_scrape)) as f64;
+                let received = data.packets_received() as f64 / (now - self.last_scrape);
                 counters.push(CounterSnapshot::new(
                     "proxy_network_receive_packet_rate".to_string(),
                     attrs.as_slice(),

@@ -422,8 +422,8 @@ pub(crate) struct JobDesc {
     pub(crate) partition: String,
     pub(crate) cluster: String,
     pub(crate) run_dir: String,
-    pub(crate) start_time: u64,
-    pub(crate) end_time: u64,
+    pub(crate) start_time: f64,
+    pub(crate) end_time: f64,
 }
 
 impl JobDesc {
@@ -437,17 +437,17 @@ impl JobDesc {
             return Err(ProxyErr::new("Mismatching sizes id"));
         }
 
-        if let Some(min) = [self.start_time, other_desc.start_time]
-            .iter()
-            .min()
-            .cloned()
-        {
-            self.start_time = min;
-        }
+        self.start_time = if self.start_time < other_desc.start_time {
+            self.start_time
+        } else {
+            other_desc.start_time
+        };
 
-        if let Some(max) = [self.end_time, other_desc.end_time].iter().max().cloned() {
-            self.end_time = max;
-        }
+        self.end_time = if self.end_time < other_desc.end_time {
+            other_desc.end_time
+        } else {
+            self.end_time
+        };
 
         Ok(())
     }
@@ -508,7 +508,7 @@ impl JobDesc {
             cluster,
             run_dir,
             start_time: unix_ts(),
-            end_time: 0,
+            end_time: 0.0,
         }
     }
 }

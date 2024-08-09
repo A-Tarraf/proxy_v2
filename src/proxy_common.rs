@@ -56,12 +56,13 @@ pub fn init_log() {
 }
 
 #[allow(unused)]
-pub fn unix_ts() -> u64 {
+pub fn unix_ts() -> f64 {
     let current_time = SystemTime::now();
     current_time
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
-        .as_secs()
+        .as_millis() as f64
+        / 1000.0 as f64
 }
 
 #[allow(unused)]
@@ -194,8 +195,8 @@ pub fn parse_bool(sbool: &str) -> bool {
 }
 
 #[allow(unused)]
-pub fn derivate_time_serie(data: &Vec<(u64, f64)>) -> Vec<(u64, f64)> {
-    let mut ret: Vec<(u64, f64)> = vec![(data[0].0, 0.0)];
+pub fn derivate_time_serie(data: &Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    let mut ret: Vec<(f64, f64)> = vec![(data[0].0, 0.0)];
 
     for i in (1..data.len()) {
         let deltax = (data[i].0 as f64) - (data[i - 1].0 as f64);
@@ -206,7 +207,7 @@ pub fn derivate_time_serie(data: &Vec<(u64, f64)>) -> Vec<(u64, f64)> {
 }
 
 #[allow(unused)]
-pub fn offset_time_serie(data: &mut Vec<(u64, f64)>, offset: u64) {
+pub fn offset_time_serie(data: &mut Vec<(f64, f64)>, offset: f64) {
     for v in data {
         v.0 -= offset;
     }

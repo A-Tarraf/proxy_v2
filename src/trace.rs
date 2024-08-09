@@ -32,7 +32,7 @@ use crate::proxy_common::offset_time_serie;
 #[derive(Serialize)]
 pub struct TraceExport {
     pub infos: TraceInfo,
-    pub metrics: HashMap<String, Vec<(u64, f64)>>,
+    pub metrics: HashMap<String, Vec<(f64, f64)>>,
 }
 
 impl TraceExport {
@@ -47,7 +47,7 @@ impl TraceExport {
         Ok(ret)
     }
 
-    pub fn set(&mut self, name: String, values: Vec<(u64, f64)>) -> Result<(), ProxyErr> {
+    pub fn set(&mut self, name: String, values: Vec<(f64, f64)>) -> Result<(), ProxyErr> {
         self.metrics.insert(name, values);
         Ok(())
     }
@@ -56,21 +56,26 @@ impl TraceExport {
         let metrics = traces.metrics(&self.infos.desc.jobid)?;
         let full_data = traces.full_read(&self.infos.desc.jobid)?;
 
+        let mut offset: Option<f64> = None;
+
         /* Get the minimum timestamp on series */
-        let offset: u64 = full_data
-            .series
-            .par_iter()
-            .filter_map(|(_, counter_vec)| {
-                if let Some((ts, _)) = counter_vec.first() {
-                    return Some(*ts);
+        full_data.series.iter().for_each(|(_, counter_vec)| {
+            if let Some((ts, _)) = counter_vec.first() {
+                match offset {
+                    Some(v) => {
+                        if *ts < v {
+                            offset = Some(*ts);
+                        }
+                    }
+                    None => offset = Some(*ts),
                 }
-                None
-            })
-            .min()
-            .unwrap_or(0);
+            }
+        });
+
+        let offset = offset.unwrap_or(0.0);
 
         // Define a type alias for the inner tuple
-        type MetricTuple = (u64, f64);
+        type MetricTuple = (f64, f64);
 
         // Define a type alias for the main vector
         type CollectedMetrics = Vec<(String, Vec<MetricTuple>, Vec<MetricTuple>)>;
@@ -131,21 +136,21 @@ pub(crate) struct TraceCounterMetadata {
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) enum TraceFrame {
     Desc {
-        ts: u64,
+        ts: f64,
         desc: JobDesc,
     },
     CounterMetadata {
-        ts: u64,
+        ts: f64,
         metadata: TraceCounterMetadata,
     },
     Counters {
-        ts: u64,
+        ts: f64,
         counters: Vec<TraceCounter>,
     },
 }
 
 impl TraceFrame {
-    fn ts(&self) -> u64 {
+    fn ts(&self) -> f64 {
         match *self {
             TraceFrame::Desc { ts, desc: _ } => ts,
             TraceFrame::CounterMetadata { ts, metadata: _ } => ts,
@@ -215,7 +220,7 @@ impl TraceFrame {
                     ts: tsb,
                     counters: countersb,
                 } => Ok(TraceFrame::Counters {
-                    ts: (*tsb + ts) / 2,
+                    ts: (*tsb + ts) / 2.0,
                     counters: TraceFrame::mergecounters(counters, countersb),
                 }),
                 _ => unreachable!("This function must take a counter"),
@@ -243,7 +248,7 @@ pub(crate) struct TraceData {
     pub(crate) counters: HashMap<String, TraceCounterMetadata>,
     pub(crate) desc: TraceFrame,
     pub(crate) frames: Vec<TraceFrame>,
-    pub(crate) series: HashMap<u64, Vec<(u64, CounterType)>>,
+    pub(crate) series: HashMap<u64, Vec<(f64, CounterType)>>,
 }
 
 impl TraceData {
@@ -253,7 +258,7 @@ impl TraceData {
         self.frames = Vec::new();
     }
 
-    fn push_counters(&mut self, ts: u64, counters: &Vec<TraceCounter>) {
+    fn push_counters(&mut self, ts: f64, counters: &Vec<TraceCounter>) {
         for c in counters {
             let counter_vec = self.series.entry(c.id).or_default();
             counter_vec.push((ts, c.value.clone()));
@@ -314,7 +319,7 @@ struct TraceState {
     /// Maximum size of the trace
     max_size: usize,
     /// Timestamp of the last write to the trace
-    lastwrite: u64,
+    lastwrite: f64,
     /// Path of the trace
     path: PathBuf,
 
@@ -640,7 +645,7 @@ impl TraceState {
             loaded: true, // Trace is new thus already loaded
             size: 0,
             max_size,
-            lastwrite: 0,
+            lastwrite: 0.0,
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
@@ -665,7 +670,7 @@ impl TraceState {
             loaded: false, // Trace is not loaded already
             size: 0,
             max_size,
-            lastwrite: 0,
+            lastwrite: 0.0,
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
@@ -710,7 +715,7 @@ impl Trace {
         let mut state = TraceState::from(path, 0)?;
         let mut desc = state.desc()?;
         /* Assume end time is the last profile write ~1 sec exact */
-        if state.lastwrite != 0 {
+        if state.lastwrite != 0.0 {
             desc.end_time = state.lastwrite;
         }
         Ok(Trace {
@@ -782,13 +787,13 @@ impl Trace {
 pub(crate) struct TraceInfo {
     pub desc: JobDesc,
     pub size: u64,
-    pub lastwrite: u64,
+    pub lastwrite: f64,
 }
 
 #[derive(Serialize)]
 pub(crate) struct TraceRead {
     info: TraceInfo,
-    time_serie: Vec<(u64, CounterType)>,
+    time_serie: Vec<(f64, CounterType)>,
 }
 
 impl TraceInfo {
@@ -966,7 +971,7 @@ impl TraceView {
                     };
                     time_serie
                 } else {
-                    let empty: Vec<(u64, CounterType)> = Vec::new();
+                    let empty: Vec<(f64, CounterType)> = Vec::new();
                     empty
                 };
 
@@ -984,8 +989,8 @@ impl TraceView {
         Err(ProxyErr::new(format!("No such trace id {}", jobid)))
     }
 
-    pub(crate) fn to_time_serie(time_serie: &[(u64, CounterType)]) -> Vec<(u64, f64)> {
-        let mut ret: Vec<(u64, f64)> = Vec::new();
+    pub(crate) fn to_time_serie(time_serie: &[(f64, CounterType)]) -> Vec<(f64, f64)> {
+        let mut ret: Vec<(f64, f64)> = Vec::new();
 
         for (ts, c) in time_serie.iter() {
             ret.push((*ts, c.value()));
@@ -995,7 +1000,7 @@ impl TraceView {
     }
 
     #[allow(unused)]
-    pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(u64, f64)>, ProxyErr> {
+    pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(f64, f64)>, ProxyErr> {
         let trace = self.read(jobid, Some(filter))?;
         let ret = TraceView::to_time_serie(&trace.time_serie);
         Ok(ret)

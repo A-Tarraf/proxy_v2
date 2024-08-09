@@ -511,8 +511,8 @@ impl ExporterFactory {
             partition: "".to_string(),
             cluster: "".to_string(),
             run_dir: "".to_string(),
-            start_time: 0,
-            end_time: 0,
+            start_time: 0.0,
+            end_time: 0.0,
         };
 
         let nodejob_desc = JobDesc {
@@ -523,8 +523,8 @@ impl ExporterFactory {
             partition: "".to_string(),
             cluster: "".to_string(),
             run_dir: "".to_string(),
-            start_time: 0,
-            end_time: 0,
+            start_time: 0.0,
+            end_time: 0.0,
         };
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
