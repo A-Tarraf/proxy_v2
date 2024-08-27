@@ -155,7 +155,7 @@ struct Args {
     #[arg(short, long)]
     unixsocket: Option<String>,
     /// Sampling period in MS
-    #[arg(short, long, default_value_t = 1000)]
+    #[arg(short = 'S', long, default_value_t = 1000)]
     period: u64,
     /// A command to run (passed after --)
     #[arg(last = true)]

@@ -804,7 +804,7 @@ impl TraceInfo {
         TraceInfo {
             desc: trace.desc.clone(),
             size: infos.size,
-            lastwrite: (infos.lastwrite / 1000000) as u64,
+            lastwrite: (infos.lastwrite / 1000),
         }
     }
 }
@@ -995,7 +995,15 @@ impl TraceView {
         let mut ret: Vec<(f64, f64)> = Vec::new();
 
         for (ts, c) in time_serie.iter() {
-            ret.push((*ts, c.value()));
+            match c {
+                CounterType::Counter { ts: cnt_ts, value } => ret.push((*cnt_ts, *value)),
+                CounterType::Gauge {
+                    min: _,
+                    max: _,
+                    hits: _,
+                    total: _,
+                } => ret.push((*ts, c.value())),
+            }
         }
 
         ret

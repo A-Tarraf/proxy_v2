@@ -207,7 +207,7 @@ pub fn derivate_time_serie(data: &[(u64, f64)]) -> Vec<(u64, f64)> {
 
     for i in (1..data.len()) {
         let deltax = (data[i].0 as f64) - (data[i - 1].0 as f64);
-        ret.push((data[i].0, (data[i].1 - data[i - 1].1) / deltax))
+        ret.push((data[i].0, (data[i].1 - data[i - 1].1) / deltax));
     }
 
     ret
