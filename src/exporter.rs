@@ -432,7 +432,7 @@ impl ExporterFactory {
     pub(crate) fn add_scrape(
         factory: Arc<ExporterFactory>,
         url: &String,
-        period: f64,
+        period: u64,
     ) -> Result<(), Box<dyn Error>> {
         let new = ProxyScraper::new(url, period, factory.clone())?;
         factory
@@ -465,7 +465,7 @@ impl ExporterFactory {
     pub(crate) fn join(
         root_server: &String,
         my_server_address: &String,
-        period: f64,
+        period: u64,
     ) -> Result<(), ProxyErr> {
         let mut pivot_url = root_server.to_string() + "/pivot?from=" + my_server_address;
 
@@ -512,8 +512,8 @@ impl ExporterFactory {
             partition: "".to_string(),
             cluster: "".to_string(),
             run_dir: "".to_string(),
-            start_time: 0.0,
-            end_time: 0.0,
+            start_time: 0,
+            end_time: 0,
         };
 
         let nodejob_desc = JobDesc {
@@ -524,8 +524,8 @@ impl ExporterFactory {
             partition: "".to_string(),
             cluster: "".to_string(),
             run_dir: "".to_string(),
-            start_time: 0.0,
-            end_time: 0.0,
+            start_time: 0,
+            end_time: 0,
         };
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);

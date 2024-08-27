@@ -1,5 +1,5 @@
 use crate::exporter::Exporter;
-use crate::proxy_common::{self, is_url_live};
+use crate::proxy_common::{self, is_url_live, unix_ts};
 use crate::proxy_common::{unix_ts_us, ProxyErr};
 use crate::proxywireprotocol::{CounterSnapshot, CounterType, JobDesc, JobProfile};
 use crate::trace::{Trace, TraceView};
@@ -51,7 +51,7 @@ pub struct ProxyScraper {
     target_url: String,
     state: HashMap<String, JobProfile>,
     factory: Option<Arc<ExporterFactory>>,
-    period: f64,
+    period: u64,
     last_scrape: u64,
     ttype: ScraperType,
 }
@@ -60,7 +60,7 @@ pub struct ProxyScraper {
 pub struct ProxyScraperSnapshot {
     target_url: String,
     ttype: String,
-    period: f64,
+    period: u64,
     last_scrape: u64,
 }
 
@@ -103,7 +103,7 @@ impl ProxyScraper {
 
     pub(crate) fn new(
         target_url: &String,
-        period: f64,
+        period: u64,
         factory: Arc<ExporterFactory>,
     ) -> Result<ProxyScraper, ProxyErr> {
         let (url, ttype) = ProxyScraper::detect_type(target_url)?;
@@ -140,7 +140,7 @@ impl ProxyScraper {
             target_url: format!("/FTIO/{}", jobid),
             state: HashMap::new(),
             factory: None,
-            period: 30.0,
+            period: 30000,
             last_scrape: 0,
             ttype: ScraperType::Ftio {
                 traces,
@@ -364,7 +364,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts_us() - self.last_scrape < self.period {
+        if unix_ts() - self.last_scrape < self.period {
             /* Not to be scraped yet */
             return Ok(());
         }
@@ -389,7 +389,7 @@ impl ProxyScraper {
             }
         }
 
-        self.last_scrape = unix_ts_us();
+        self.last_scrape = unix_ts();
 
         Ok(())
     }

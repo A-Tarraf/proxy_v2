@@ -463,8 +463,8 @@ pub(crate) struct JobDesc {
     pub(crate) partition: String,
     pub(crate) cluster: String,
     pub(crate) run_dir: String,
-    pub(crate) start_time: f64,
-    pub(crate) end_time: f64,
+    pub(crate) start_time: u64,
+    pub(crate) end_time: u64,
 }
 
 impl JobDesc {
@@ -549,7 +549,7 @@ impl JobDesc {
             cluster,
             run_dir,
             start_time: unix_ts(),
-            end_time: 0.0,
+            end_time: 0,
         }
     }
 }

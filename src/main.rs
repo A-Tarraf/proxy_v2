@@ -81,18 +81,14 @@ fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
     let stime = spl.next();
 
     if url.is_none() || stime.is_none() {
-        return (arg.to_string(), 1.0);
+        return (arg.to_string(), 100);
     }
 
-    match str::parse::<f64>(stime.unwrap()) {
+    match str::parse::<u64>(stime.unwrap()) {
         Ok(v) => (url.unwrap().to_string(), v),
         Err(e) => {
             log::error!("Failed to parse scrape time in {} : {}", arg, e);
-<<<<<<< HEAD
-            (arg.to_string(), 1.0)
-=======
             (arg.to_string(), default_period)
->>>>>>> 96fe096 (Add period argument to proxy)
         }
     }
 }

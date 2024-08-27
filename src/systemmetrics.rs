@@ -14,7 +14,7 @@ impl SystemMetrics {
     pub fn new() -> SystemMetrics {
         SystemMetrics {
             sys: System::new_all(),
-            last_scrape: unix_ts(),
+            last_scrape: unix_ts() as f64 / 1000.0,
         }
     }
 
@@ -90,7 +90,7 @@ impl SystemMetrics {
     }
 
     fn scrape_network_cards(&self, counters: &mut Vec<CounterSnapshot>) -> Result<(), ProxyErr> {
-        let now = unix_ts();
+        let now = unix_ts() as f64;
 
         for (interface_name, data) in self.sys.networks() {
             let attrs: Vec<(String, String)> =
@@ -160,7 +160,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of bytes sent on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts_us() as u64,
+                    ts: unix_ts(),
                     value: transmitted,
                 },
             ));
@@ -171,7 +171,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of bytes received on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts_us() as u64,
+                    ts: unix_ts(),
                     value: received,
                 },
             ));
@@ -405,7 +405,7 @@ impl SystemMetrics {
             attrs.as_slice(),
             "Number of scrapes for proxy instance".to_string(),
             CounterType::Counter {
-                ts: unix_ts_us() as u64,
+                ts: unix_ts(),
                 value: 1.0,
             },
         ));
@@ -501,7 +501,7 @@ impl SystemMetrics {
         self.scrape_cpu(&mut ret)?;
 
         /* Flag the last scrape TS */
-        self.last_scrape = unix_ts();
+        self.last_scrape = unix_ts() as f64 / 1000.0;
 
         Ok(ret)
     }
