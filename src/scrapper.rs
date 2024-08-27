@@ -1,7 +1,7 @@
 use crate::exporter::Exporter;
 use crate::proxy_common::{self, is_url_live};
 use crate::proxy_common::{unix_ts_us, ProxyErr};
-use crate::proxywireprotocol::{self, CounterSnapshot, CounterType, JobDesc, JobProfile};
+use crate::proxywireprotocol::{CounterSnapshot, CounterType, JobDesc, JobProfile};
 use crate::trace::{Trace, TraceView};
 use crate::ExporterFactory;
 use core::fmt;
@@ -126,7 +126,7 @@ impl ProxyScraper {
             target_url: format!("/trace.{}", trace.desc().jobid),
             state: HashMap::new(),
             factory: None,
-            period: 0.5,
+            period: proxy_common::get_proxy_period(),
             last_scrape: 0,
             ttype: ScraperType::Trace { exporter, trace },
         })
@@ -155,7 +155,7 @@ impl ProxyScraper {
             target_url: self.target_url.to_string(),
             ttype: self.ttype.to_string(),
             period: self.period,
-            last_scrape: (self.last_scrape / 1000000) as u64,
+            last_scrape: self.last_scrape / 1000,
         }
     }
 
@@ -275,7 +275,7 @@ impl ProxyScraper {
                     prometheus_parse::Value::Counter(value) => Some(CounterSnapshot {
                         name: ProxyScraper::prometheus_sample_name(&v),
                         ctype: CounterType::Counter {
-                            ts: proxy_common::unix_ts_us() as u64,
+                            ts: proxy_common::unix_ts_us(),
                             value,
                         },
                         doc,
@@ -364,7 +364,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts_us() - self.last_scrape < (self.period * 1000) {
+        if unix_ts_us() - self.last_scrape < self.period {
             /* Not to be scraped yet */
             return Ok(());
         }

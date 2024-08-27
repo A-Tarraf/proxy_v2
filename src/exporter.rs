@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
+use crate::proxy_common;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
@@ -422,7 +423,7 @@ impl ExporterFactory {
                 }
             }
 
-            sleep(Duration::from_millis(500));
+            sleep(Duration::from_millis(10));
         }
     }
 
@@ -587,7 +588,9 @@ impl ExporterFactory {
 
         /* Now insert the default system scrape */
         let systemurl = "/system".to_string();
-        if let Ok(sys_metrics) = ProxyScraper::new(&systemurl, 1.0, ret.clone()) {
+        if let Ok(sys_metrics) =
+            ProxyScraper::new(&systemurl, proxy_common::get_proxy_period(), ret.clone())
+        {
             ret.scrapes.lock().unwrap().insert(systemurl, sys_metrics);
         }
 

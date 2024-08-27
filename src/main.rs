@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::exit;
@@ -65,9 +66,13 @@ struct Args {
     /// Root directory for the proxy (optionnal default ~/.proxyprofiles/)
     #[arg(short, long)]
     target_prefix: Option<PathBuf>,
+
+    /// Sampling period in MS
+    #[arg(short = 'S', long, default_value_t = 1000)]
+    sampling_period: u64,
 }
 
-fn parse_period(arg: &String) -> (String, f64) {
+fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
     let mut spl = arg.split('@');
 
     let url = spl.next();
@@ -81,7 +86,11 @@ fn parse_period(arg: &String) -> (String, f64) {
         Ok(v) => (url.unwrap().to_string(), v),
         Err(e) => {
             log::error!("Failed to parse scrape time in {} : {}", arg, e);
+<<<<<<< HEAD
             (arg.to_string(), 1.0)
+=======
+            (arg.to_string(), default_period)
+>>>>>>> 96fe096 (Add period argument to proxy)
         }
     }
 }
@@ -90,6 +99,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     init_log();
 
     let args = Args::parse();
+
+    /* Make sure it is globally visible */
+    env::set_var("PROXY_PERIOD", format!("{}", args.sampling_period));
 
     let profile_prefix = if let Some(prefix) = args.target_prefix {
         prefix
@@ -120,7 +132,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(urls) = args.sub_proxies {
         for url in urls.iter() {
-            let (url, freq) = parse_period(url);
+            let (url, freq) = parse_period(url, args.sampling_period);
             log::info!("Inserting scrape {} every {} second(s)", url, freq);
             if let Err(e) = ExporterFactory::add_scrape(factory.clone(), &url, freq) {
                 log::error!("Failed add scrape : {}", e);
@@ -149,7 +161,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         /* Wait for server to start before joining as the server will back-connect  */
         sleep(Duration::from_secs(3));
         if let Some(root) = args.root_proxy {
-            let (url, period) = parse_period(&root);
+            let (url, period) = parse_period(&root, args.sampling_period);
 
             if let Err(e) = ExporterFactory::join(&url, &web_url, period) {
                 log::error!("Failed to register in root server {}: {}", root, e);
