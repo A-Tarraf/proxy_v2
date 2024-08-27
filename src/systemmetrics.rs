@@ -159,7 +159,10 @@ impl SystemMetrics {
                 "proxy_network_transmit_bytes_total".to_string(),
                 attrs.as_slice(),
                 "Total number of bytes sent on the given device".to_string(),
-                CounterType::Counter { value: transmitted },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: transmitted,
+                },
             ));
 
             let received = data.total_received() as f64;
@@ -167,7 +170,10 @@ impl SystemMetrics {
                 "proxy_network_receive_bytes_total".to_string(),
                 attrs.as_slice(),
                 "Total number of bytes received on the given device".to_string(),
-                CounterType::Counter { value: received },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: received,
+                },
             ));
 
             let transmitted = data.total_packets_transmitted() as f64;
@@ -175,7 +181,10 @@ impl SystemMetrics {
                 "proxy_network_transmit_packets_total".to_string(),
                 attrs.as_slice(),
                 "Total number of packets sent on the given device".to_string(),
-                CounterType::Counter { value: transmitted },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: transmitted,
+                },
             ));
 
             let received = data.total_packets_received() as f64;
@@ -183,7 +192,10 @@ impl SystemMetrics {
                 "proxy_network_receive_packets_total".to_string(),
                 attrs.as_slice(),
                 "Total number of packets received on the given device".to_string(),
-                CounterType::Counter { value: received },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: received,
+                },
             ));
 
             let transmitted = data.total_errors_on_transmitted() as f64;
@@ -191,7 +203,10 @@ impl SystemMetrics {
                 "proxy_network_transmit_packets_error_total".to_string(),
                 attrs.as_slice(),
                 "Total number of erroneous packets sent on the given device".to_string(),
-                CounterType::Counter { value: transmitted },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: transmitted,
+                },
             ));
 
             let received = data.total_errors_on_received() as f64;
@@ -199,7 +214,10 @@ impl SystemMetrics {
                 "proxy_network_receive_packets_error_total".to_string(),
                 attrs.as_slice(),
                 "Total number of erroneous  packets received on the given device".to_string(),
-                CounterType::Counter { value: received },
+                CounterType::Counter {
+                    ts: unix_ts(),
+                    value: received,
+                },
             ));
         }
 
@@ -386,7 +404,10 @@ impl SystemMetrics {
             "proxy_scrape_total".to_string(),
             attrs.as_slice(),
             "Number of scrapes for proxy instance".to_string(),
-            CounterType::Counter { value: 1.0 },
+            CounterType::Counter {
+                ts: unix_ts(),
+                value: 1.0,
+            },
         ));
         Ok(())
     }

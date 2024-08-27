@@ -11,7 +11,7 @@
 # This configure script is free software; the Free Software Foundation
 # gives unlimited permission to copy, distribute and modify it.
 #
-# Copyright (c) 1999-2023 The strace developers.
+# Copyright (c) 1999-2024 The strace developers.
 ## -------------------- ##
 ## M4sh Initialization. ##
 ## -------------------- ##
@@ -1645,7 +1645,7 @@ Copyright (C) 2012 Free Software Foundation, Inc.
 This configure script is free software; the Free Software Foundation
 gives unlimited permission to copy, distribute and modify it.
 
-Copyright (c) 1999-2023 The strace developers.
+Copyright (c) 1999-2024 The strace developers.
 _ACEOF
   exit
 fi
@@ -5452,9 +5452,9 @@ A''M_DISTCHECK_CONFIGURE_FLAGS += --disable-code-coverage
 
 
 
-$as_echo "#define COPYRIGHT_YEAR \"2023\"" >>confdefs.h
+$as_echo "#define COPYRIGHT_YEAR \"2024\"" >>confdefs.h
 
-COPYRIGHT_YEAR=2023
+COPYRIGHT_YEAR=2024
 
 
 

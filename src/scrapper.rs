@@ -1,7 +1,7 @@
 use crate::exporter::Exporter;
-use crate::proxy_common::is_url_live;
+use crate::proxy_common::{self, is_url_live};
 use crate::proxy_common::{unix_ts_us, ProxyErr};
-use crate::proxywireprotocol::{CounterSnapshot, CounterType, JobDesc, JobProfile};
+use crate::proxywireprotocol::{self, CounterSnapshot, CounterType, JobDesc, JobProfile};
 use crate::trace::{Trace, TraceView};
 use crate::ExporterFactory;
 use core::fmt;
@@ -274,7 +274,10 @@ impl ProxyScraper {
                 let entry: Option<CounterSnapshot> = match v.value {
                     prometheus_parse::Value::Counter(value) => Some(CounterSnapshot {
                         name: ProxyScraper::prometheus_sample_name(&v),
-                        ctype: CounterType::Counter { value },
+                        ctype: CounterType::Counter {
+                            ts: proxy_common::unix_ts(),
+                            value,
+                        },
                         doc,
                     }),
                     prometheus_parse::Value::Gauge(value) => Some(CounterSnapshot {

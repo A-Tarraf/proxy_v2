@@ -4,12 +4,14 @@ use crate::proxy_common::ProxyErr;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::{collections::HashMap, env, error::Error};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum CounterType {
     Counter {
+        ts: u64,
         value: f64,
     },
     Gauge {
@@ -23,8 +25,8 @@ pub enum CounterType {
 impl fmt::Display for CounterType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CounterType::Counter { value } => {
-                write!(f, "{} COUNTER", value)
+            CounterType::Counter { ts, value } => {
+                write!(f, "{} {} COUNTER", ts, value)
             }
             CounterType::Gauge {
                 min,
@@ -47,9 +49,21 @@ impl fmt::Display for CounterType {
 }
 
 impl CounterType {
+    pub fn ts(&self) -> u64 {
+        match self {
+            CounterType::Counter { ts, value: _ } => *ts,
+            Self::Gauge {
+                min: _,
+                max: _,
+                hits: _,
+                total: _,
+            } => unix_ts(),
+        }
+    }
+
     #[allow(unused)]
     pub fn newcounter() -> CounterType {
-        Self::Counter { value: 0.0 }
+        Self::Counter { ts: 0, value: 0.0 }
     }
 
     #[allow(unused)]
@@ -95,7 +109,7 @@ impl CounterType {
     #[allow(unused)]
     pub fn hasdata(&self) -> bool {
         match self {
-            CounterType::Counter { value } => *value != 0.0,
+            CounterType::Counter { ts: _, value } => *value != 0.0,
             Self::Gauge {
                 min: _,
                 max: _,
@@ -108,7 +122,7 @@ impl CounterType {
     #[allow(unused)]
     pub fn value(&self) -> f64 {
         match self {
-            Self::Counter { value } => *value,
+            Self::Counter { ts: _, value } => *value,
             Self::Gauge {
                 min: _,
                 max: _,
@@ -120,8 +134,8 @@ impl CounterType {
 
     fn serialize(&self, name: &String) -> String {
         match self {
-            Self::Counter { value } => {
-                format!("{} {}\n", name, value)
+            Self::Counter { ts, value } => {
+                format!("{} {} {}\n", name, ts, value)
             }
             Self::Gauge {
                 min: _,
@@ -137,10 +151,14 @@ impl CounterType {
     pub(crate) fn merge(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
         self.same_type(other)?;
         match other {
-            CounterType::Counter { value } => {
+            CounterType::Counter { ts, value } => {
                 /* For a counter we simply add the local and remote values */
                 match self {
-                    CounterType::Counter { value: svalue } => {
+                    CounterType::Counter {
+                        ts: sts,
+                        value: svalue,
+                    } => {
+                        *sts = (*ts + *sts) / 2;
                         *svalue += *value;
                         Ok(())
                     }
@@ -177,10 +195,14 @@ impl CounterType {
     pub(crate) fn set(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
         self.same_type(other)?;
         match other {
-            CounterType::Counter { value } => {
+            CounterType::Counter { ts, value } => {
                 /* For a counter we simply add the local and remote values */
                 match self {
-                    CounterType::Counter { value: svalue } => {
+                    CounterType::Counter {
+                        ts: sts,
+                        value: svalue,
+                    } => {
+                        *sts = (*ts + *sts) / 2;
                         *svalue += *value;
                         Ok(())
                     }
@@ -216,10 +238,14 @@ impl CounterType {
     fn delta(&mut self, other: &CounterType) -> Result<(), ProxyErr> {
         self.same_type(other)?;
         match other {
-            CounterType::Counter { value } => {
+            CounterType::Counter { ts, value } => {
                 /* For a counter we simply add the local and remote values */
                 match self {
-                    CounterType::Counter { value: svalue } => {
+                    CounterType::Counter {
+                        ts: sts,
+                        value: svalue,
+                    } => {
+                        *sts -= ts;
                         *svalue -= *value;
                         Ok(())
                     }
@@ -397,7 +423,7 @@ impl CounterValue {
     #[allow(unused)]
     pub fn reset(&mut self) {
         self.value = match self.value {
-            CounterType::Counter { value } => CounterType::Counter { value: 0.0 },
+            CounterType::Counter { ts: _, value } => CounterType::Counter { ts: 0, value: 0.0 },
             CounterType::Gauge {
                 min,
                 max,
@@ -410,6 +436,21 @@ impl CounterValue {
                 total: 0.0,
             },
         };
+    }
+
+    pub fn set_ts(&mut self, to_set_ts: u64) -> &mut Self {
+        match &mut self.value {
+            CounterType::Counter { ts, value } => {
+                *ts = to_set_ts;
+            }
+            CounterType::Gauge {
+                min,
+                max,
+                hits,
+                total,
+            } => {}
+        }
+        self
     }
 }
 
@@ -612,7 +653,7 @@ impl CounterSnapshot {
     #[allow(unused)]
     pub(crate) fn float_value(&self) -> f64 {
         match self.ctype {
-            CounterType::Counter { value } => value,
+            CounterType::Counter { ts: _, value } => value,
             CounterType::Gauge {
                 min: _,
                 max: _,
@@ -667,7 +708,7 @@ impl JobProfile {
                     *min = f64::MAX;
                     *max = f64::MIN;
                 }
-                CounterType::Counter { value: _ } => {}
+                CounterType::Counter { ts: _, value: _ } => {}
             }
         }
 

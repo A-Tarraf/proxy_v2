@@ -173,10 +173,10 @@ impl TraceFrame {
             .map(|v| {
                 let ret = if let Some(prev) = first.get(&v.id) {
                     match v.value {
-                        CounterType::Counter { value } => match prev.value {
-                            CounterType::Counter { value: _ } => TraceCounter {
+                        CounterType::Counter { ts, value } => match prev.value {
+                            CounterType::Counter { ts: _, value: _ } => TraceCounter {
                                 id: v.id,
-                                value: CounterType::Counter { value },
+                                value: CounterType::Counter { ts, value },
                             },
                             CounterType::Gauge { .. } => unreachable!(),
                         },
@@ -595,10 +595,9 @@ impl TraceState {
             })
             .collect();
 
-        let frame = TraceFrame::Counters {
-            ts: unix_ts(),
-            counters,
-        };
+        let ts = counters.get(0).map(|v| v.value.ts()).unwrap_or(unix_ts());
+
+        let frame = TraceFrame::Counters { ts, counters };
 
         /* Add to file */
         self.write_frame(&frame)?;

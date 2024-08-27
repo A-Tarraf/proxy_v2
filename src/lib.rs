@@ -7,6 +7,7 @@ use std::time::Duration;
 use std::{error::Error, io::Write};
 
 mod proxy_common;
+mod squeue;
 use proxy_common::ProxyErr;
 use proxy_common::{get_proxy_path, init_log};
 
@@ -37,7 +38,7 @@ impl MetricProxyValue {
     fn updated(&self) -> bool {
         let val = self.value.lock().unwrap();
         match val.value {
-            CounterType::Counter { value } => value > 0.0,
+            CounterType::Counter { ts: _, value } => value > 0.0,
             CounterType::Gauge {
                 min: _,
                 max: _,
@@ -59,11 +60,9 @@ impl MetricProxyValue {
     fn inc(&self, increment: f64) -> Result<(), ProxyErr> {
         let mut tval = self.value.lock().unwrap();
 
-        match tval.value {
-            CounterType::Counter { value } => {
-                tval.value = CounterType::Counter {
-                    value: value + increment,
-                }
+        match &mut tval.value {
+            CounterType::Counter { ts: _, value } => {
+                *value += increment;
             }
             _ => {
                 return Err(ProxyErr::new("Inc is only meaningfull for counters"));
@@ -181,7 +180,8 @@ impl MetricProxyClient {
                 .filter(|(_, v)| v.updated())
                 .map(|(_, v)| {
                     let mut value = v.value.lock().unwrap();
-                    let ret = ProxyCommand::Value(value.clone());
+                    let ts = proxy_common::unix_ts();
+                    let ret = ProxyCommand::Value(value.set_ts(ts).clone());
                     /* Make sure to clear the original counter */
                     value.reset();
                     ret
@@ -204,7 +204,7 @@ impl MetricProxyClient {
 
         if let Some(mut stream) = stream_lock.as_mut() {
             serde_json::to_writer(&mut stream, cmd)?;
-            let null_byte: [u8; 1] = [0; 1];
+            let null_byte: [u8; 1] = [0_u8; 1];
             stream.write_all(&null_byte)?;
 
             log::debug!("Sending {:?}", cmd);
@@ -218,7 +218,7 @@ impl MetricProxyClient {
 
     fn send_jobdesc(&self) -> Result<(), Box<dyn Error>> {
         let desc = ProxyCommand::JobDesc(JobDesc::new());
-        return self.send(&desc);
+        self.send(&desc)
     }
 
     fn push_entry(

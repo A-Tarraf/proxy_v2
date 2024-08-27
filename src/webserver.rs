@@ -1,5 +1,5 @@
-use crate::proxy_common::{gen_range, ProxyErr};
-use crate::proxywireprotocol::{ApiResponse, CounterSnapshot, CounterType, JobProfile};
+use crate::proxy_common::{self, gen_range, ProxyErr};
+use crate::proxywireprotocol::{self, ApiResponse, CounterSnapshot, CounterType, JobProfile};
 use crate::{
     exporter::{Exporter, ExporterFactory},
     proxy_common::{concat_slices, derivate_time_serie, hostname, parse_bool},
@@ -223,7 +223,10 @@ impl Web {
         let snap = CounterSnapshot {
             name: key,
             doc: "".to_string(),
-            ctype: CounterType::Counter { value },
+            ctype: CounterType::Counter {
+                ts: proxy_common::unix_ts(),
+                value,
+            },
         };
 
         match self.factory.get_main().set(snap) {
@@ -250,7 +253,10 @@ impl Web {
         let snap = CounterSnapshot {
             name: key,
             doc: "".to_string(),
-            ctype: CounterType::Counter { value },
+            ctype: CounterType::Counter {
+                ts: proxy_common::unix_ts(),
+                value,
+            },
         };
 
         match self.factory.get_main().accumulate(&snap, false) {
