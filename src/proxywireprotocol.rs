@@ -5,7 +5,6 @@ use crate::proxy_common::ProxyErr;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::{collections::HashMap, env, error::Error};
 
@@ -80,7 +79,7 @@ impl CounterType {
     #[allow(unused)]
     pub fn clean_nan(&mut self) {
         match self {
-            CounterType::Counter { value } => {
+            CounterType::Counter { ts: _, value } => {
                 if value.is_infinite() || value.is_nan() {
                     *value = 0.0;
                 }
