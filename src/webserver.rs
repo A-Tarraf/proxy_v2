@@ -5,7 +5,6 @@ use crate::{
     proxy_common::{concat_slices, derivate_time_serie, hostname, parse_bool},
 };
 
-use anyhow::anyhow;
 use colored::Colorize;
 use rouille::input::json::JsonError;
 use rouille::{Request, Response};
@@ -13,7 +12,10 @@ use serde::Deserialize;
 use static_files::Resource;
 use std::collections::HashMap;
 use std::path::Path;
+
 use std::sync::{Arc, Mutex};
+
+use crate::squeue;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -306,6 +308,38 @@ impl Web {
             }
         } else {
             Web::serialize_exporter(&self.factory.get_main())
+        }
+    }
+
+    fn handle_queue(&self, _req: &Request) -> WebResponse {
+        match squeue::SqueueJobList::init() {
+            Ok(q) => WebResponse::Native(Response::json(&q)),
+            Err(e) => WebResponse::BadReq(format!("Failed to call squeue: {}", e)),
+        }
+    }
+
+    fn handle_queue_model(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("job") {
+            match squeue::SqueueJobList::init() {
+                Ok(jlist) => match jlist.job_cmd(&jobid) {
+                    Some(pending) => {
+                        if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&pending) {
+                            return WebResponse::Native(Response::text(jsonl));
+                        } else {
+                            return WebResponse::BadReq(format!(
+                                "Failed to retrieve a model for : {} ({})",
+                                jobid, pending
+                            ));
+                        }
+                    }
+                    None => {
+                        WebResponse::BadReq(format!("Failed to retrieve a job with id : {}", jobid))
+                    }
+                },
+                Err(e) => WebResponse::BadReq(format!("Failed to call squeue: {}", e)),
+            }
+        } else {
+            WebResponse::BadReq(format!("A Job Parameter is required"))
         }
     }
 
@@ -621,7 +655,7 @@ impl Web {
                 return WebResponse::BadReq("No such jobid".to_string());
             };
 
-            if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&prof.desc) {
+            if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&prof.desc.command) {
                 return WebResponse::Native(Response::text(jsonl));
             }
             return WebResponse::BadReq(format!("Failed to get {}", jobid));
@@ -903,6 +937,11 @@ impl Web {
                 "job" => match resource.as_str() {
                     "list" => self.handle_joblist(request),
                     "" => self.handle_job(request),
+                    _ => WebResponse::BadReq(url),
+                },
+                "queue" => match resource.as_str() {
+                    "list" => self.handle_queue(request),
+                    "model" => self.handle_queue_model(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "trace" => match resource.as_str() {

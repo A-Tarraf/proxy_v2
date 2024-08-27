@@ -543,7 +543,7 @@ impl JobDesc {
 
         JobDesc {
             jobid,
-            command,
+            command: command.trim().to_string(),
             size,
             nodelist,
             partition,

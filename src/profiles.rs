@@ -31,8 +31,8 @@ impl ProfileView {
         Ok(content)
     }
 
-    fn extrap_filename(&self, desc: &JobDesc) -> (Option<PathBuf>, String) {
-        let digest = md5::compute(&desc.command);
+    fn extrap_filename(&self, command: &str) -> (Option<PathBuf>, String) {
+        let digest = md5::compute(command);
         let mut path = self.profdir.clone();
         let hash = format!("{:x}", digest);
         path.push(format!("{}.jsonl", hash));
@@ -54,8 +54,8 @@ impl ProfileView {
         ProfileView::_get_profile(&path.to_string_lossy().to_string())
     }
 
-    pub(crate) fn get_jsonl(&self, desc: &JobDesc) -> Result<String, Box<dyn Error>> {
-        if let (Some(path), _) = self.extrap_filename(desc) {
+    pub(crate) fn get_jsonl(&self, command: &str) -> Result<String, Box<dyn Error>> {
+        if let (Some(path), _) = self.extrap_filename(command) {
             let mut fd = fs::File::open(path)?;
             let mut data: Vec<u8> = Vec::new();
             fd.read_to_end(&mut data)?;
@@ -77,7 +77,7 @@ impl ProfileView {
         for p in ret.iter() {
             if !ht.contains_key(p) {
                 let content = Self::_get_profile(p)?;
-                let extrap_model = self.extrap_filename(&content.desc);
+                let extrap_model = self.extrap_filename(&content.desc.command);
 
                 ht.insert(content.desc.jobid.clone(), content);
 

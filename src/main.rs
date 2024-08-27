@@ -13,6 +13,8 @@ use exporter::ExporterFactory;
 mod proxy;
 use proxy::UnixProxy;
 
+mod squeue;
+
 mod webserver;
 use webserver::Web;
 
