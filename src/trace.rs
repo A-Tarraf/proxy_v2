@@ -19,7 +19,7 @@ use serde_binary::binary_stream;
 
 use crate::{
     exporter::ExporterFactory,
-    proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, ProxyErr},
+    proxy_common::{check_prefix_dir, list_files_with_ext_in, unix_ts, unix_ts_us, ProxyErr},
     proxywireprotocol::{max_f64, min_f64, CounterSnapshot, CounterType, JobDesc, JobProfile},
 };
 
@@ -459,7 +459,7 @@ impl TraceState {
                     .insert(c.name.to_string(), metadata.clone());
 
                 let frame = TraceFrame::CounterMetadata {
-                    ts: unix_ts(),
+                    ts: unix_ts_us(),
                     metadata,
                 };
 
@@ -515,7 +515,7 @@ impl TraceState {
             Self::do_write_frame(&mut fd, f)?;
         }
 
-        self.lastwrite = unix_ts();
+        self.lastwrite = unix_ts_us();
         self.size = fd.metadata()?.len();
 
         Ok(())
@@ -595,7 +595,10 @@ impl TraceState {
             })
             .collect();
 
-        let ts = counters.get(0).map(|v| v.value.ts()).unwrap_or(unix_ts());
+        let ts = counters
+            .first()
+            .map(|v| v.value.ts())
+            .unwrap_or(unix_ts_us());
 
         let frame = TraceFrame::Counters { ts, counters };
 
@@ -636,7 +639,7 @@ impl TraceState {
     fn new(path: &Path, job: &JobDesc, max_size: usize) -> Result<TraceState, Box<dyn Error>> {
         // First thing save the jobdesc
         let desc = TraceFrame::Desc {
-            ts: unix_ts(),
+            ts: unix_ts_us(),
             desc: job.clone(),
         };
 
@@ -661,7 +664,7 @@ impl TraceState {
         let desc = TraceState::desc_from_file(&path.to_path_buf())?;
 
         let desc = TraceFrame::Desc {
-            ts: unix_ts(),
+            ts: unix_ts_us(),
             desc: desc.clone(),
         };
 
@@ -714,8 +717,8 @@ impl Trace {
         let mut state = TraceState::from(path, 0)?;
         let mut desc = state.desc()?;
         /* Assume end time is the last profile write ~1 sec exact */
-        if state.lastwrite != 0.0 {
-            desc.end_time = state.lastwrite;
+        if state.lastwrite != 0 {
+            desc.end_time = (state.lastwrite / 1000000) as u64;
         }
         Ok(Trace {
             desc,
@@ -801,7 +804,7 @@ impl TraceInfo {
         TraceInfo {
             desc: trace.desc.clone(),
             size: infos.size,
-            lastwrite: infos.lastwrite,
+            lastwrite: (infos.lastwrite / 1000000) as u64,
         }
     }
 }

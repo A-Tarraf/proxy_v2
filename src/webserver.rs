@@ -224,7 +224,7 @@ impl Web {
             name: key,
             doc: "".to_string(),
             ctype: CounterType::Counter {
-                ts: proxy_common::unix_ts(),
+                ts: proxy_common::unix_ts_us() as u64,
                 value,
             },
         };
@@ -254,7 +254,7 @@ impl Web {
             name: key,
             doc: "".to_string(),
             ctype: CounterType::Counter {
-                ts: proxy_common::unix_ts(),
+                ts: proxy_common::unix_ts_us() as u64,
                 value,
             },
         };

@@ -52,7 +52,7 @@ pub struct ProxyScraper {
     state: HashMap<String, JobProfile>,
     factory: Option<Arc<ExporterFactory>>,
     period: f64,
-    last_scrape: u128,
+    last_scrape: u64,
     ttype: ScraperType,
 }
 
@@ -275,7 +275,7 @@ impl ProxyScraper {
                     prometheus_parse::Value::Counter(value) => Some(CounterSnapshot {
                         name: ProxyScraper::prometheus_sample_name(&v),
                         ctype: CounterType::Counter {
-                            ts: proxy_common::unix_ts(),
+                            ts: proxy_common::unix_ts_us() as u64,
                             value,
                         },
                         doc,
@@ -364,7 +364,7 @@ impl ProxyScraper {
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
-        if unix_ts_us() - self.last_scrape < (self.period * 1000000.0) as u128 {
+        if unix_ts_us() - self.last_scrape < (self.period * 1000) {
             /* Not to be scraped yet */
             return Ok(());
         }

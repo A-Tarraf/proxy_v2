@@ -1,4 +1,5 @@
 use crate::proxy_common::unix_ts;
+use crate::proxy_common::unix_ts_us;
 use crate::proxy_common::ProxyErr;
 
 use serde::{Deserialize, Serialize};
@@ -57,7 +58,7 @@ impl CounterType {
                 max: _,
                 hits: _,
                 total: _,
-            } => unix_ts(),
+            } => unix_ts_us(),
         }
     }
 

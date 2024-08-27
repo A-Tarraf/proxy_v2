@@ -135,11 +135,7 @@ impl MetricProxyClient {
             log::warn!("Not Connected to Metric Proxy");
         }
 
-        let period: Duration = env::var("PROXY_PERIOD")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(Duration::from_millis)
-            .unwrap_or(Duration::from_millis(1000));
+        let period: Duration = Duration::from_millis(proxy_common::get_proxy_period());
 
         let client = MetricProxyClient {
             period,
@@ -180,7 +176,7 @@ impl MetricProxyClient {
                 .filter(|(_, v)| v.updated())
                 .map(|(_, v)| {
                     let mut value = v.value.lock().unwrap();
-                    let ts = proxy_common::unix_ts();
+                    let ts = proxy_common::unix_ts_us();
                     let ret = ProxyCommand::Value(value.set_ts(ts).clone());
                     /* Make sure to clear the original counter */
                     value.reset();

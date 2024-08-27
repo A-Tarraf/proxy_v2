@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
-use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, fs};
 use std::{error::Error, path::PathBuf};
 
 /*******************
@@ -55,6 +55,13 @@ pub fn init_log() {
     env_logger::init_from_env(env);
 }
 
+pub fn get_proxy_period() -> u64 {
+    env::var("PROXY_PERIOD")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1000)
+}
+
 #[allow(unused)]
 pub fn unix_ts() -> f64 {
     let current_time = SystemTime::now();
@@ -66,12 +73,12 @@ pub fn unix_ts() -> f64 {
 }
 
 #[allow(unused)]
-pub fn unix_ts_us() -> u128 {
+pub fn unix_ts_us() -> u64 {
     let current_time = SystemTime::now();
     current_time
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
-        .as_micros()
+        .as_millis() as u64
 }
 
 #[allow(unused)]
@@ -195,7 +202,7 @@ pub fn parse_bool(sbool: &str) -> bool {
 }
 
 #[allow(unused)]
-pub fn derivate_time_serie(data: &Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+pub fn derivate_time_serie(data: &[(u64, f64)]) -> Vec<(u64, f64)> {
     let mut ret: Vec<(f64, f64)> = vec![(data[0].0, 0.0)];
 
     for i in (1..data.len()) {

@@ -1,7 +1,7 @@
 use sysinfo::{ComponentExt, CpuExt, DiskExt, NetworkExt, System, SystemExt};
 
 use crate::{
-    proxy_common::{unix_ts, ProxyErr},
+    proxy_common::{unix_ts, unix_ts_us, ProxyErr},
     proxywireprotocol::{CounterSnapshot, CounterType},
 };
 
@@ -160,7 +160,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of bytes sent on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: transmitted,
                 },
             ));
@@ -171,7 +171,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of bytes received on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: received,
                 },
             ));
@@ -182,7 +182,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of packets sent on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: transmitted,
                 },
             ));
@@ -193,7 +193,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of packets received on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: received,
                 },
             ));
@@ -204,7 +204,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of erroneous packets sent on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: transmitted,
                 },
             ));
@@ -215,7 +215,7 @@ impl SystemMetrics {
                 attrs.as_slice(),
                 "Total number of erroneous  packets received on the given device".to_string(),
                 CounterType::Counter {
-                    ts: unix_ts(),
+                    ts: unix_ts_us() as u64,
                     value: received,
                 },
             ));
@@ -405,7 +405,7 @@ impl SystemMetrics {
             attrs.as_slice(),
             "Number of scrapes for proxy instance".to_string(),
             CounterType::Counter {
-                ts: unix_ts(),
+                ts: unix_ts_us() as u64,
                 value: 1.0,
             },
         ));

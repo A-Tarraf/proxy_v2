@@ -154,6 +154,9 @@ struct Args {
     /// Optionnal path to proxy UNIX Socket
     #[arg(short, long)]
     unixsocket: Option<String>,
+    /// Sampling period in MS
+    #[arg(short, long, default_value_t = 1000)]
+    period: u64,
     /// A command to run (passed after --)
     #[arg(last = true)]
     command: Vec<String>,
@@ -219,6 +222,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(unix) = args.unixsocket {
         cmd.env("PROXY_PATH", unix);
     }
+
+    /* Handle Sampling Period */
+    cmd.env("PROXY_PERIOD", format!("{}", args.period));
 
     /* Forward arguments */
     let args: Vec<OsString> = command[1..].iter().cloned().map(OsString::from).collect();
