@@ -245,7 +245,9 @@ impl CounterType {
                         ts: sts,
                         value: svalue,
                     } => {
-                        *sts -= ts;
+                        if *sts > *ts {
+                            *sts -= ts;
+                        }
                         *svalue -= *value;
                         Ok(())
                     }
@@ -761,7 +763,7 @@ impl JobProfile {
 
     pub(crate) fn did_complete(&self) -> bool {
         if let (Some(start), Some(end)) = (self.get("has_started"), self.get("has_finished")) {
-            return start.value().value == end.value().value;
+            return start.value().value.value() == end.value().value.value();
         }
 
         false

@@ -348,7 +348,7 @@ impl ProxyScraper {
         let data = exporter.profile(trace.desc(), false)?;
         if let Some(new_sampling) = trace.push(data, self.period)? {
             log::info!(
-                "Lowering sampling period for {} to {} s",
+                "Lowering sampling period for {} to {} ms",
                 trace.path(),
                 new_sampling
             );
