@@ -993,7 +993,7 @@ impl TraceView {
 
         for (ts, c) in time_serie.iter() {
             match c {
-                CounterType::Counter { ts: cnt_ts, value } => ret.push((*cnt_ts, *value)),
+                CounterType::Counter { ts: cnt_ts, value } => ret.push((*ts, *value)),
                 CounterType::Gauge {
                     min: _,
                     max: _,
