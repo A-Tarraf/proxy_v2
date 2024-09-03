@@ -763,7 +763,7 @@ impl JobProfile {
 
     pub(crate) fn did_complete(&self) -> bool {
         if let (Some(start), Some(end)) = (self.get("has_started"), self.get("has_finished")) {
-            return start.value().value.value() == end.value().value.value();
+            return (start.value().value.value() != 0.0) && (end.value().value.value() != 0.0);
         }
 
         false
