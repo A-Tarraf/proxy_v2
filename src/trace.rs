@@ -595,7 +595,7 @@ impl TraceState {
             })
             .collect();
 
-        let ts = counters.first().map(|v| v.value.ts()).unwrap_or(unix_ts());
+        let ts = unix_ts(); //counters.first().map(|v| v.value.ts()).unwrap_or(unix_ts());
 
         let frame = TraceFrame::Counters { ts, counters };
 
