@@ -817,15 +817,14 @@ impl Web {
             }
         };
 
-        if let Ok(model) = self
+        match self
             .factory
             .profile_store
             .extrap_model_plot(&prof.desc, metric, &range)
         {
-            return WebResponse::Native(Response::json(&model));
+            Ok(model) => return WebResponse::Native(Response::json(&model)),
+            Err(e) => WebResponse::BadReq(format!("Failed to plot {}", e)),
         }
-
-        WebResponse::BadReq(format!("Failed to get {}", jobid))
     }
 
     fn handle_profile_points(&self, req: &Request) -> WebResponse {

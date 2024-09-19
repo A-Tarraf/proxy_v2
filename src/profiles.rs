@@ -187,6 +187,11 @@ impl ProfileView {
         let cmd_hash = md5::compute(&desc.command);
         let hash = format!("{:x}", cmd_hash);
 
+        /* Try to load models too */
+        if self.models.lock().unwrap().get(&hash).is_none() {
+            let _ = self.refresh_profiles();
+        }
+
         if let Some(m) = self.models.lock().unwrap().get_mut(&hash) {
             let vals = m.plot(&metric, points)?;
             Ok(vals)
