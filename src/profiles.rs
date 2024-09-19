@@ -46,16 +46,24 @@ impl ProfileView {
 
     pub(crate) fn get_profile(&self, jobid: &str) -> Result<JobProfile, Box<dyn Error>> {
         if let Some(prof) = self.profiles.read().unwrap().get(jobid) {
-            return Ok(prof.clone());
+            let mut ret = prof.clone();
+            if ret.add_duration()? {
+                self.generate_extrap_model(&ret.desc)?;
+            }
+            return Ok(ret);
         }
 
         let mut path = self.profdir.clone();
         path.push(format!("{}.profile", jobid));
-        ProfileView::_get_profile(&path.to_string_lossy().to_string())
+        let mut ret = ProfileView::_get_profile(&path.to_string_lossy().to_string())?;
+        if ret.add_duration()? {
+            self.generate_extrap_model(&ret.desc)?;
+        }
+        Ok(ret)
     }
 
-    pub(crate) fn get_jsonl(&self, command: &str) -> Result<String, Box<dyn Error>> {
-        if let (Some(path), _) = self.extrap_filename(command) {
+    pub(crate) fn get_jsonl_by_cmd(&self, command: &str) -> Result<String, Box<dyn Error>> {
+        if let (Some(path), _) = self.extrap_filename(&command) {
             let mut fd = fs::File::open(path)?;
             let mut data: Vec<u8> = Vec::new();
             fd.read_to_end(&mut data)?;
@@ -65,6 +73,18 @@ impl ProfileView {
         } else {
             Err(ProxyErr::newboxed("No model for this profile"))
         }
+    }
+
+    pub(crate) fn get_jsonl(&self, desc: &JobDesc) -> Result<String, Box<dyn Error>> {
+        let mut data = self.get_jsonl_by_cmd(&desc.command)?;
+
+        if !data.contains("walltime") {
+            /* This is a previous JSONL lets regenerate */
+            self.generate_extrap_model(&desc)?;
+            data = self.get_jsonl_by_cmd(&desc.command)?;
+        }
+
+        Ok(data)
     }
 
     pub(crate) fn refresh_profiles(&self) -> Result<(), Box<dyn Error>> {

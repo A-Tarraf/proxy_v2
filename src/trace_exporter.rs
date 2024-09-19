@@ -135,7 +135,7 @@ impl TraceExporter {
             )));
         }
 
-        if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&infos.desc.command) {
+        if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&infos.desc) {
             let mut outf = File::create(output)?;
             outf.write_all(jsonl.as_bytes())?;
         }

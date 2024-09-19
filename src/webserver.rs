@@ -323,7 +323,7 @@ impl Web {
             match squeue::SqueueJobList::init() {
                 Ok(jlist) => match jlist.job_cmd(&jobid) {
                     Some(pending) => {
-                        if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&pending) {
+                        if let Ok(jsonl) = self.factory.profile_store.get_jsonl_by_cmd(&pending) {
                             return WebResponse::Native(Response::text(jsonl));
                         } else {
                             return WebResponse::BadReq(format!(
@@ -655,7 +655,7 @@ impl Web {
                 return WebResponse::BadReq("No such jobid".to_string());
             };
 
-            if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&prof.desc.command) {
+            if let Ok(jsonl) = self.factory.profile_store.get_jsonl(&prof.desc) {
                 return WebResponse::Native(Response::text(jsonl));
             }
             return WebResponse::BadReq(format!("Failed to get {}", jobid));

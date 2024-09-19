@@ -673,6 +673,29 @@ pub(crate) struct JobProfile {
 }
 
 impl JobProfile {
+    pub(crate) fn add_duration(&mut self) -> Result<bool, ProxyErr> {
+        for c in self.counters.iter() {
+            if c.name == "walltime" {
+                return Ok(true);
+            }
+        }
+
+        /* Here we compute and insert walltime */
+        let duration = self.desc.end_time - self.desc.start_time;
+
+        self.counters.push(CounterSnapshot::new(
+            "walltime".to_string(),
+            &[],
+            "Duration of the application".to_string(),
+            CounterType::Counter {
+                ts: 0,
+                value: duration as f64,
+            },
+        ));
+
+        Ok(false)
+    }
+
     #[allow(unused)]
     pub(crate) fn merge(&mut self, other_prof: JobProfile) -> Result<(), ProxyErr> {
         self.desc.merge(other_prof.desc)?;
