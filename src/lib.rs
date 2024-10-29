@@ -1,21 +1,27 @@
+use elf::abi::PT_LOAD;
+use elf::endian::AnyEndian;
+use elf::segment::ProgramHeader;
+use lazy_static::lazy_static;
+use proc_maps::{get_process_maps, maps_contain_addr, MapRange};
 use std::env;
 use std::ffi::CStr;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::ptr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use std::{error::Error, io::Write};
-
 mod proxy_common;
 mod squeue;
+use elf::ElfBytes;
 use proxy_common::ProxyErr;
 use proxy_common::{get_proxy_path, init_log};
 
 mod proxywireprotocol;
-use libc::{signal, SIGPIPE, SIG_IGN};
+use libc::{c_ulonglong, signal, user, SIGPIPE, SIG_IGN};
 use proxywireprotocol::{CounterType, CounterValue, JobDesc, ProxyCommand, ValueDesc};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use std::thread;
 
@@ -88,11 +94,15 @@ impl MetricProxyValue {
     }
 }
 
+static mut PROXY_INSTANCE: Option<Arc<MetricProxyClient>> = None;
+
 pub struct MetricProxyClient {
     period: Duration,
     running: Arc<Mutex<bool>>,
     stream: Mutex<Option<UnixStream>>,
     counters: RwLock<HashMap<String, Arc<MetricProxyValue>>>,
+    functions: RwLock<HashMap<String, Arc<MetricProxyValue>>>,
+    maps: Vec<MapRange>,
 }
 
 impl Drop for MetricProxyClient {
@@ -103,8 +113,18 @@ impl Drop for MetricProxyClient {
 
 static START: Once = Once::new();
 
+lazy_static! {
+    static ref JOBDESC: JobDesc = JobDesc::new();
+}
+
 impl MetricProxyClient {
     fn new() -> Arc<MetricProxyClient> {
+        unsafe {
+            if let Some(client) = PROXY_INSTANCE.clone() {
+                return client;
+            }
+        }
+
         START.call_once(|| {
             init_log();
         });
@@ -142,6 +162,8 @@ impl MetricProxyClient {
             running: Arc::new(Mutex::new(can_run)),
             stream: Mutex::new(tsock),
             counters: RwLock::new(HashMap::new()),
+            functions: RwLock::new(HashMap::new()),
+            maps: get_process_maps(std::process::id() as i32).unwrap(),
         };
 
         let pclient = Arc::new(client);
@@ -162,7 +184,76 @@ impl MetricProxyClient {
             });
         }
 
+        unsafe {
+            PROXY_INSTANCE = Some(pclient.clone());
+        }
+
         pclient
+    }
+
+    fn text_offset(dso: &str) -> Option<usize> {
+        let path = std::path::PathBuf::from(dso);
+
+        if !path.is_file() {
+            return None;
+        }
+
+        let file_data = std::fs::read(path).expect("Could not read file.");
+        let slice = file_data.as_slice();
+        if let Ok(file) = ElfBytes::<AnyEndian>::minimal_parse(slice) {
+            if let Ok(Some(txt)) = file.section_header_by_name(".text") {
+                let p_vaddr = if let Some(first_load_phdr) =
+                    file.segments().unwrap().iter().find(|phdr| {
+                        phdr.p_type == PT_LOAD
+                            && ((phdr.p_offset <= txt.sh_offset)
+                                && ((txt.sh_offset + txt.sh_size)
+                                    <= (phdr.p_offset + phdr.p_filesz)))
+                    }) {
+                    first_load_phdr.p_offset
+                } else {
+                    0
+                };
+
+                log::debug!(
+                    "{} .txt is at {:#x} loaded {:#x} linked at {:#x}",
+                    dso,
+                    txt.sh_offset,
+                    txt.sh_addr,
+                    txt.sh_offset
+                );
+                return Some((txt.sh_offset) as usize);
+            }
+        }
+
+        None
+    }
+
+    fn dso_local_offset(&self, addr: usize) -> (usize, String) {
+        for r in self.maps.iter() {
+            if maps_contain_addr(addr, &[r.clone()]) {
+                let p = if let Some(path) = r.filename().unwrap().as_os_str().to_str() {
+                    path.to_string()
+                } else {
+                    "Unknown".to_string()
+                };
+
+                log::debug!("{} load is at {:#x}", p, r.start());
+
+                let faddr = if let Some(file_off) = MetricProxyClient::text_offset(&p) {
+                    log::debug!(
+                        "Symbol is at offset {:#x} in loaded section",
+                        addr - r.start()
+                    );
+                    (addr - r.start()) + file_off
+                } else {
+                    addr
+                };
+
+                return (faddr, p);
+            }
+        }
+
+        (addr, "Unknown".to_string())
     }
 
     fn dump_values(&self) -> Result<(), Box<dyn Error>> {
@@ -213,12 +304,12 @@ impl MetricProxyClient {
     }
 
     fn send_jobdesc(&self) -> Result<(), Box<dyn Error>> {
-        let desc = ProxyCommand::JobDesc(JobDesc::new());
+        let desc = ProxyCommand::JobDesc(JOBDESC.clone());
         self.send(&desc)
     }
 
     fn push_entry(
-        &mut self,
+        &self,
         name: String,
         doc: String,
         ctype: CounterType,
@@ -258,7 +349,7 @@ impl MetricProxyClient {
     }
 
     fn new_counter(
-        &mut self,
+        &self,
         name: String,
         doc: String,
     ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
@@ -271,6 +362,62 @@ impl MetricProxyClient {
         doc: String,
     ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
         self.push_entry(name, doc, CounterType::newgauge())
+    }
+
+    fn addr2line(addr: usize, dso: &str) -> String {
+        let mut command = std::process::Command::new("addr2line");
+        command.arg("-fe").arg(dso).arg(format!("0x{:x}", addr));
+
+        let clean_dso = dso.replace(".so", "").replace("/", "_").replace(".", "_");
+
+        if let Ok(output) = command.output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = output_str.split('\n').collect();
+
+            if lines.len() > 1 {
+                if lines[0].contains("??") {
+                    return format!("{:#x}_{}", addr, clean_dso);
+                } else {
+                    return format!("{}_{}", lines[0], clean_dso);
+                }
+            }
+        }
+
+        format!("{:#x}{}", addr, clean_dso)
+    }
+
+    fn new_func(
+        &self,
+        this_fn: usize,
+        callsite: usize,
+    ) -> Result<Arc<MetricProxyValue>, Box<dyn Error>> {
+        let func: String = format!("{}@{}", this_fn, callsite);
+
+        if let Ok(funcs) = self.functions.read() {
+            if let Some(prev) = funcs.get(&func) {
+                return Ok(prev.clone());
+            }
+        }
+
+        let (addr, dso) = self.dso_local_offset(this_fn);
+
+        let locus = MetricProxyClient::addr2line(addr, &dso);
+
+        log::trace!("CALLSITE {}", locus);
+
+        if let Ok(c) = self.new_counter(
+            format!("func__{}", locus.clone()),
+            format!("Number of calls to {}", locus),
+        ) {
+            self.functions
+                .write()
+                .as_mut()
+                .unwrap()
+                .insert(func.clone(), c.clone());
+            return Ok(c);
+        }
+
+        Err(ProxyErr::newboxed("Failed to retrieve proxyclient"))
     }
 }
 
@@ -290,7 +437,7 @@ pub extern "C" fn metric_proxy_init() -> *mut MetricProxyClient {
         "has_started".to_string(),
         "Number of calls to metric_proxy_init".to_string(),
     ) {
-        start.inc(1.0);
+        let _ = start.inc(1.0);
     }
 
     client
@@ -316,7 +463,7 @@ pub unsafe extern "C" fn metric_proxy_release(pclient: *mut MetricProxyClient) -
         "has_finished".to_string(),
         "Number of calls to metric_proxy_release".to_string(),
     ) {
-        done.inc(1.0);
+        let _ = done.inc(1.0);
     }
 
     *client.running.lock().unwrap() = false;
@@ -384,6 +531,75 @@ pub unsafe extern "C" fn metric_proxy_counter_new(
     }
 
     std::ptr::null_mut()
+}
+
+#[no_mangle]
+pub extern "C" fn rust_ctor() {
+    log::debug!("Calling constructor for proxy_client library");
+    let _ = MetricProxyClient::new();
+}
+
+#[no_mangle]
+pub extern "C" fn rust_dtor() {
+    log::debug!("Calling destructor for proxy_client library");
+    unsafe {
+        if let Some(client) = PROXY_INSTANCE.clone() {
+            let _ = client.dump_values();
+        }
+    }
+}
+
+#[link_section = ".init_array"]
+pub static INITIALIZE: extern "C" fn() = rust_ctor;
+
+#[link_section = ".fini_array"]
+pub static FINALIZE: extern "C" fn() = rust_dtor;
+
+/// This creates a counter for the given function if it does not exists
+///
+/// # Safety
+///
+/// Only correct pointers are returned by previous functions should be returned.
+/// Doing otherwise may crash.
+#[no_mangle]
+pub unsafe extern "C" fn metric_proxy_get_func(
+    pclient: *mut MetricProxyClient,
+    func: libc::size_t,
+    callsite: libc::size_t,
+) -> *mut MetricProxyValue {
+    let client: &mut MetricProxyClient = unsafe { &mut *(pclient) };
+
+    if !*client.running.lock().unwrap() {
+        return std::ptr::null_mut();
+    }
+
+    if let Ok(c) = client.new_func(func, callsite) {
+        return Arc::into_raw(c) as *mut MetricProxyValue;
+    }
+
+    std::ptr::null_mut()
+}
+
+/// Callback function for entering a function.new_func
+#[no_mangle]
+pub extern "C" fn __cyg_profile_func_enter(this_fn: *const (), call_site: *const ()) {
+    log::trace!("==> FUNC ENTER {:p} && {:p}", this_fn, call_site);
+    unsafe {
+        let client = if let Some(client) = PROXY_INSTANCE.clone() {
+            client
+        } else {
+            MetricProxyClient::new()
+        };
+
+        let this_fn: usize = this_fn as usize;
+        let call_site: usize = call_site as usize;
+
+        // Additional logic using `fn_addr` can be added here
+
+        if let Ok(cnt) = client.new_func(this_fn, call_site) {
+            let _ = cnt.inc(1.0);
+        }
+    }
 }
 
 /// This Increments the value of a Counter in the proxy

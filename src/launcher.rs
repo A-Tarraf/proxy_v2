@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::process::exit;
+use std::str::FromStr;
 use std::{error::Error, path::PathBuf};
 
 mod proxy_common;
@@ -22,7 +23,6 @@ enum Exporter {
 impl Exporter {
     fn newpreload(path: PathBuf) -> Exporter {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        assert!(name.starts_with("libmetricproxy-exporter-"));
         assert!(name.ends_with(".so"));
 
         let name = name
@@ -129,6 +129,14 @@ impl ExporterList {
                 ],
             })
         }
+
+        exporters.push(Exporter::Preload {
+            name: "finstrument".to_string(),
+            path: PathBuf::from_str(&format!(
+                "{}/libproxyclient.so",
+                libdir.as_path().to_str().unwrap()
+            ))?,
+        });
 
         Ok(ExporterList { exporters })
     }

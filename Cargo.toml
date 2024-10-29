@@ -41,12 +41,16 @@ meval = "0.2.0"
 anyhow = "1.0.79"
 regex = "1.10.3"
 which = "6.0.2"
+lazy_static = "1.5.0"
+proc-maps = "0.4.0"
+elf = "0.7.4"
 
 [lib]
 name = "proxyclient"
 path = "src/lib.rs"
 crate-type = ["cdylib"]      # Creates dynamic lib
 # crate-type = ["staticlib"] # Creates static lib
+
 
 [[bin]]
 name = "proxy_v2"
