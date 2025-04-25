@@ -1059,27 +1059,27 @@ impl TraceView {
             .unwrap();
         drop(child_stdin);
 
-        let output = cmd.wait_with_output()?;
+        // let output = cmd.wait_with_output()?;
 
-        if output.status.success() {
-            match serde_json::from_slice::<Vec<FtioModel>>(&output.stdout) {
-                Ok(models) => {
-                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
-                        let job_storage = job_model_ht
-                            .entry(jobid.to_string())
-                            .or_insert(FtioModelStorage::new());
+        // if output.status.success() {
+        //     match serde_json::from_slice::<Vec<FtioModel>>(&output.stdout) {
+        //         Ok(models) => {
+        //             if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+        //                 let job_storage = job_model_ht
+        //                     .entry(jobid.to_string())
+        //                     .or_insert(FtioModelStorage::new());
 
-                        for m in models {
-                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
-                            job_storage.models.insert(m.metric.to_string(), m);
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Failed to parse FTIO output: {}", e);
-                }
-            }
-        }
+        //                 for m in models {
+        //                     log::debug!("FTIO Model for {}: {:?}", m.metric, m);
+        //                     job_storage.models.insert(m.metric.to_string(), m);
+        //                 }
+        //             }
+        //         }
+        //         Err(e) => {
+        //             log::error!("Failed to parse FTIO output: {}", e);
+        //         }
+        //     }
+        // }
 
         Ok(())
     }

@@ -582,7 +582,7 @@ pub unsafe extern "C" fn metric_proxy_get_func(
 
 /// Callback function for entering a function.new_func
 #[no_mangle]
-pub extern "C" fn __cyg_profile_func_enter(this_fn: *const (), call_site: *const ()) {
+pub extern "C" fn __cyg_profile_func_enter(this_fn: *mut (), call_site: *mut ()) {
     log::trace!("==> FUNC ENTER {:p} && {:p}", this_fn, call_site);
     unsafe {
         let client = if let Some(client) = PROXY_INSTANCE.clone() {
