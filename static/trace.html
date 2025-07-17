@@ -146,7 +146,8 @@
                     let datapoint = [];
 
                     data.forEach(function (v) {
-                        labels.push(v[0]);
+                        let time = new Date(v[0] * 1000);
+                        labels.push(time.toLocaleString());
                         datapoint.push(v[1]);
                     });
 
