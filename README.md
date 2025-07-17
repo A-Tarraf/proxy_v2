@@ -48,7 +48,7 @@ cd proxy_v2
 # Add the prefix to your path
 export PATH=$HOME/metric-proxy/bin:$PATH
 # Run the server (and keep it running)
-proxy-v2
+proxy_v2
 # Run the client in another shell1
 proxy_run -j testls -- ls -R /
 ```
