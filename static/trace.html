@@ -104,6 +104,25 @@
             const derivate = document.getElementById('derivatebox').checked;
 
             // Create the JSON request object
+            const request_ftio = {
+                jobid: target
+            } 
+
+            let query_params = new URLSearchParams(request_ftio).toString();
+
+            fetch(`/model/ftio?${query_params}`, {
+                method: 'GET',
+            }).then(response => response.json())
+                .then(data => {
+                    // Debug Respone
+                    console.log(data);
+
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+
+            // Create the JSON request object
             const request = {
                 jobid: target,
                 filter: metric,

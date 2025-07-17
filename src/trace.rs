@@ -1059,27 +1059,31 @@ impl TraceView {
             .unwrap();
         drop(child_stdin);
 
-        // let output = cmd.wait_with_output()?;
+         let output = cmd.wait_with_output()?;
 
-        // if output.status.success() {
-        //     match serde_json::from_slice::<Vec<FtioModel>>(&output.stdout) {
-        //         Ok(models) => {
-        //             if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
-        //                 let job_storage = job_model_ht
-        //                     .entry(jobid.to_string())
-        //                     .or_insert(FtioModelStorage::new());
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let json_start = output_str.find('[').ok_or("JSON array not found in FTIO output")?;
+        let json_part = &output_str[json_start..];
 
-        //                 for m in models {
-        //                     log::debug!("FTIO Model for {}: {:?}", m.metric, m);
-        //                     job_storage.models.insert(m.metric.to_string(), m);
-        //                 }
-        //             }
-        //         }
-        //         Err(e) => {
-        //             log::error!("Failed to parse FTIO output: {}", e);
-        //         }
-        //     }
-        // }
+        if output.status.success() {
+            match serde_json::from_slice::<Vec<FtioModel>>(json_part.as_bytes()) {
+                Ok(models) => {
+                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+                        let job_storage = job_model_ht
+                            .entry(jobid.to_string())
+                            .or_insert(FtioModelStorage::new());
+
+                        for m in models {
+                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
+                            job_storage.models.insert(m.metric.to_string(), m);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to parse FTIO output: {}", e);
+                }
+            }
+        }
 
         Ok(())
     }
