@@ -29,6 +29,8 @@
 
 
     <script>
+        let showFTIO = true;
+
         // Function to populate the Metric select element based on the selected Target
         async function populateMetricSelect() {
             const targetSelect = document.getElementById('target');
@@ -95,18 +97,14 @@
             populateMetricSelect();
         }
 
-
-        function update_data(chart) {
-
-
+        function update_ftio() {
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
-            const derivate = document.getElementById('derivatebox').checked;
 
             // Create the JSON request object
             const request_ftio = {
                 jobid: target
-            } 
+            }
 
             let query_params = new URLSearchParams(request_ftio).toString();
 
@@ -116,11 +114,32 @@
                 .then(data => {
                     // Debug Respone
                     console.log(data);
+                    const models = data.models;
 
+                    const firstModel = models[metric];
+                    if (firstModel) {
+                        console.log("FTIO Model:", firstModel);
+                        console.log("FTIO Model Amplitude:", firstModel.amp);
+                        console.log("FTIO Model Frequency:", firstModel.dominant_freq);
+                        console.log("FTIO Model Phi:", firstModel.phi);
+                        chart._ftioParams = {
+                            amplitude: firstModel.amp[0],
+                            frequency: firstModel.dominant_freq[0],
+                            phi: firstModel.phi[0]
+                        };
+                    }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                 });
+        }
+
+        function update_data(chart) {
+
+
+            const target = document.getElementById('target').value;
+            const metric = document.getElementById('metric').value;
+            const derivate = document.getElementById('derivatebox').checked;
 
             // Create the JSON request object
             const request = {
@@ -145,6 +164,9 @@
                     let labels = [];
                     let datapoint = [];
 
+                    chart._startTimeStamp = data[0][0]; // Convert to milliseconds
+                    chart._endTimeStamp = data[data.length - 1][0]; // Convert to milliseconds
+
                     data.forEach(function (v) {
                         let time = new Date(v[0] * 1000);
                         labels.push(time.toLocaleString());
@@ -162,6 +184,64 @@
                 });
 
         }
+
+        const ftioResult = {
+            id: 'ftioResult',
+            afterDraw: (chart) => {
+                if (!showFTIO) return;
+                if (!chart._endTimeStamp || !chart._startTimeStamp) return;
+                if (!chart._ftioParams) return;
+
+                const { ctx, chartArea: { left, right, top, bottom }, scales } = chart;
+                
+                const { amplitude, frequency, phi } = chart._ftioParams;
+
+                const adjustedAmplitude = amplitude / 11;
+
+                const yZero = scales.y.getPixelForValue(0);
+                const yAmp = scales.y.getPixelForValue(adjustedAmplitude);
+                const amplitudePixels = Math.abs(yAmp - yZero); // Calculate the pixel height for the amplitude
+
+                const totalDuration = chart._endTimeStamp - chart._startTimeStamp;
+                const pixelWidth = right - left;
+
+                ctx.save();
+
+                // Clip the ftio output to avoid drawing over the labels
+                const labelPadding = 8;
+                ctx.beginPath();
+                ctx.rect(left, top, right - left, bottom - top + labelPadding);
+                ctx.clip();
+
+                // Draw the FTIO result
+                ctx.beginPath();
+                let started = false;
+
+                // Precompute invariables for performance
+                const invariables = 2 * Math.PI * frequency * totalDuration;
+                const phiOffset = phi + Math.PI;
+
+                for (let x = left; x <= right; x += 2) {
+                    // Get progress as percentage
+                    const progress = (x - left) / pixelWidth;
+
+                    const y = bottom + amplitudePixels * Math.cos(invariables * progress + phiOffset);
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        };
 
         // Initialize the Metric select options based on the default Target
         populateJobSelect();
@@ -187,16 +267,30 @@
                 datasets: [{
                     label: metric,
                     data: datapoint,
-                    borderWidth: 1
-                }]
+                    borderWidth: 1,
+                    borderColor: '#73B7F3',
+                    backgroundColor: '#73B7F3',
+                },
+                 showFTIO ? {
+                    label: 'FTIO',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'red',
+                    backgroundColor: 'red',
+                } : null
+                ].filter(Boolean) 
             },
             options: {
+                animation: {
+                    duration: 500
+                },
                 scales: {
                     y: {
                         beginAtZero: true
                     }
                 }
-            }
+            },
+            plugins: [ftioResult]
         });
 
 
@@ -204,6 +298,29 @@
             update_data(chart);
         }, 500);
 
+        setInterval(function () {
+            if (showFTIO) {
+                update_ftio();
+            }
+        }, 2000);
+
+        document.getElementById('ftiobox').addEventListener('change', function () {
+            showFTIO = this.checked;
+
+            if (showFTIO) {
+                chart.data.datasets.push({
+                    label: 'FTIO',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'red',
+                    backgroundColor: 'red',
+                });
+            } else {
+                chart.data.datasets = chart.data.datasets.filter(dataset => dataset.label !== 'FTIO');
+            }
+
+            chart.update();
+        });
 
         // Event listener to populate the Metric select element when the Target changes
         document.getElementById('target').addEventListener('change', populateMetricSelect);
