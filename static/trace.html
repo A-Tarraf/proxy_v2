@@ -17,20 +17,30 @@
             <br><br>
 
             <label for="ftiobox">Predict phases with FTIO:</label>
-            <input type="checkbox" id="ftiobox" name="ftiobox" checked>
+            <input type="checkbox" id="ftiobox" name="ftiobox">
+            <br><br>
+
+            <!-- Dropdown container that will be shown only when checkbox is checked -->
+            <div id="ftioOptions" style="display: none;">
+                <label for="ftioSelect">Choose number of frequencies to display:</label>
+                <select id="ftioSelect" name="ftioSelect">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                </select>
+            </div>
         </form>
     </section>
-    <section>
+    <section id="tracePlot">
         <h2>Visualizations</h2>
         <canvas id="myChart"></canvas>
     </section>
 
     <script src="/chart.js"></script>
-
+    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
 
     <script>
-        let showFTIO = true;
-
         // Function to populate the Metric select element based on the selected Target
         async function populateMetricSelect() {
             const targetSelect = document.getElementById('target');
@@ -97,45 +107,7 @@
             populateMetricSelect();
         }
 
-        function update_ftio() {
-            const target = document.getElementById('target').value;
-            const metric = document.getElementById('metric').value;
-
-            // Create the JSON request object
-            const request_ftio = {
-                jobid: target
-            }
-
-            let query_params = new URLSearchParams(request_ftio).toString();
-
-            fetch(`/model/ftio?${query_params}`, {
-                method: 'GET',
-            }).then(response => response.json())
-                .then(data => {
-                    // Debug Respone
-                    console.log(data);
-                    const models = data.models;
-
-                    const firstModel = models[metric];
-                    if (firstModel) {
-                        console.log("FTIO Model:", firstModel);
-                        console.log("FTIO Model Amplitude:", firstModel.amp);
-                        console.log("FTIO Model Frequency:", firstModel.dominant_freq);
-                        console.log("FTIO Model Phi:", firstModel.phi);
-                        chart._ftioParams = {
-                            amplitude: firstModel.amp[0],
-                            frequency: firstModel.dominant_freq[0],
-                            phi: firstModel.phi[0]
-                        };
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                });
-        }
-
         function update_data(chart) {
-
 
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
@@ -160,29 +132,74 @@
                     // Handle the response as needed
                     console.log(data);
 
-
                     let labels = [];
                     let datapoint = [];
 
-                    chart._startTimeStamp = data[0][0]; // Convert to milliseconds
-                    chart._endTimeStamp = data[data.length - 1][0]; // Convert to milliseconds
+                    chart._startTimeStamp = data[0][0] * 1000;
+                    chart._endTimeStamp = data[data.length - 1][0] * 1000;
 
                     data.forEach(function (v) {
-                        let time = new Date(v[0] * 1000);
-                        labels.push(time.toLocaleString());
+                        labels.push(v[0] * 1000);
                         datapoint.push(v[1]);
                     });
 
+
+                    const currentXMin = chart.options.scales.x.min;
+                    const currentXMax = chart.options.scales.x.max;
 
                     chart.data.labels = labels;
                     chart.data.datasets[0].data = datapoint;
                     chart.data.datasets[0].label = metric;
                     chart.update();
+
+                    chart.options.scales.x.min = currentXMin;
+                    chart.options.scales.x.max = currentXMax;
                 })
                 .catch(error => {
                     console.error('Error:', error);
                 });
+        }
 
+        function update_ftio() {
+            const target = document.getElementById('target').value;
+            const metric = document.getElementById('metric').value;
+
+            // Create the JSON request object
+            const request_ftio = {
+                jobid: target,
+                metricid: metric
+            }
+
+            let query_params = new URLSearchParams(request_ftio).toString();
+
+            fetch(`/model/ftio?${query_params}`, {
+                method: 'GET',
+            }).then(response => response.json())
+                .then(data => {
+                    if (data.amp === undefined) {
+                        console.warn(data.operation);
+                        return;
+                    }
+                    console.log(data);
+
+                    if (data.amp.length > 0) {
+                        chart._ftioParams = {
+                            amplitude: data.amp[0] / data.t_end,
+                            frequency: data.dominant_freq[0],
+                            phi: data.phi[0]
+                        };
+                    }
+                    else {
+                        chart._ftioParams = {
+                            amplitude: data.top_freq.amp[0] / data.t_end,
+                            frequency: data.top_freq.freq[0],
+                            phi: data.top_freq.phi[0]
+                        };
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
         }
 
         const ftioResult = {
@@ -193,17 +210,23 @@
                 if (!chart._ftioParams) return;
 
                 const { ctx, chartArea: { left, right, top, bottom }, scales } = chart;
-                
+
                 const { amplitude, frequency, phi } = chart._ftioParams;
 
-                const adjustedAmplitude = amplitude / 11;
+                const derivate = document.getElementById('derivatebox').checked;
 
                 const yZero = scales.y.getPixelForValue(0);
-                const yAmp = scales.y.getPixelForValue(adjustedAmplitude);
+                const yAmp = scales.y.getPixelForValue(amplitude);
                 const amplitudePixels = Math.abs(yAmp - yZero); // Calculate the pixel height for the amplitude
 
-                const totalDuration = chart._endTimeStamp - chart._startTimeStamp;
+                const beginning = scales.x.min ?? chart._startTimeStamp;
+                const end = scales.x.max ?? chart._endTimeStamp;
+                const totalDuration = (beginning - end) / 1000;
                 const pixelWidth = right - left;
+
+                const panInSeconds = scales.x.min ? (scales.x.min - chart._startTimeStamp) / 1000 : 0;
+
+                let yOffset = derivate ? yZero : bottom
 
                 ctx.save();
 
@@ -219,13 +242,13 @@
 
                 // Precompute invariables for performance
                 const invariables = 2 * Math.PI * frequency * totalDuration;
-                const phiOffset = phi + Math.PI;
+                const phiOffset = phi + Math.PI - 2 * Math.PI * frequency * panInSeconds; // +Math.PI because canvas is flipped, the rest to account for panning
 
                 for (let x = left; x <= right; x += 2) {
                     // Get progress as percentage
                     const progress = (x - left) / pixelWidth;
 
-                    const y = bottom + amplitudePixels * Math.cos(invariables * progress + phiOffset);
+                    const y = yOffset + amplitudePixels * Math.cos(invariables * progress + phiOffset);
 
                     if (!started) {
                         ctx.moveTo(x, y);
@@ -248,6 +271,14 @@
 
         const target = document.getElementById('target').value;
         const metric = document.getElementById('metric').value;
+
+        const ftiobox = document.getElementById('ftiobox');
+        const ftioOptions = document.getElementById('ftioOptions');
+        ftioOptions.style.display = ftiobox.checked ? "block" : "none";
+        const ftioSelect = document.getElementById('ftioSelect');
+        let showFTIO = ftiobox.checked ? ftioSelect.value : 0;
+
+
         // Create the JSON request object
         const request = {
             jobid: target,
@@ -271,24 +302,63 @@
                     borderColor: '#73B7F3',
                     backgroundColor: '#73B7F3',
                 },
-                 showFTIO ? {
-                    label: 'FTIO',
+                showFTIO >= 1 ? {
+                    label: 'FTIO1',
                     data: [],
                     borderWidth: 1,
                     borderColor: 'red',
                     backgroundColor: 'red',
+                } : null,
+                showFTIO >= 2 ? {
+                    label: 'FTIO2',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'orange',
+                    backgroundColor: 'orange',
+                } : null,
+                showFTIO == 3 ? {
+                    label: 'FTIO3',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'green',
+                    backgroundColor: 'green',
                 } : null
-                ].filter(Boolean) 
+                ].filter(Boolean)
             },
             options: {
+                layout: {
+                    padding: {
+                        left: 70,
+                        right: 70,
+                        top: 10,
+                        bottom: 10
+                    }
+                },
                 animation: {
                     duration: 500
                 },
                 scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            // Customize label display format here:
+                            tooltipFormat: 'd/M/yy HH:mm:ss',
+                            displayFormats: {
+                                millisecond: 'd/M/yy HH:mm:ss',
+                                second: 'd/M/yy HH:mm:ss',
+                            }
+                        },
+                        ticks: {
+                            source: 'data',    // <-- force ticks at data points
+                            autoSkip: false,   // <-- disable skipping ticks
+                            maxRotation: 60,
+                            minRotation: 25
+                        }
+                    },
                     y: {
                         beginAtZero: true
                     }
-                }
+                },
             },
             plugins: [ftioResult]
         });
@@ -302,21 +372,82 @@
             if (showFTIO) {
                 update_ftio();
             }
-        }, 2000);
+        }, 3000);
 
-        document.getElementById('ftiobox').addEventListener('change', function () {
-            showFTIO = this.checked;
+        ftiobox.addEventListener('change', function () {
+            showFTIO = this.checked ? ftioSelect.value : 0;
 
-            if (showFTIO) {
+            if (showFTIO != 0) {
+                ftioOptions.style.display = 'block';
                 chart.data.datasets.push({
-                    label: 'FTIO',
+                    label: 'FTIO1',
                     data: [],
                     borderWidth: 1,
                     borderColor: 'red',
                     backgroundColor: 'red',
                 });
+                if (showFTIO >= 2) {
+                    chart.data.datasets.push({
+                        label: 'FTIO2',
+                        data: [],
+                        borderWidth: 1,
+                        borderColor: 'orange',
+                        backgroundColor: 'orange',
+                    });
+                    if (showFTIO == 3) {
+                        chart.data.datasets.push({
+                            label: 'FTIO3',
+                            data: [],
+                            borderWidth: 1,
+                            borderColor: 'green',
+                            backgroundColor: 'green',
+                        });
+                    }
+                }
+                update_ftio();
             } else {
-                chart.data.datasets = chart.data.datasets.filter(dataset => dataset.label !== 'FTIO');
+                ftioOptions.style.display = 'none';
+                chart.data.datasets = chart.data.datasets.filter(dataset => !dataset.label.startsWith('FTIO'));
+            }
+
+            chart.update();
+        });
+
+        ftioSelect.addEventListener('change', function () {
+            showFTIO = ftiobox.checked ? this.value : 0;
+
+            // Remove existing FTIO datasets
+            chart.data.datasets = chart.data.datasets.filter(dataset => !dataset.label.startsWith('FTIO'));
+
+            // Add new FTIO datasets based on the selected value
+            if (showFTIO >= 1) {
+                console.log('Adding FTIO1 dataset');
+                chart.data.datasets.push({
+                    label: 'FTIO1',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'red',
+                    backgroundColor: 'red',
+                });
+            }
+            if (showFTIO >= 2) {
+                console.log('Adding FTIO2 dataset');
+                chart.data.datasets.push({
+                    label: 'FTIO2',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'orange',
+                    backgroundColor: 'orange',
+                });
+            }
+            if (showFTIO == 3) {
+                chart.data.datasets.push({
+                    label: 'FTIO3',
+                    data: [],
+                    borderWidth: 1,
+                    borderColor: 'green',
+                    backgroundColor: 'green',
+                });
             }
 
             chart.update();
@@ -325,9 +456,108 @@
         // Event listener to populate the Metric select element when the Target changes
         document.getElementById('target').addEventListener('change', populateMetricSelect);
 
+        // Event listener to update ftio data when the Metric changes
+        document.getElementById('metric').addEventListener('change', function () {
+            update_data(chart);
+            if (showFTIO) {
+                update_ftio();
+            }
+        });
 
+        ctx.addEventListener('wheel', function (event) {
+            if (!event.shiftKey) return;
+            event.preventDefault(); // Prevent page scrolling
 
-        //        setInterval(function () {
-        //       }, 1000);
+            const xScale = chart.scales.x;
+
+            // Convert mouse position on x axis to chart value
+            const xMouseValue = xScale.getValueForPixel(event.offsetX);
+
+            // Current scale range
+            const range = xScale.max - xScale.min;
+
+            // Calculate new range based on wheel direction
+            let newRange;
+
+            if (event.deltaY < 0) {
+                // Zoom in
+                newRange = range * 0.7;
+            } else {
+                // Zoom out
+                newRange = range * 1.5;
+            }
+
+            // Calculate new min and max so that xValue stays under the mouse pointer
+            let newMin = xMouseValue - ((xMouseValue - xScale.min) / range) * newRange;
+            let newMax = xMouseValue + ((xScale.max - xMouseValue) / range) * newRange;
+
+            if (newMin <= chart._startTimeStamp) {
+                newMin = undefined;
+            }
+            if (newMax >= chart._endTimeStamp) {
+                newMax = undefined
+            }
+
+            // Set new scale limits
+            chart.options.scales.x.min = newMin;
+            chart.options.scales.x.max = newMax;
+
+            console.log(`Zooming to range: ${newMin} - ${newMax}`);
+
+            chart.update();
+        });
+
+        let isPanning = false;
+        let startX = null;
+        let startMin = null;
+        let startMax = null;
+
+        let lastUpdate = 0;
+        const updateInterval = 16.67;
+
+        ctx.addEventListener('mousedown', (event) => {
+            chart.options.animation.duration = 0;
+            isPanning = true;
+            startX = event.offsetX;
+            startMin = chart.scales.x.min;
+            startMax = chart.scales.x.max;
+        });
+
+        ctx.addEventListener('mousemove', (event) => {
+            if (!isPanning) { return };
+
+            if (Date.now() - lastUpdate < updateInterval) { return; }
+            lastUpdate = Date.now();
+
+            const xScale = chart.scales.x;
+            const pixelsPerUnit = (xScale.right - xScale.left) / (startMax - startMin);
+            const deltaXUnits = (startX - event.offsetX) / pixelsPerUnit;
+
+            if (startMin + deltaXUnits <= chart._startTimeStamp) {
+                chart.options.scales.x.min = undefined;
+                return;
+            }
+            else if (startMax + deltaXUnits >= chart._endTimeStamp) {
+                chart.options.scales.x.max = undefined;
+                return;
+            }
+
+            chart.options.scales.x.min = startMin + deltaXUnits;
+            chart.options.scales.x.max = startMax + deltaXUnits;
+
+            chart.update('none');
+
+        });
+
+        ctx.addEventListener('mouseup', () => {
+            chart.options.animation.duration = 500;
+            isPanning = false;
+        });
+
+        ctx.addEventListener('mouseleave', () => {
+            chart.options.animation.duration = 500;
+            isPanning = false;
+        });
+
     </script>
 </main>

@@ -665,13 +665,24 @@ impl Web {
 
     fn handle_ftio_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
-            if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
-                return WebResponse::Native(Response::json(&model));
-            } else {
-                return WebResponse::BadReq("No such jobid".to_string());
+            if let Some(metricid) = req.get_param("metricid"){
+                if let Some(model) = self.factory.trace_store.get_metric_freq_model(jobid, metricid) {
+                    return WebResponse::Native(Response::json(&model));
+                } else {
+                    return WebResponse::BadReq("This jobid or metric does not have a ftio model stored".to_string());
+                }
             }
         }
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+        
+        /* if let Some(jobid) = req.get_param("jobid") {
+                if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
+                    return WebResponse::Native(Response::json(&model));
+                } else {
+                    return WebResponse::BadReq("No such jobid".to_string());
+                }
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string()) */
     }
 
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {

@@ -816,7 +816,7 @@ struct FtioModelTopFreq {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct FtioModel {
+pub struct FtioModel {
     metric: String,
     dominant_freq: Vec<f64>,
     conf: Vec<f64>,
@@ -860,6 +860,18 @@ impl TraceView {
         }
 
         models
+    }
+
+    pub fn get_metric_freq_model(&self, jobid: String, metric: String) -> Option<FtioModel> {
+        let mut metric_model: Option<FtioModel> = None;
+        
+        if let Some(job_models) = self.get_job_freq_model(jobid) {
+            if let Some(model) = job_models.models.get(&metric) {
+                metric_model = Some(model.clone());
+            } 
+        }
+
+        metric_model
     }
 
     fn load_existing_traces(
@@ -1053,17 +1065,54 @@ impl TraceView {
 
         let mut child_stdin = cmd.stdin.take().unwrap();
 
+        let target_metric = "proxy_cpu_usage_percent{name=\"cpu1\",vendor=\"AuthenticAMD\",model=\"AMD Ryzen 5 5600X 6-Core Processor\"}";
+
+        // if jobid == "main" {
+        //     /* println!(
+        //         "Data to be sent:\n{}",
+        //         serde_json::to_string_pretty(&export)?
+        //     );  */
+        //     if let Some(series) = export.metrics.get(target_metric) {
+        //         println!(
+        //             "\n▶ Input Series for '{}':\n{}",
+        //             target_metric,
+        //             serde_json::to_string_pretty(&series)?
+        //         );
+        //     } else {
+        //         println!("\n⚠ Metric '{}' not found in input data.", target_metric);
+        //     }
+        // }
+
         // The subprocess outputs this string.
         child_stdin
             .write_all(serde_json::to_string(&export)?.as_bytes())
             .unwrap();
         drop(child_stdin);
 
-         let output = cmd.wait_with_output()?;
+        let output = cmd.wait_with_output()?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        let json_start = output_str.find('[').ok_or("JSON array not found in FTIO output")?;
+        let json_start = output_str
+            .find('[')
+            .ok_or("JSON array not found in FTIO output")?;
         let json_part = &output_str[json_start..];
+
+        // println!("FTIO output from ftio itself: {}", &output_str[..json_start]);
+
+        // if jobid == "main" {
+        //     let ftio_models: Vec<FtioModel> = serde_json::from_slice(json_part.as_bytes())?;
+        //     for model in &ftio_models {
+        //         //if model.metric == target_metric {
+        //             println!(
+        //                 "\n✅ FTIO Output for '{}':\n{}",
+        //                 target_metric,
+        //                 serde_json::to_string_pretty(model)?
+        //             );
+        //         //}
+        //     }
+
+        //     //println!("FTIO output:\n {}", serde_json::to_string_pretty(&json_part)?);
+        // }
 
         if output.status.success() {
             match serde_json::from_slice::<Vec<FtioModel>>(json_part.as_bytes()) {
