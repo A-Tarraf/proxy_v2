@@ -2,6 +2,7 @@ use retry::{delay::Fixed, retry};
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -15,6 +16,8 @@ use crate::profiles::ProfileView;
 use crate::trace::{Trace, TraceView};
 
 use super::proxy_common::{hostname, ProxyErr};
+
+use crate::ftio::FtioClient;
 
 use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
 
@@ -392,6 +395,8 @@ pub(crate) struct ExporterFactory {
     max_trace_size: usize,
     /// This is where the traces are stored
     pub trace_store: Arc<TraceView>,
+    /// Client to FTIO server
+    pub ftio_client: Arc<FtioClient>,
 }
 
 impl ExporterFactory {
@@ -530,6 +535,8 @@ impl ExporterFactory {
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
 
+        let ftio_client = Arc::new(FtioClient::new("tcp://127.0.0.1:5555"));
+
         let (main_job_trace, node_job_trace) = if aggregate {
             trace_store.clear(&main_jobdesc)?;
             trace_store.clear(&nodejob_desc)?;
@@ -551,6 +558,7 @@ impl ExporterFactory {
             trace_store: trace_store.clone(),
             aggregator: aggregate,
             max_trace_size,
+            ftio_client: ftio_client.clone(),
         });
 
         let scrape_ref = ret.clone();
@@ -623,7 +631,7 @@ impl ExporterFactory {
         exporter: Arc<TraceView>,
         jobid: &String,
     ) -> Result<(), Box<dyn Error>> {
-        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid) {
+        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid, self.ftio_client.clone()) {
             self.pending_scrapes
                 .lock()
                 .unwrap()

@@ -18,6 +18,7 @@ mod squeue;
 mod webserver;
 use webserver::Web;
 
+mod ftio;
 mod extrap;
 mod icc;
 mod profiles;

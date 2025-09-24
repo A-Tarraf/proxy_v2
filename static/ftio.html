@@ -1,17 +1,7 @@
 <main>
     <section>
-        <h2>Select Target:</h2>
+        <h2>Select Status:</h2>
         <form id="traceSelect">
-            <label for="target">Target:</label>
-            <select id="target" name="target" required>
-                <!-- Options for selecting the target will be added dynamically using JavaScript -->
-            </select><br><br>
-
-            <label for="metric">Metric:</label>
-            <select id="metric" name="metric" required>
-                <!-- Options for selecting the metric will be added dynamically using JavaScript -->
-            </select><br><br>
-
             <label for="ftiobox">Predict phases with FTIO:</label>
             <input type="checkbox" id="ftiobox" name="ftiobox" checked>
             <br><br>
@@ -21,28 +11,28 @@
         <h2>Parameters:</h2>
         <form id="ftioParameters">
             <label for="samplingRateField">Frequency of sampling rate:</label>
-            <input type="number" id="samplingRateField" name="samplingRateField" min="-1" value="-1"> 
+            <input type="number" id="samplingRateField" name="samplingRateField" min="-1" value="-1">
             <br><br>
 
             <label for="techniqueMenu">Frequency technique:</label>
             <select name="techniqueMenu" id="techniqueMenu">
-              <option value="dft">Discrete fourier transformation</option>
-              <option value="wave_disc">Discrete wavelet transformation</option>
-              <option value="wave_cont">Continuous wavelet transformation</option>
-            </select> 
+                <option value="dft">Discrete Fourier Transformation</option>
+                <option value="wave_disc">Discrete Wavelet Transformation</option>
+                <option value="wave_cont">Continuous Wavelet Transformation</option>
+            </select>
             <br><br>
 
             <label for="outlierMenu">Outlier detection:</label>
             <select name="outlierMenu" id="outlierMenu">
-              <option value="zscore">Z-score</option>
-              <option value="dbscan">DB-scan</option>
-              <option value="isolationForest">Isolation forest</option>
-              <option value="lof">Local outlier factor</option>
-            </select> 
+                <option value="Z-score">Z-score</option>
+                <option value="DB-scan">DB-scan</option>
+                <option value="Isolation_forest">Isolation forest</option>
+                <option value="LOF">Local outlier factor</option>
+            </select>
             <br><br>
 
             <label for="toleranceField">Tolerance value:</label>
-            <input type="number" id="toleranceField" name="toleranceField" min="0" max="1" step="0.001" value="0.8"> 
+            <input type="number" id="toleranceField" name="toleranceField" min="0" max="1" step="0.001" value="0.8">
             <br><br>
 
             <label for="dtwBox">Dynamic time wrapping:</label>
@@ -51,9 +41,9 @@
 
             <label for="spectrumMenu">Spectrum:</label>
             <select name="spectrumMenu" id="spectrumMenu">
-              <option value="powerDensity">Power density spectrum</option>
-              <option value="amplitude">Amplitude spectrum</option>
-            </select> 
+                <option value="powerDensity">Power density spectrum</option>
+                <option value="amplitude">Amplitude spectrum</option>
+            </select>
             <br><br>
 
             <label for="autocorrelationBox">Autocorrelation:</label>
@@ -65,87 +55,58 @@
             <br><br>
 
             <label for="freqHitsField">Frequency hits:</label>
-            <input type="number" id="freqHitsField" name="freqHitsField" min="1" value="3"> 
+            <input type="number" id="freqHitsField" name="freqHitsField" min="1" value="3">
             <br><br>
 
+            <button type="button" id="saveBtn">Save Parameters</button>
         </form>
     </section>
 
     <script>
-        // Function to populate the Metric select element based on the selected Target
-        async function populateMetricSelect() {
-            const targetSelect = document.getElementById('target');
-            const metricSelect = document.getElementById('metric');
-            const selectedTarget = targetSelect.value;
-
-            // Clear existing options
-            metricSelect.innerHTML = '';
-
-            try {
-                const response = await fetch("/trace/metrics?job=" + selectedTarget);
-                if (response.ok) {
-                    const data = await response.json();
-
-                    // Sort the data before creating and appending options
-                    data.sort((a, b) => a.localeCompare(b));
-
-                    for (const v of data) {
-                        const option = document.createElement('option');
-                        option.value = v;
-                        option.text = v;
-                        metricSelect.appendChild(option);
-                    }
-                } else {
-                    console.error(`Failed to fetch data from ${endpoint}`);
-                }
-            } catch (error) {
-                console.error(error);
-            }
-        }
-
-
-        async function populateJobSelect() {
-            // Fetch data from the /trace/list endpoint
-            fetch('/trace/list') // Replace with the actual endpoint URL
+        async function populateParameters() {
+            fetch('/ftio/args', { method: 'GET' })
                 .then(response => response.json())
                 .then(data => {
-                    const comboBox = document.getElementById('target');
-
-                    // Sort data based on jobid
-                    data.sort((a, b) => a.desc.jobid.localeCompare(b.desc.jobid));
-
-                    // Remove existing options from the select element
-                    comboBox.innerHTML = "";
-
-                    // Create an option element for each "jobid" and append to the select element
-                    data.forEach(item => {
-                        const option = document.createElement('option');
-                        option.value = item.desc.jobid;
-                        option.textContent = item.desc.jobid + " : " + item.desc.command;
-                        comboBox.appendChild(option);
-                    });
-
-                    // Set the value to the first option
-                    comboBox.value = comboBox.options[0].value;
-
-                    // Create a new event
-                    const event = new Event('change');
-                    // Dispatch the event to trigger the event listener
-                    comboBox.dispatchEvent(event);
-                })
-                .catch(error => console.error('Error fetching data:', error));
-
-            populateMetricSelect();
+                    document.getElementById('samplingRateField').value = data.freq ?? -1;
+                    document.getElementById('techniqueMenu').value = data.transformation ?? 'dft';
+                    document.getElementById('outlierMenu').value = data.outlier ?? 'Z-score';
+                    document.getElementById('toleranceField').value = data.tol ?? 0.8;
+                    document.getElementById('dtwBox').checked = data.dtw ?? false;
+                    document.getElementById('spectrumMenu').value = data.no_psd ? 'amplitude' : 'powerDensity';
+                    document.getElementById('autocorrelationBox').checked = data.autocorrelation ?? false;
+                    document.getElementById('windowAdaptationBox').checked = data.window_adaptation ?? false;
+                    document.getElementById('freqHitsField').value = data.frequency_hits ?? 3;
+                });
         }
 
-        // Initialize the Metric select options based on the default Target
-        populateJobSelect();
+        async function saveParameters() {
+            const payload = {
+                freq: parseInt(document.getElementById('samplingRateField').value),
+                transformation: document.getElementById('techniqueMenu').value,
+                outlier: document.getElementById('outlierMenu').value,
+                tol: parseFloat(document.getElementById('toleranceField').value),
+                dtw: document.getElementById('dtwBox').checked,
+                no_psd: document.getElementById('spectrumMenu').value === 'amplitude',
+                autocorrelation: document.getElementById('autocorrelationBox').checked,
+                window_adaptation: document.getElementById('windowAdaptationBox').checked,
+                frequency_hits: parseInt(document.getElementById('freqHitsField').value)
+            };
 
-        const target = document.getElementById('target').value;
-        const metric = document.getElementById('metric').value;
+            fetch('/ftio/args', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(response => {
+                if (response.ok) {
+                    console.log('Parameters saved successfully!');
+                } else {
+                    console.error('Failed to save parameters.');
+                }
+            });
+        }
 
+        document.getElementById('saveBtn').addEventListener('click', saveParameters);
 
-        // Event listener to populate the Metric select element when the Target changes
-        document.getElementById('target').addEventListener('change', populateMetricSelect);
+        populateParameters();
     </script>
 </main>

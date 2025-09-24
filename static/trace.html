@@ -172,7 +172,7 @@
 
             let query_params = new URLSearchParams(request_ftio).toString();
 
-            fetch(`/model/ftio?${query_params}`, {
+            fetch(`/trace/ftio?${query_params}`, {
                 method: 'GET',
             }).then(response => response.json())
                 .then(data => {

@@ -13,7 +13,7 @@ use static_files::Resource;
 use std::collections::HashMap;
 use std::path::Path;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::squeue;
 
@@ -665,16 +665,22 @@ impl Web {
 
     fn handle_ftio_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
-            if let Some(metricid) = req.get_param("metricid"){
-                if let Some(model) = self.factory.trace_store.get_metric_freq_model(jobid, metricid) {
+            if let Some(metricid) = req.get_param("metricid") {
+                if let Some(model) = self
+                    .factory
+                    .trace_store
+                    .get_metric_freq_model(jobid, metricid)
+                {
                     return WebResponse::Native(Response::json(&model));
                 } else {
-                    return WebResponse::BadReq("This jobid or metric does not have a ftio model stored".to_string());
+                    return WebResponse::BadReq(
+                        "This jobid or metric does not have a ftio model stored".to_string(),
+                    );
                 }
             }
         }
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
-        
+
         /* if let Some(jobid) = req.get_param("jobid") {
                 if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
                     return WebResponse::Native(Response::json(&model));
@@ -683,6 +689,23 @@ impl Web {
                 }
         }
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string()) */
+    }
+
+    fn handle_ftio_get_args(&self, req: &Request) -> WebResponse {
+        match req.method() {
+            "GET" => {
+                let args = self.factory.ftio_client.get_arguments();
+                WebResponse::Native(Response::json(&*args))
+            }
+            "POST" | "PUT" => match rouille::input::json_input::<crate::ftio::FtioArguments>(req) {
+                Ok(new_args) => {
+                    self.factory.ftio_client.set_arguments(new_args);
+                    WebResponse::Success("FTIO args updated".to_string())
+                }
+                Err(e) => WebResponse::BadReq(format!("Invalid FTIO args JSON: {}", e)),
+            },
+            _ => WebResponse::BadReq("Unsupported method".to_string()),
+        }
     }
 
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
@@ -960,6 +983,7 @@ impl Web {
                     "plot" => self.handle_traceplot(request),
                     "metrics" => self.handle_tracemetrics(request),
                     "json" => self.handle_get_json_trace(request),
+                    "ftio" => self.handle_ftio_get_model(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "profiles" => match resource.as_str() {
@@ -971,10 +995,13 @@ impl Web {
                     _ => WebResponse::BadReq(url),
                 },
                 "model" => match resource.as_str() {
-                    "ftio" => self.handle_ftio_get_model(request),
                     "download" => self.handle_extrap_get_jsonl(request),
                     "get" => self.handle_extrap_get_model(request),
                     "plot" => self.handle_extrap_plot_model(request),
+                    _ => WebResponse::BadReq(url),
+                },
+                "ftio" => match resource.as_str() {
+                    "args" => self.handle_ftio_get_args(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

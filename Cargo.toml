@@ -44,6 +44,7 @@ which = "6.0.2"
 lazy_static = "1.5.0"
 proc-maps = "0.4.0"
 elf = "0.7.4"
+zmq = "0.10.0"
 
 [lib]
 name = "proxyclient"

@@ -25,6 +25,7 @@ use std::io::Write;
 
 mod exporter;
 mod extrap;
+mod ftio;
 mod profiles;
 mod scrapper;
 mod systemmetrics;
