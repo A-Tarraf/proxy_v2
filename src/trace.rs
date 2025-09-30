@@ -1060,14 +1060,14 @@ impl TraceView {
         jobid: &String,
         ftio_client: Arc<FtioClient>,
     ) -> Result<(), Box<dyn Error>> {
-        /*let export = self.export(jobid)?;
+        let export = self.export(jobid)?;
 
         if let Ok(ftio_result) = ftio_client.send_receive(&serde_json::to_string(&export)?) {
             if let Ok(_) = self.save_ftio_model(&ftio_result, jobid) {
                 return Ok(());
             }
         }
-        log::warn!("FTIO server not responding. Fallback to CLI."); */
+        log::warn!("FTIO server not responding. Fallback to CLI.");
 
         if let Ok(ftio_result) = self.generate_fallback_ftio_model(jobid) {
             if let Ok(_) = self.save_ftio_model(&ftio_result, jobid) {

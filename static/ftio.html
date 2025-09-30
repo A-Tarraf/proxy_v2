@@ -10,53 +10,154 @@
     <section>
         <h2>Parameters:</h2>
         <form id="ftioParameters">
-            <label for="samplingRateField">Frequency of sampling rate:</label>
-            <input type="number" id="samplingRateField" name="samplingRateField" min="-1" value="-1">
-            <br><br>
+            <div id="freqGroup" class="ftio-params">
+                <label for="samplingRateField">Frequency of sampling rate: </label>
+                <input type="number" id="samplingRateField" name="samplingRateField" step="0.001" value="10.0">
+            </div>
 
-            <label for="techniqueMenu">Frequency technique:</label>
-            <select name="techniqueMenu" id="techniqueMenu">
-                <option value="dft">Discrete Fourier Transformation</option>
-                <option value="wave_disc">Discrete Wavelet Transformation</option>
-                <option value="wave_cont">Continuous Wavelet Transformation</option>
-            </select>
-            <br><br>
 
-            <label for="outlierMenu">Outlier detection:</label>
-            <select name="outlierMenu" id="outlierMenu">
-                <option value="Z-score">Z-score</option>
-                <option value="DB-scan">DB-scan</option>
-                <option value="Isolation_forest">Isolation forest</option>
-                <option value="LOF">Local outlier factor</option>
-            </select>
-            <br><br>
+            <div id="memoryLimitGroup" class="ftio-params">
+                <label for="memoryLimitField">Memory limit: </label>
+                <input type="number" id="memoryLimitField" name="memoryLimitField" step="0.001" value="0.5">
+            </div>
 
-            <label for="toleranceField">Tolerance value:</label>
-            <input type="number" id="toleranceField" name="toleranceField" min="0" max="1" step="0.001" value="0.8">
-            <br><br>
 
-            <label for="dtwBox">Dynamic time wrapping:</label>
-            <input type="checkbox" id="dtwBox" name="dtwBox">
-            <br><br>
+            <div id="tsGroup" class="ftio-params">
+                <label for="tsField">Start time (ts): </label>
+                <input type="number" id="tsField" name="tsField" step="0.001">
+            </div>
 
-            <label for="spectrumMenu">Spectrum:</label>
-            <select name="spectrumMenu" id="spectrumMenu">
-                <option value="powerDensity">Power density spectrum</option>
-                <option value="amplitude">Amplitude spectrum</option>
-            </select>
-            <br><br>
 
-            <label for="autocorrelationBox">Autocorrelation:</label>
-            <input type="checkbox" id="autocorrelationBox" name="autocorrelationBox">
-            <br><br>
+            <div id="teGroup" class="ftio-params">
+                <label for="teField">End time (te): </label>
+                <input type="number" id="teField" name="teField" step="0.001">
+            </div>
 
-            <label for="windowAdaptationBox">Window adaptation:</label>
-            <input type="checkbox" id="windowAdaptationBox" name="windowAdaptationBox">
-            <br><br>
 
-            <label for="freqHitsField">Frequency hits:</label>
-            <input type="number" id="freqHitsField" name="freqHitsField" min="1" value="3">
-            <br><br>
+            <div id="techniqueGroup" class="ftio-params">
+                <label for="techniqueMenu">Frequency technique: </label>
+                <select name="techniqueMenu" id="techniqueMenu">
+                    <option value="dft">Discrete Fourier Transformation</option>
+                    <option value="wave_disc">Discrete Wavelet Transformation</option>
+                    <option value="wave_cont">Continuous Wavelet Transformation</option>
+                </select>
+            </div>
+
+
+            <div id="levelGroup" class="ftio-params">
+                <label for="levelField">Wavelet level: </label>
+                <input type="number" id="levelField" name="levelField" min="0" step="1" value="3">
+            </div>
+
+
+            <div id="waveletGroup" class="ftio-params">
+                <label for="waveletField">Wavelet type: </label>
+                <span class="info-symbol" title="Enter the wavelet function to use, e.g., morl or db1.">&#x1F6C8</span>
+                <input type="text" id="waveletField" name="waveletField">
+            </div>
+
+
+            <div id="outlierGroup" class="ftio-params">
+                <label for="outlierMenu">Outlier detection: </label>
+                <select name="outlierMenu" id="outlierMenu">
+                    <option value="z-score">Z-score</option>
+                    <option value="dbscan">DB-scan</option>
+                    <option value="forest">Isolation forest</option>
+                    <option value="lof">Local outlier factor</option>
+                    <option value="peak">find_peaks (from sci-pi)</option>
+                </select>
+            </div>
+
+
+            <div id="periodicityGroup" class="ftio-params">
+                <label for="periodicityMenu">Periodicity detection: </label>
+                <select name="periodicityMenu" id="periodicityMenu">
+                    <option value="">None</option>
+                    <option value="rpde">RPDE</option>
+                    <option value="sf">Spectral flatness</option>
+                    <option value="corr">Correlation</option>
+                    <option value="ind">Correlation for individual periods</option>
+                </select>
+            </div>
+
+
+            <div id="toleranceGroup" class="ftio-params">
+                <label for="toleranceField">Tolerance value: </label>
+                <input type="number" id="toleranceField" name="toleranceField" min="0" max="1" step="0.001" value="0.8">
+            </div>
+
+
+            <div id="dtwGroup" class="ftio-params">
+                <label for="dtwBox">Dynamic time warping:</label>
+                <input type="checkbox" id="dtwBox" name="dtwBox">
+            </div>
+
+
+            <div id="spectrumGroup" class="ftio-params">
+                <label for="spectrumMenu">Spectrum: </label>
+                <select name="spectrumMenu" id="spectrumMenu">
+                    <option value="powerDensity">Power density spectrum</option>
+                    <option value="amplitude">Amplitude spectrum</option>
+                </select>
+            </div>
+
+
+            <div id="nFreqGroup" class="ftio-params">
+                <label for="nFreqField">Number of frequencies to extract: </label>
+                <input type="number" id="nFreqField" name="nFreqField" min="0" step="1" value="10">
+            </div>
+
+
+            <div id="fourierFitGroup" class="ftio-params">
+                <label for="fourierFitBox">Fourier fit:</label>
+                <input type="checkbox" id="fourierFitBox" name="fourierFitBox">
+            </div>
+
+
+            <div id="autocorrelationGroup" class="ftio-params">
+                <label for="autocorrelationBox">Autocorrelation:</label>
+                <input type="checkbox" id="autocorrelationBox" name="autocorrelationBox">
+            </div>
+
+
+            <div id="windowAdaptationGroup" class="ftio-params">
+                <label for="windowAdaptationField">Window adaptation: </label>
+                <select name="windowAdaptationField" id="windowAdaptationField">
+                    <option value="">None</option>
+                    <option value="frequency_hits">Frequency Hits</option>
+                    <option value="data">Data</option>
+                </select>
+            </div>
+
+
+            <div id="hitsGroup" class="ftio-params">
+                <label for="hitsField">Hits: </label>
+                <input type="number" id="hitsField" name="hitsField" step="0.01" value="3.0">
+            </div>
+
+
+            <div id="filterTypeGroup" class="ftio-params">
+                <label for="filterTypeField">Filter type: </label>
+                <select name="filterTypeField" id="filterTypeField">
+                    <option value="">None</option>
+                    <option value="lowpass">Lowpass</option>
+                    <option value="highpass">Highpass</option>
+                    <option value="bandpass">Bandpass</option>
+                </select>
+            </div>
+
+
+            <div id="filterCutoffGroup" class="ftio-params">
+                <label for="filterCutoffField">Filter cutoff: </label>
+                <input type="number" id="filterCutoffField" name="filterCutoffField" step="0.01">
+            </div>
+
+
+            <div id="filterOrderGroup" class="ftio-params">
+                <label for="filterOrderField">Filter order: </label>
+                <input type="number" id="filterOrderField" name="filterOrderField" min="1" step="1" value="4">
+            </div>
+            <br>
 
             <button type="button" id="saveBtn">Save Parameters</button>
         </form>
@@ -67,29 +168,56 @@
             fetch('/ftio/args', { method: 'GET' })
                 .then(response => response.json())
                 .then(data => {
-                    document.getElementById('samplingRateField').value = data.freq ?? -1;
+                    document.getElementById('samplingRateField').value = data.freq ?? 10.0;
+                    document.getElementById('memoryLimitField').value = data.memory_limit ?? '';
+                    document.getElementById('tsField').value = data.ts ?? '';
+                    document.getElementById('teField').value = data.te ?? '';
                     document.getElementById('techniqueMenu').value = data.transformation ?? 'dft';
-                    document.getElementById('outlierMenu').value = data.outlier ?? 'Z-score';
-                    document.getElementById('toleranceField').value = data.tol ?? 0.8;
+                    document.getElementById('levelField').value = data.level ?? '';
+                    document.getElementById('waveletField').value = data.wavelet ?? '';
+                    document.getElementById('outlierMenu').value = data.outlier ?? 'z-score';
+                    document.getElementById('periodicityMenu').value = data.periodicity_detection ?? '';
+                    document.getElementById('toleranceField').value = data.tol ?? '';
                     document.getElementById('dtwBox').checked = data.dtw ?? false;
                     document.getElementById('spectrumMenu').value = data.no_psd ? 'amplitude' : 'powerDensity';
+                    document.getElementById('nFreqField').value = data.n_freq ?? 10;
+                    document.getElementById('fourierFitBox').checked = data.fourier_fit ?? false;
                     document.getElementById('autocorrelationBox').checked = data.autocorrelation ?? false;
-                    document.getElementById('windowAdaptationBox').checked = data.window_adaptation ?? false;
-                    document.getElementById('freqHitsField').value = data.frequency_hits ?? 3;
+                    document.getElementById('windowAdaptationField').value = data.window_adaptation ?? '';
+                    document.getElementById('hitsField').value = data.hits ?? '';
+                    document.getElementById('filterTypeField').value = data.filter_type ?? '';
+                    document.getElementById('filterCutoffField').value = data.filter_cutoff ?? '';
+                    document.getElementById('filterOrderField').value = data.filter_order ?? '';
+                    toggleMemoryLimit();
+                    toggleDecompLevel();
+                    toggleWaveletType();
+                    toggleHitsNeeded();
+                    toggleFilter();
                 });
         }
 
         async function saveParameters() {
             const payload = {
-                freq: parseInt(document.getElementById('samplingRateField').value),
+                freq: parseFloat(document.getElementById('samplingRateField').value),
+                memory_limit: parseFloat(document.getElementById('memoryLimitField').value) || null,
+                ts: parseFloat(document.getElementById('tsField').value) || null,
+                te: parseFloat(document.getElementById('teField').value) || null,
                 transformation: document.getElementById('techniqueMenu').value,
+                level: parseInt(document.getElementById('levelField').value) || null,
+                wavelet: document.getElementById('waveletField').value || null,
                 outlier: document.getElementById('outlierMenu').value,
-                tol: parseFloat(document.getElementById('toleranceField').value),
+                periodicity_detection: document.getElementById('periodicityMenu').value || null,
+                tol: document.getElementById('toleranceField').value ? parseFloat(document.getElementById('toleranceField').value) : null,
                 dtw: document.getElementById('dtwBox').checked,
                 no_psd: document.getElementById('spectrumMenu').value === 'amplitude',
+                n_freq: parseInt(document.getElementById('nFreqField').value),
+                fourier_fit: document.getElementById('fourierFitBox').checked,
                 autocorrelation: document.getElementById('autocorrelationBox').checked,
-                window_adaptation: document.getElementById('windowAdaptationBox').checked,
-                frequency_hits: parseInt(document.getElementById('freqHitsField').value)
+                window_adaptation: document.getElementById('windowAdaptationField').value || null,
+                hits: document.getElementById('hitsField').value ? parseFloat(document.getElementById('hitsField').value) : null,
+                filter_type: document.getElementById('filterTypeField').value || null,
+                filter_cutoff: document.getElementById('filterCutoffField').value ? parseFloat(document.getElementById('filterCutoffField').value) : null,
+                filter_order: document.getElementById('filterOrderField').value ? parseInt(document.getElementById('filterOrderField').value) : null
             };
 
             fetch('/ftio/args', {
@@ -105,6 +233,39 @@
             });
         }
 
+        function toggleMemoryLimit() {
+            const freqVal = parseFloat(document.getElementById('samplingRateField').value);
+            const memGroup = document.getElementById('memoryLimitGroup');
+            memGroup.style.display = (freqVal === -1) ? 'block' : 'none';
+        }
+        function toggleDecompLevel() {
+            const techniqueVal = document.getElementById('techniqueMenu').value;
+            const levelGroup = document.getElementById('levelGroup');
+            levelGroup.style.display = (techniqueVal === 'wave_disc') ? 'block' : 'none';
+        }
+        function toggleWaveletType() {
+            const techniqueVal = document.getElementById('techniqueMenu').value;
+            const waveletGroup = document.getElementById('waveletGroup');
+            waveletGroup.style.display = (techniqueVal === 'wave_disc' || techniqueVal === 'wave_cont') ? 'block' : 'none';
+        }
+        function toggleHitsNeeded() {
+            const windowAdaptationVal = document.getElementById('windowAdaptationField').value;
+            const hitsGroup = document.getElementById('hitsGroup');
+            hitsGroup.style.display = (windowAdaptationVal === 'frequency_hits') ? 'block' : 'none';
+        }
+        function toggleFilter() {
+            const filterTypeVal = document.getElementById('filterTypeField').value;
+            const filterCutoffGroup = document.getElementById('filterCutoffGroup');
+            const filterOrderGroup = document.getElementById('filterOrderGroup');
+            filterCutoffGroup.style.display = (filterTypeVal !== '') ? 'block' : 'none';
+            filterOrderGroup.style.display = (filterTypeVal !== '') ? 'block' : 'none';
+        }
+
+        document.getElementById('samplingRateField').addEventListener('input', toggleMemoryLimit);
+        document.getElementById('techniqueMenu').addEventListener('change', toggleDecompLevel);
+        document.getElementById('techniqueMenu').addEventListener('change', toggleWaveletType);
+        document.getElementById('windowAdaptationField').addEventListener('change', toggleHitsNeeded);
+        document.getElementById('filterTypeField').addEventListener('change', toggleFilter);
         document.getElementById('saveBtn').addEventListener('click', saveParameters);
 
         populateParameters();

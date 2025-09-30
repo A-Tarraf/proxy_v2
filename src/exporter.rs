@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::proxy_common;
+use crate::{proxy_common};
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
@@ -535,7 +535,15 @@ impl ExporterFactory {
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
 
+        println!("testing FTIO server connectivity...");
         let ftio_client = Arc::new(FtioClient::new("tcp://127.0.0.1:5555"));
+        if !ftio_client.ping_server() && which::which("admire_proxy_zmq").is_ok() {
+            println!("FTIO server not responding, attempting to start it...");
+            Command::new("admire_proxy_zmq")
+            .stdin(Stdio::null())
+            //.stdout(Stdio::null())
+            .spawn()?;
+        }
 
         let (main_job_trace, node_job_trace) = if aggregate {
             trace_store.clear(&main_jobdesc)?;
