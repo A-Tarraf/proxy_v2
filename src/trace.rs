@@ -831,8 +831,9 @@ pub struct FtioModel {
     t_end: f64,
     total_bytes: usize,
     ranks: usize,
-    freq: usize,
+    freq: f64,
     top_freq: FtioModelTopFreq,
+    n_samples: usize,
 }
 
 #[derive(Serialize, Clone)]
@@ -1062,7 +1063,7 @@ impl TraceView {
     ) -> Result<(), Box<dyn Error>> {
         let export = self.export(jobid)?;
 
-        if let Ok(ftio_result) = ftio_client.send_receive(&serde_json::to_string(&export)?) {
+        if let Ok(ftio_result) = ftio_client.send_receive(export) {
             if let Ok(_) = self.save_ftio_model(&ftio_result, jobid) {
                 return Ok(());
             }

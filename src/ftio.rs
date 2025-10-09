@@ -2,6 +2,8 @@ use clap::builder::Str;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
+use crate::trace::TraceExport;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FtioArguments {
@@ -41,7 +43,7 @@ impl Default for FtioArguments {
             periodicity_detection: None,
             tol: None,
             dtw: false,
-            no_psd: false,
+            no_psd: true,
             n_freq: 10,
             fourier_fit: false,
             autocorrelation: false,
@@ -183,7 +185,7 @@ impl FtioClient {
         *args = new_args;
     }
 
-    pub fn send_receive(&self, export: &String) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn send_receive(&self, export: TraceExport) -> Result<String, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
         socket.set_rcvtimeo(3000)?;
         socket.set_sndtimeo(3000)?;
@@ -193,6 +195,7 @@ impl FtioClient {
         let payload = serde_json::json!({
             "argv": args.to_args(),
             "metrics": export,
+            "disable_parallel": false
         });
         let payload_str = serde_json::to_string(&payload)?;
 
@@ -202,7 +205,14 @@ impl FtioClient {
             .recv_string(0)?
             .map_err(|e| format!("Recv error: {:?}", e))?;
 
-        Ok(reply)
+        let json_start = reply
+            .find("[")
+            .ok_or("JSON array not found in FTIO output")?;
+        let json_part = reply[json_start..].to_string();
+
+        println!("FTIO output length: {}", json_part.len());
+
+        Ok(json_part)
     }
 
     pub fn ping_server(&self) -> bool {

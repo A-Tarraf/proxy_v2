@@ -184,16 +184,20 @@
 
                     if (data.amp.length > 0) {
                         chart._ftioParams = {
-                            amplitude: data.amp[0] / data.t_end,
+                            amplitude: data.amp[0],
                             frequency: data.dominant_freq[0],
-                            phi: data.phi[0]
+                            phi: data.phi[0],
+                            n_samples: data.n_samples,
+                            freq: data.freq
                         };
                     }
                     else {
                         chart._ftioParams = {
-                            amplitude: data.top_freq.amp[0] / data.t_end,
+                            amplitude: data.top_freq.amp[0],
                             frequency: data.top_freq.freq[0],
-                            phi: data.top_freq.phi[0]
+                            phi: data.top_freq.phi[0],
+                            n_samples: data.n_samples,
+                            freq: data.freq
                         };
                     }
                 })
@@ -211,12 +215,21 @@
 
                 const { ctx, chartArea: { left, right, top, bottom }, scales } = chart;
 
-                const { amplitude, frequency, phi } = chart._ftioParams;
+                const { amplitude, frequency, phi, n_samples, freq } = chart._ftioParams;
 
                 const derivate = document.getElementById('derivatebox').checked;
 
+                let amp;
+
+                if (frequency !== 0 && !(frequency === freq / 2)){
+                    amp = amplitude * (2 / n_samples);
+                }
+                else {
+                    amp =  amplitude * (1 / n_samples);
+                }
+
                 const yZero = scales.y.getPixelForValue(0);
-                const yAmp = scales.y.getPixelForValue(amplitude);
+                const yAmp = scales.y.getPixelForValue(amp);
                 const amplitudePixels = Math.abs(yAmp - yZero); // Calculate the pixel height for the amplitude
 
                 const beginning = scales.x.min ?? chart._startTimeStamp;

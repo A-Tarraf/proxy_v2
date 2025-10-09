@@ -144,7 +144,7 @@ impl ProxyScraper {
             target_url: format!("/FTIO/{}", jobid),
             state: HashMap::new(),
             factory: None,
-            period: 30000,
+            period: 15000,
             last_scrape: 0,
             ttype: ScraperType::Ftio {
                 traces,
