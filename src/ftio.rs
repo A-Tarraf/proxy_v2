@@ -210,8 +210,6 @@ impl FtioClient {
             .ok_or("JSON array not found in FTIO output")?;
         let json_part = reply[json_start..].to_string();
 
-        println!("FTIO output length: {}", json_part.len());
-
         Ok(json_part)
     }
 

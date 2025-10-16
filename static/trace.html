@@ -25,14 +25,18 @@
                 <label for="ftioSelect">Choose number of frequencies to display:</label>
                 <select id="ftioSelect" name="ftioSelect">
                     <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
                 </select>
             </div>
         </form>
     </section>
     <section id="tracePlot">
         <h2>Visualizations</h2>
+
+        <label for="size">Trace Size:</label>
+        <progress id="size" value="0" max="100"> </progress>
+        <span id="sizeText">0 MB / 32.00 MB (0%)</span>
+        <br><br>
+
         <canvas id="myChart"></canvas>
     </section>
 
@@ -163,7 +167,34 @@
                 .catch(error => {
                     console.error('Error:', error);
                 });
+
+            const request_size = {
+                jobid: target
+            };
+
+            let query_params = new URLSearchParams(request_size).toString();
+
+            fetch(`/trace/size?${query_params}`, {
+                method: 'GET',
+            }).then(response => response.json())
+                .then(data => {
+                    const sizeElement = document.getElementById('size');
+                    const sizeText = document.getElementById('sizeText');
+
+                    const sizeMB = data[0] / (1024 * 1024);
+                    const maxSizeMB = data[1] / (1024 * 1024);
+
+                    sizeElement.value = sizeMB;
+                    sizeElement.max = maxSizeMB;
+                    
+                    sizeText.textContent = `${sizeMB.toFixed(2)} MB / ${maxSizeMB.toFixed(2)} MB  (${((sizeMB / maxSizeMB) * 100).toFixed(1)}%)`;
+
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
         }
+
 
         function update_ftio() {
             const target = document.getElementById('target').value;
@@ -187,8 +218,53 @@
                     }
                     console.log(data);
 
+                    // Expand/Retract ftioConfigs and select menu
+                    const ftioSelect = document.getElementById('ftioSelect');
+                    while (ftioSelect.options.length !== data.freq && ftioSelect.options.length <= 10) {
+                        if (ftioSelect.options.length < data.freq) {
+                            const newIndex = ftioSelect.options.length + 1;
+                            const opt = document.createElement('option');
+                            opt.value = newIndex;
+                            opt.text = newIndex;
+                            ftioSelect.appendChild(opt);
+                        } else {
+                            ftioSelect.removeChild(ftioSelect.lastChild);
+                        }
+                    }
+
+
+                    // Get and Sort data by confidence
+                    const indices = data.top_freq.conf.map((_, i) => i);
+                    indices.sort((a, b) => data.top_freq.conf[b] - data.top_freq.conf[a]);
+
+                    const sortedFreqs = indices.map(i => data.top_freq.freq[i]);
+                    const sortedAmps = indices.map(i => data.top_freq.amp[i]);
+                    const sortedConfs = indices.map(i => data.top_freq.conf[i]);
+                    const sortedPhis = indices.map(i => data.top_freq.phi[i]);
+
+
+                    // Update labels with confidence values
+                    for (let i = 0; i < ftioConfigs.length && i < sortedConfs.length; i++) {
+                        const conf = (sortedConfs[i] * 100).toFixed(1);
+                        ftioConfigs[i].label = `FTIO${i + 1} (${conf}%)`;
+                    }
+
+                    // Update dataset labels if they're already shown
+                    chart.data.datasets.forEach((ds, i) => {
+                        if (i > 0) ds.label = ftioConfigs[i - 1].label;
+                    });
+                    chart.update();
+
+
+
                     chart._ftioParams = {
-                        ftio_data: data,
+                        sortedFreqs: sortedFreqs,
+                        sortedAmps: sortedAmps,
+                        sortedConfs: sortedConfs,
+                        sortedPhis: sortedPhis,
+                        n_samples: data.n_samples,
+                        freq: data.freq,
+                        n_dom_freq: data.dominant_freq.length
                     };
 
                 })
@@ -206,19 +282,10 @@
 
                 const { ctx, chartArea: { left, right, top, bottom }, scales } = chart;
 
-                const ftio_data = chart._ftioParams.ftio_data;
-                if (!ftio_data) return;
+                const { sortedFreqs, sortedAmps, sortedConfs, sortedPhis, n_samples, freq, n_dom_freq } = chart._ftioParams;
 
-                // Get and Sort data by confidence
-                const indices = ftio_data.top_freq.conf.map((_, i) => i);
-                indices.sort((a, b) => ftio_data.top_freq.conf[b] - ftio_data.top_freq.conf[a]);
 
-                const sortedFreqs = indices.map(i => ftio_data.top_freq.freq[i]);
-                const sortedAmps = indices.map(i => ftio_data.top_freq.amp[i]);
-                const sortedConfs = indices.map(i => ftio_data.top_freq.conf[i]);
-                const sortedPhis = indices.map(i => ftio_data.top_freq.phi[i]);
-                const n_samples = ftio_data.n_samples;
-                const freq = ftio_data.freq;
+
 
                 const ftiobox = document.getElementById('ftiobox');
                 const ftioSelect = document.getElementById('ftioSelect');
@@ -281,6 +348,12 @@
 
                     ctx.strokeStyle = ftioConfigs[i].color;
                     ctx.lineWidth = 1;
+                    if (n_dom_freq > i) {
+                        ctx.setLineDash([]); // Solid line for dominant frequencies
+                    } else {
+                        ctx.setLineDash([12, 4]); // Dashed line for non-dominant frequencies
+                    }
+
                     ctx.stroke();
 
                     ctx.restore();
@@ -337,9 +410,16 @@
         };
 
         const ftioConfigs = [
-            { label: 'FTIO1', color: 'red' },
-            { label: 'FTIO2', color: 'orange' },
-            { label: 'FTIO3', color: 'green' }
+            { label: 'FTIO1', color: '#C93E3E' },
+            { label: 'FTIO2', color: '#9AC932' },
+            { label: 'FTIO3', color: '#8C3FBF' },
+            { label: 'FTIO4', color: '#56C3D6' },
+            { label: 'FTIO5', color: '#D46C22' },
+            { label: 'FTIO6', color: '#999999' },
+            { label: 'FTIO7', color: '#4E5691' },
+            { label: 'FTIO8', color: '#11AD19' },
+            { label: 'FTIO9', color: '#751410' },
+            { label: 'FTIO10', color: '#E31B9A' },
         ];
 
         const ctx = document.getElementById('myChart');
@@ -394,6 +474,13 @@
                         beginAtZero: true
                     }
                 },
+                plugins: {
+                    legend: {
+                        labels: {
+                            padding: 20
+                        }
+                    }
+                }
             },
             plugins: [ftioResult]
         });
@@ -402,13 +489,13 @@
 
         setInterval(function () {
             update_data(chart);
-        }, 500);
+        }, 1000);
 
         setInterval(function () {
             if (showFTIO) {
                 update_ftio();
             }
-        }, 3000);
+        }, 5000);
 
         // ==================
         // Event Listeners

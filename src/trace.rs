@@ -880,6 +880,15 @@ impl TraceView {
         metric_model
     }
 
+    pub fn get_trace_sizes(&self, jobid: &String) -> Option<(u64, usize)> {
+        if let Some(trace) = self.traces.read().unwrap().get(jobid) {
+            let state = trace.state.lock().unwrap();
+            Some((state.size, state.max_size))
+        } else {
+            None
+        }
+    }
+
     fn load_existing_traces(
         prefix: &PathBuf,
     ) -> Result<HashMap<String, Arc<Trace>>, Box<dyn Error>> {

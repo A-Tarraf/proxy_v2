@@ -377,6 +377,20 @@ impl Web {
         WebResponse::BadReq("No job GET parameter passed".to_string())
     }
 
+    fn handle_tracesize(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            match self.factory.trace_store.get_trace_sizes(&jobid) {
+                Some(size) => {
+                    return WebResponse::Native(Response::json(&size));
+                }
+                None => {
+                    return WebResponse::BadReq(format!("No such jobid {}", jobid));
+                }
+            }
+        }
+        WebResponse::BadReq("No job GET parameter passed".to_string())
+    }
+
     fn handle_traceplot(&self, req: &Request) -> WebResponse {
         #[derive(Deserialize)]
         struct Plotdef {
@@ -982,6 +996,7 @@ impl Web {
                     "read" => self.handle_traceread(request),
                     "plot" => self.handle_traceplot(request),
                     "metrics" => self.handle_tracemetrics(request),
+                    "size" => self.handle_tracesize(request),
                     "json" => self.handle_get_json_trace(request),
                     "ftio" => self.handle_ftio_get_model(request),
                     _ => WebResponse::BadReq(url),
