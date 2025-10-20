@@ -1073,22 +1073,33 @@ impl TraceView {
         let export = self.export(jobid)?;
 
         if let Ok(ftio_result) = ftio_client.send_receive(export) {
-            if let Ok(_) = self.save_ftio_model(&ftio_result, jobid) {
-                return Ok(());
+            match rmp_serde::from_slice::<Vec<FtioModel>>(&ftio_result) {
+                Ok(models) => {
+                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+                        let job_storage = job_model_ht
+                            .entry(jobid.to_string())
+                            .or_insert(FtioModelStorage::new());
+
+                        for m in models {
+                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
+                            job_storage.models.insert(m.metric.to_string(), m);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to parse FTIO output: {}", e);
+                }
             }
+            return Ok(());
         }
         log::warn!("FTIO server not responding. Fallback to CLI.");
 
-        if let Ok(ftio_result) = self.generate_fallback_ftio_model(jobid) {
-            if let Ok(_) = self.save_ftio_model(&ftio_result, jobid) {
-                return Ok(());
-            }
-        }
-
+        self.generate_fallback_ftio_model(jobid)?;
+        
         Ok(())
     }
 
-    fn generate_fallback_ftio_model(&self, jobid: &String) -> Result<String, Box<dyn Error>> {
+    fn generate_fallback_ftio_model(&self, jobid: &String) -> Result<(), Box<dyn Error>> {
         which::which("admire_proxy_invoke_ftio")?;
 
         let export = self.export(jobid)?;
@@ -1116,33 +1127,33 @@ impl TraceView {
         let json_part = &output_str[json_start..];
 
         if output.status.success() {
-            return Ok(json_part.to_string());
+            match serde_json::from_slice::<Vec<FtioModel>>(json_part.as_bytes()) {
+                Ok(models) => {
+                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+                        let job_storage = job_model_ht
+                            .entry(jobid.to_string())
+                            .or_insert(FtioModelStorage::new());
+
+                        for m in models {
+                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
+
+                            job_storage.models.insert(m.metric.to_string(), m);
+                        }
+                    }
+                }
+
+                Err(e) => {
+                    log::error!("Failed to parse FTIO output: {}", e);
+                }
+            }
+
+            return Ok(());
         }
+
         Err(ProxyErr::newboxed(format!(
             "FTIO command failed: {}",
             String::from_utf8_lossy(&output.stderr)
         )))
-    }
-
-    fn save_ftio_model(&self, ftio_result: &String, jobid: &String) -> Result<(), Box<dyn Error>> {
-        match serde_json::from_slice::<Vec<FtioModel>>(ftio_result.as_bytes()) {
-            Ok(models) => {
-                if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
-                    let job_storage = job_model_ht
-                        .entry(jobid.to_string())
-                        .or_insert(FtioModelStorage::new());
-
-                    for m in models {
-                        log::debug!("FTIO Model for {}: {:?}", m.metric, m);
-                        job_storage.models.insert(m.metric.to_string(), m);
-                    }
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to parse FTIO output: {}", e);
-            }
-        }
-        Ok(())
     }
 
     pub(crate) fn done(&self, job: &JobDesc) -> Result<(), Box<dyn Error>> {

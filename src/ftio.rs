@@ -1,3 +1,4 @@
+use rmp_serde::{encode, decode};
 use clap::builder::Str;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -185,10 +186,10 @@ impl FtioClient {
         *args = new_args;
     }
 
-    pub fn send_receive(&self, export: TraceExport) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(3000)?;
-        socket.set_sndtimeo(3000)?;
+        socket.set_rcvtimeo(1000)?;
+        socket.set_sndtimeo(1000)?;
         socket.connect(&self.address)?;
 
         let args = self.get_arguments();
@@ -197,20 +198,14 @@ impl FtioClient {
             "metrics": export,
             "disable_parallel": false
         });
-        let payload_str = serde_json::to_string(&payload)?;
 
-        socket.send(&payload_str, 0)?;
+        let mut buf = Vec::new();
+        rmp_serde::encode::write(&mut buf, &payload)?;
+        socket.send(buf, 0)?;
 
-        let reply = socket
-            .recv_string(0)?
-            .map_err(|e| format!("Recv error: {:?}", e))?;
+        let reply = socket.recv_bytes(0)?;
 
-        let json_start = reply
-            .find("[")
-            .ok_or("JSON array not found in FTIO output")?;
-        let json_part = reply[json_start..].to_string();
-
-        Ok(json_part)
+        Ok(reply)
     }
 
     pub fn ping_server(&self) -> bool {
