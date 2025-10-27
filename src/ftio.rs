@@ -188,8 +188,8 @@ impl FtioClient {
 
     pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(1000)?;
-        socket.set_sndtimeo(1000)?;
+        socket.set_rcvtimeo(500)?;
+        socket.set_sndtimeo(500)?;
         socket.connect(&self.address)?;
 
         let args = self.get_arguments();
@@ -201,6 +201,8 @@ impl FtioClient {
 
         let mut buf = Vec::new();
         rmp_serde::encode::write(&mut buf, &payload)?;
+
+        println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;

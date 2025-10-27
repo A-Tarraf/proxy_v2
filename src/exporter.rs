@@ -541,7 +541,7 @@ impl ExporterFactory {
             println!("FTIO server not responding, attempting to start it...");
             Command::new("admire_proxy_zmq")
             .stdin(Stdio::null())
-            //.stdout(Stdio::null())
+            .stdout(Stdio::null())
             .spawn()?;
         }
 

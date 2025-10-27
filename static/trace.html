@@ -41,8 +41,8 @@
     </section>
 
     <script src="/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
 
     <script>
 
@@ -147,18 +147,15 @@
                     chart._startTimeStamp = data[0][0] * 1000;
                     chart._endTimeStamp = data[data.length - 1][0] * 1000;
 
-                    data.forEach(function (v) {
-                        labels.push(v[0] * 1000);
-                        datapoint.push(v[1]);
-                    });
 
 
                     const currentXMin = chart.options.scales.x.min;
                     const currentXMax = chart.options.scales.x.max;
 
-                    chart.data.labels = labels;
-                    chart.data.datasets[0].data = datapoint;
                     chart.data.datasets[0].label = metric;
+
+                    const points = data.map(v => ({ x: v[0] * 1000, y: v[1] }));
+                    chart.data.datasets[0].data = points;
                     chart.update();
 
                     chart.options.scales.x.min = currentXMin;
@@ -256,7 +253,6 @@
                     chart.update();
 
 
-
                     chart._ftioParams = {
                         sortedFreqs: sortedFreqs,
                         sortedAmps: sortedAmps,
@@ -332,7 +328,7 @@
                     const invariables = 2 * Math.PI * frequency * totalDuration;
                     const phiOffset = phi + Math.PI - 2 * Math.PI * frequency * panInSeconds; // +Math.PI because canvas is flipped, the rest to account for panning
 
-                    for (let x = left; x <= right; x += 2) {
+                    for (let x = left; x <= right; x += 1) {
                         // Get progress as percentage
                         const progress = (x - left) / pixelWidth;
 
@@ -457,17 +453,17 @@
                         type: 'time',
                         time: {
                             // Customize label display format here:
-                            tooltipFormat: 'd/M/yy HH:mm:ss',
+                            tooltipFormat: 'd/M/yy HH:mm:ss.SSS',
                             displayFormats: {
                                 millisecond: 'd/M/yy HH:mm:ss',
                                 second: 'd/M/yy HH:mm:ss',
                             }
                         },
                         ticks: {
-                            source: 'data',    // <-- force ticks at data points
-                            autoSkip: false,   // <-- disable skipping ticks
-                            maxRotation: 60,
-                            minRotation: 25
+                            source: 'data',
+                            autoSkip: true, 
+                            maxRotation: 70,
+                            minRotation: 15
                         }
                     },
                     y: {
