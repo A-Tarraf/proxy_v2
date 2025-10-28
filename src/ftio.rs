@@ -1,5 +1,5 @@
-use rmp_serde::{encode, decode};
 use clap::builder::Str;
+use rmp_serde::{decode, encode};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
@@ -17,7 +17,7 @@ pub struct FtioArguments {
     pub wavelet: Option<String>,
     pub outlier: String,
     pub periodicity_detection: Option<String>,
-    pub tol: Option<f64>,
+    pub tol: f64,
     pub dtw: bool,
     pub no_psd: bool,
     pub n_freq: i32,
@@ -27,7 +27,9 @@ pub struct FtioArguments {
     pub hits: Option<f64>,
     pub filter_type: Option<String>,
     pub filter_cutoff: Option<f64>,
+    pub filter_cutoff2: Option<f64>,
     pub filter_order: Option<i32>,
+    pub custom_args: Option<String>,
 }
 
 impl Default for FtioArguments {
@@ -42,7 +44,7 @@ impl Default for FtioArguments {
             wavelet: None,
             outlier: "z-score".to_string(),
             periodicity_detection: None,
-            tol: None,
+            tol: 0.8,
             dtw: false,
             no_psd: true,
             n_freq: 10,
@@ -52,7 +54,9 @@ impl Default for FtioArguments {
             hits: None,
             filter_type: None,
             filter_cutoff: None,
+            filter_cutoff2: None,
             filter_order: None,
+            custom_args: None,
         }
     }
 }
@@ -65,7 +69,7 @@ impl FtioArguments {
         args.push(self.freq.to_string());
 
         if let Some(memory_limit) = self.memory_limit {
-            args.push("--memory-limit".to_string());
+            args.push("--memory_limit".to_string());
             args.push(memory_limit.to_string());
         }
 
@@ -96,14 +100,12 @@ impl FtioArguments {
         args.push(self.outlier.clone());
 
         if let Some(p) = &self.periodicity_detection {
-            args.push("--periodicity-detection".to_string());
+            args.push("--periodicity_detection".to_string());
             args.push(p.clone());
         }
 
-        if let Some(tol) = self.tol {
-            args.push("--tol".to_string());
-            args.push(tol.to_string());
-        }
+        args.push("--tol".to_string());
+        args.push(self.tol.to_string());
 
         if self.dtw {
             args.push("--dtw".to_string());
@@ -117,7 +119,7 @@ impl FtioArguments {
         args.push(self.n_freq.to_string());
 
         if self.fourier_fit {
-            args.push("--fourier-fit".to_string());
+            args.push("--fourier_fit".to_string());
         }
 
         if self.autocorrelation {
@@ -125,7 +127,7 @@ impl FtioArguments {
         }
 
         if let Some(win) = &self.window_adaptation {
-            args.push("--window-adaptation".to_string());
+            args.push("--window_adaptation".to_string());
             args.push(win.clone());
         }
 
@@ -135,18 +137,28 @@ impl FtioArguments {
         }
 
         if let Some(ft) = &self.filter_type {
-            args.push("--filter-type".to_string());
+            args.push("--filter_type".to_string());
             args.push(ft.clone());
         }
 
         if let Some(fc) = self.filter_cutoff {
-            args.push("--filter-cutoff".to_string());
+            args.push("--filter_cutoff".to_string());
             args.push(fc.to_string());
+            if let Some(fc2) = self.filter_cutoff2 {
+                args.push(fc2.to_string());
+            }
         }
 
         if let Some(fo) = self.filter_order {
-            args.push("--filter-order".to_string());
+            args.push("--filter_order".to_string());
             args.push(fo.to_string());
+        }
+
+        if let Some(custom) = &self.custom_args {
+            let custom_parts: Vec<&str> = custom.split_whitespace().collect();
+            for part in custom_parts {
+                args.push(part.to_string());
+            }
         }
 
         args
