@@ -217,8 +217,8 @@
 
                     // Expand/Retract ftioConfigs and select menu
                     const ftioSelect = document.getElementById('ftioSelect');
-                    while (ftioSelect.options.length !== data.freq && ftioSelect.options.length <= 10) {
-                        if (ftioSelect.options.length < data.freq) {
+                    while (ftioSelect.options.length !== data.top_freq.freq.length && ftioSelect.options.length <= 10) {
+                        if (ftioSelect.options.length < data.top_freq.freq.length) {
                             const newIndex = ftioSelect.options.length + 1;
                             const opt = document.createElement('option');
                             opt.value = newIndex;
