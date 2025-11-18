@@ -834,6 +834,8 @@ pub struct FtioModel {
     freq: f64,
     top_freq: FtioModelTopFreq,
     n_samples: usize,
+    wave_names: Vec<String>,
+    //waves: Vec<Vec<f64>>,
 }
 
 #[derive(Serialize, Clone)]

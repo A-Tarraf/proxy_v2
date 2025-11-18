@@ -1,7 +1,7 @@
 use clap::builder::Str;
 use rmp_serde::{decode, encode};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::{collections::HashMap, sync::{Arc, RwLock}};
 
 use crate::trace::TraceExport;
 
@@ -198,10 +198,36 @@ impl FtioClient {
         *args = new_args;
     }
 
+    pub fn send_receive_modified(
+        &self,
+        args: FtioArguments,
+        metrics: HashMap<String, serde_json::Value>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let socket = self.context.socket(zmq::REQ)?;
+        socket.set_rcvtimeo(1000)?;
+        socket.set_sndtimeo(1000)?;
+        socket.connect(&self.address)?;
+
+        let payload = serde_json::json!({
+            "argv": args.to_args(),
+            "metrics": { "metrics": metrics },
+            "disable_parallel": true
+        });
+
+        let mut buf = Vec::new();
+        rmp_serde::encode::write(&mut buf, &payload)?;
+
+        println!("Sending {} bytes to FTIO server", buf.len());
+        socket.send(buf, 0)?;
+
+        let reply = socket.recv_bytes(0)?;
+        Ok(reply)
+    }
+
     pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(500)?;
-        socket.set_sndtimeo(500)?;
+        socket.set_rcvtimeo(1000)?;
+        socket.set_sndtimeo(1000)?;
         socket.connect(&self.address)?;
 
         let args = self.get_arguments();
@@ -218,7 +244,6 @@ impl FtioClient {
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;
-
         Ok(reply)
     }
 
@@ -231,8 +256,8 @@ impl FtioClient {
             }
         };
 
-        socket.set_rcvtimeo(500).unwrap();
-        socket.set_sndtimeo(500).unwrap();
+        socket.set_rcvtimeo(1000).unwrap();
+        socket.set_sndtimeo(1000).unwrap();
         socket.connect(&self.address).unwrap();
 
         if socket.send("ping", 0).is_err() {

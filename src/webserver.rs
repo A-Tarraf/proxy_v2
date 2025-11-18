@@ -11,6 +11,7 @@ use rouille::{Request, Response};
 use serde::Deserialize;
 use static_files::Resource;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::Path;
 
 use std::sync::{Arc, Mutex, RwLock};
@@ -45,16 +46,31 @@ impl ClientPivot {
 
     fn is_partial(&self) -> bool {
         if (self.refcount < 2) && (1 < self.refcount) {
+            println!(
+                "Checking partial for server {} with refcount {} was True",
+                self.url, self.refcount
+            );
             return true;
         }
-
+        println!(
+            "Checking partial for server {} with refcount {} was False",
+            self.url, self.refcount
+        );
         false
     }
 
     fn is_free(&self) -> bool {
         if self.refcount < 2 {
+            println!(
+                "Checking free for server {} with refcount {} was True",
+                self.url, self.refcount
+            );
             return true;
         }
+        println!(
+            "Checking free for server {} with refcount {} was False",
+            self.url, self.refcount
+        );
 
         false
     }
@@ -722,6 +738,56 @@ impl Web {
         }
     }
 
+    fn handle_ftio_modified_args(&self, req: &Request) -> WebResponse {
+        let badreq = |msg: &str| WebResponse::BadReq(msg.to_string());
+
+        if let Some(jobid) = req.get_param("jobid") {
+            if let Some(metricid) = req.get_param("metricid") {
+                if let Some(args_str) = req.get_param("args") {
+                    let modified_args = match serde_json::from_str::<crate::ftio::FtioArguments>(&args_str) {
+                        Ok(v) => v,
+                        Err(e) => return badreq(&format!("Invalid FTIO args JSON: {}", e)),
+                    };
+
+                    let export = match self.factory.trace_store.export(&jobid) {
+                        Ok(v) => v,
+                        Err(_) => return badreq("Could not export trace data"),
+                    };
+
+                    let values = match export.metrics.get(&metricid) {
+                        Some(v) => v,
+                        None => return badreq(&format!("Metric '{}' not found", metricid)),
+                    };
+
+                    let json_values = match serde_json::to_value(values) {
+                        Ok(v) => v,
+                        Err(e) => return badreq(&format!("Error serializing metric '{}': {}", metricid, e)),
+                    };
+
+                    let mut single_metric = HashMap::new();
+                    single_metric.insert(metricid.to_string(), json_values);
+
+                    let ftio_result = match self
+                        .factory
+                        .ftio_client
+                        .send_receive_modified(modified_args, single_metric)
+                    {
+                        Ok(data) => data,
+                        Err(e) => return badreq(&format!("FTIO processing error: {}", e)),
+                    };
+
+                    let decoded: Vec<crate::trace::FtioModel> = match rmp_serde::from_slice(&ftio_result) {
+                        Ok(v) => v,
+                        Err(e) => return badreq(&format!("Failed to decode FTIO output: {}", e)),
+                    };
+                    
+                    return WebResponse::Native(Response::json(&decoded[0]));
+                }
+            }
+        }
+        return WebResponse::BadReq("A GET parameter for jobid, metricid and args must be passed".to_string());
+    }
+
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
             let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
@@ -1017,6 +1083,7 @@ impl Web {
                 },
                 "ftio" => match resource.as_str() {
                     "args" => self.handle_ftio_get_args(request),
+                    "modified_args" => self.handle_ftio_modified_args(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),
