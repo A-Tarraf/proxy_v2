@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::{proxy_common};
+use crate::proxy_common;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
@@ -397,6 +397,10 @@ pub(crate) struct ExporterFactory {
     pub trace_store: Arc<TraceView>,
     /// Client to FTIO server
     pub ftio_client: Arc<FtioClient>,
+    pub root_proxy: Arc<RwLock<Option<String>>>,
+    pub web_url: Arc<RwLock<Option<String>>>,
+    pub period: Arc<RwLock<u64>>,
+    pub branches: u64,
 }
 
 impl ExporterFactory {
@@ -410,6 +414,23 @@ impl ExporterFactory {
             if let Ok(scrapes) = self.scrapes.lock().as_mut() {
                 for (k, v) in scrapes.iter_mut() {
                     if let Err(e) = v.scrape() {
+                        if let Some(target_url) = v.get_url_if_proxy() {
+                            log::error!(
+                                "Failed to scrape proxy {} : {}! Notifying the root server.",
+                                k,
+                                e
+                            );
+                            if let Some(root_url) = self.root_proxy.read().unwrap().as_ref() {
+                                if let Some(my_url) = self.web_url.read().unwrap().as_ref() {
+                                    if let Err(e) = ExporterFactory::remove_proxy_scrape(
+                                        self, root_url, my_url, target_url,
+                                    ) {
+                                        log::error!("Failed to notify root server about non responsive proxy {}: {}", target_url, e);
+                                    }
+                                }
+                            }
+                        }
+
                         log::debug!("Failed to scrape {} : {}", k, e);
                         to_delete.push(k.to_string());
                     }
@@ -446,6 +467,21 @@ impl ExporterFactory {
             .unwrap()
             .insert(new.url().to_string(), new);
         Ok(())
+    }
+
+    #[allow(unused)]
+    /// Remove a scrape from the scrape list
+    pub(crate) fn remove_scrape(
+        factory: Arc<ExporterFactory>,
+        url: &String,
+    ) -> Result<(), Box<dyn Error>> {
+        match factory.scrapes.lock().unwrap().remove(url) {
+            Some(_) => Ok(()),
+            None => Err(ProxyErr::newboxed(format!(
+                "No such scrape {} to remove",
+                url
+            ))),
+        }
     }
 
     #[allow(unused)]
@@ -504,10 +540,122 @@ impl ExporterFactory {
         }
     }
 
+    fn remove_proxy_scrape(
+        &self,
+        root_server: &String,
+        my_server_address: &String,
+        target_address: &String,
+    ) -> Result<(), ProxyErr> {
+        let mut target_address = target_address.to_string();
+        if target_address.starts_with("http://") {
+            target_address = target_address.replace("http://", "");
+        }
+        if target_address.ends_with("/job") {
+            target_address = target_address.replace("/job", "");
+        }
+
+        let mut pivot_url = root_server.to_string()
+            + "/remove?from="
+            + my_server_address
+            + "&target="
+            + &target_address;
+
+        println!("pivot_url: {}", pivot_url);
+
+        if !pivot_url.starts_with("http") {
+            pivot_url = format!("http://{}", pivot_url);
+        }
+
+        println!(
+            "Notifying root server {} about failed proxy {}, we are {}",
+            root_server, target_address, my_server_address
+        );
+
+        /* We add some delay as the root server may get smashed */
+        let resp = retry(Fixed::from_millis(2000).take(5), || {
+            ApiResponse::query(&pivot_url)
+        })?;
+
+        if resp.success {
+            let response: Vec<&str> = resp.operation.split('&').collect();
+
+            let target_url = "http://".to_string()
+                + my_server_address
+                + "/join?to="
+                + response[0]
+                + "&period="
+                + response[1];
+
+            match ApiResponse::query(&target_url) {
+                Ok(_) => {
+                    log::info!(
+                        "Letting proxy {} join with period {}",
+                        response[0],
+                        response[1]
+                    );
+                    return Ok(());
+                }
+                Err(e) => return Err(ProxyErr::from(e)),
+            }
+        } else {
+            Err(ProxyErr::new(
+                format!(
+                    "Failed to notify root server about failed proxy {}",
+                    target_address
+                )
+                .as_str(),
+            ))
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set_data(
+        factory: Arc<ExporterFactory>,
+        root: &String,
+        my_server_address: &String,
+        period: u64,
+    ) -> Result<(), ProxyErr> {
+        {
+            let mut p = factory.period.write().unwrap();
+            *p = period;
+        }
+
+        let mut root_url = root.to_string();
+        if !root_url.starts_with("http") {
+            root_url = format!("http://{}", root_url);
+        }
+
+        let mut web_url = my_server_address.to_string();
+
+        match factory.root_proxy.write() {
+            Ok(mut guard) => {
+                *guard = Some(root_url);
+                match factory.web_url.write() {
+                    Ok(mut web_guard) => {
+                        *web_guard = Some(web_url);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        return Err(ProxyErr::new(
+                            format!("Failed to set web url: {}", e).as_str(),
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(ProxyErr::new(
+                    format!("Failed to set root proxy: {}", e).as_str(),
+                ));
+            }
+        }
+    }
+
     pub(crate) fn new(
         profile_prefix: PathBuf,
         aggregate: bool,
         max_trace_size: usize,
+        period: u64,
+        branches: u64,
     ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
         let main_jobdesc = JobDesc {
             jobid: "main".to_string(),
@@ -535,7 +683,6 @@ impl ExporterFactory {
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
 
-        println!("testing FTIO server connectivity...");
         let ftio_client = Arc::new(FtioClient::new("tcp://127.0.0.1:5555"));
         if !ftio_client.ping_server() && which::which("admire_proxy_zmq").is_ok() {
             println!("FTIO server not responding, attempting to start it...");
@@ -567,6 +714,10 @@ impl ExporterFactory {
             aggregator: aggregate,
             max_trace_size,
             ftio_client: ftio_client.clone(),
+            root_proxy: Arc::new(RwLock::new(None)),
+            web_url: Arc::new(RwLock::new(None)),
+            period: Arc::new(RwLock::new(period)),
+            branches,
         });
 
         let scrape_ref = ret.clone();

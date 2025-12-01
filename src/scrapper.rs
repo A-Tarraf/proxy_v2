@@ -168,6 +168,13 @@ impl ProxyScraper {
         &self.target_url
     }
 
+    pub(crate) fn get_url_if_proxy(&self) -> Option<&String> {
+        match &self.ttype {
+            ScraperType::Proxy => Some(&self.target_url),
+            _ => None,
+        }
+    }
+
     fn scrape_proxy(&mut self) -> Result<(), Box<dyn Error>> {
         let mut deleted: Vec<JobDesc> = Vec::new();
 

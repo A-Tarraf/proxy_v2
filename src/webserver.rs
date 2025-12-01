@@ -28,6 +28,7 @@ struct ClientPivot {
     url: String,
     refcount: u32,
     child: Vec<String>,
+    depth: i32,
 }
 
 impl ClientPivot {
@@ -36,6 +37,7 @@ impl ClientPivot {
             url,
             refcount: 0,
             child: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -44,35 +46,38 @@ impl ClientPivot {
         self.child.push(child_url);
     }
 
-    fn is_partial(&self) -> bool {
-        if (self.refcount < 2) && (1 < self.refcount) {
-            println!(
-                "Checking partial for server {} with refcount {} was True",
-                self.url, self.refcount
-            );
+    fn removefrom(&mut self, child_url: &String) {
+        self.refcount -= 1;
+        self.child.retain(|x| x != child_url);
+    }
+
+    #[allow(unused)]
+    fn is_partial(&self, max_branches: u64) -> bool {
+        if (self.refcount < max_branches as u32) && (0 < self.refcount) {
             return true;
         }
-        println!(
-            "Checking partial for server {} with refcount {} was False",
-            self.url, self.refcount
-        );
         false
     }
 
-    fn is_free(&self) -> bool {
-        if self.refcount < 2 {
-            println!(
-                "Checking free for server {} with refcount {} was True",
-                self.url, self.refcount
-            );
+    #[allow(unused)]
+    fn is_free(&self, max_branches: u64) -> bool {
+        if self.refcount < max_branches as u32 {
             return true;
         }
-        println!(
-            "Checking free for server {} with refcount {} was False",
-            self.url, self.refcount
-        );
 
         false
+    }
+
+    fn set_depth(&mut self, depth: i32) {
+        self.depth = depth;
+    }
+
+    fn get_depth_if_not_full(&self, max_branches: u64) -> i32 {
+        if self.refcount < max_branches as u32 {
+            return self.depth;
+        } else {
+            return i32::MAX;
+        }
     }
 }
 
@@ -493,6 +498,49 @@ impl Web {
         WebResponse::Success(format!("Added {} for scraping", to))
     }
 
+    fn handle_join_multiple(&self, req: &Request) -> WebResponse {
+        let to = req.get_param("to");
+
+        if to.is_none() {
+            return WebResponse::BadReq("No to parameter passed".to_string());
+        }
+
+        let to = to.unwrap();
+
+        if to.contains("http") {
+            return WebResponse::BadReq(
+                "To should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        // Split multiple targets by &
+        let targets: Vec<&str> = to.split('&').collect();
+
+        // Split periods by & if provided
+        let periods: Vec<u64> = match req.get_param("period") {
+            Some(p) => p
+                .split('&')
+                .map(|s| s.parse::<u64>().unwrap_or(1000))
+                .collect(),
+            None => vec![1000; targets.len()],
+        };
+
+        for (i, target) in targets.iter().enumerate() {
+            let period = if i < periods.len() { periods[i] } else { 1000 };
+
+            if let Err(e) =
+                ExporterFactory::add_scrape(self.factory.clone(), &target.to_string(), period)
+            {
+                return WebResponse::BadReq(format!(
+                    "Failed to add {} for scraping : {}",
+                    target, e
+                ));
+            }
+        }
+
+        WebResponse::Success(format!("Added the following nodes for scraping: {}", to))
+    }
+
     fn handle_pivot(&self, req: &Request) -> WebResponse {
         let from = req.get_param("from");
 
@@ -510,22 +558,32 @@ impl Web {
 
         let mut clients = self.known_client.lock().unwrap();
 
-        let mut target = clients.iter_mut().find(|v| v.is_partial());
+        // Find the target parent node
+
+        let target = clients
+            .iter_mut()
+            .min_by_key(|v| v.get_depth_if_not_full(self.factory.branches));
+
+        /* let mut target = clients.iter_mut().find(|v| v.is_partial());
 
         if target.is_none() {
             target = clients.iter_mut().find(|v| v.is_free());
-        }
+        } */
 
         let resp: WebResponse;
+        let mut depth = -1;
 
         if let Some(target) = target {
             target.mapto(from.to_string());
 
+            depth = target.depth + 1;
+
             log::info!(
-                "Pivot response to {} is {} with ref {}",
+                "Pivot response to {} is {} with ref {} and depth {}",
                 from,
                 target.url,
-                target.refcount
+                target.refcount,
+                target.depth
             );
 
             resp = WebResponse::Success(target.url.to_string());
@@ -533,7 +591,10 @@ impl Web {
             resp = WebResponse::BadReq("Did not match any server".to_string());
         }
 
-        clients.push(ClientPivot::new(from));
+        let mut new_client = ClientPivot::new(from);
+        new_client.set_depth(depth);
+
+        clients.push(new_client);
 
         resp
     }
@@ -552,6 +613,177 @@ impl Web {
         }
 
         WebResponse::Native(Response::json(&resp))
+    }
+
+    fn handle_remove(&self, req: &Request) -> WebResponse {
+
+        let from_url = req.get_param("from");
+        if from_url.is_none() {
+            return WebResponse::BadReq("No from parameter passed".to_string());
+        }
+
+        let from_url: String = from_url.unwrap().clone();
+        if from_url.contains("http") {
+            return WebResponse::BadReq(
+                "From should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        let target_url = req.get_param("target");
+        if target_url.is_none() {
+            return WebResponse::BadReq("No target parameter passed".to_string());
+        }
+
+        let target_url: String = target_url.unwrap().clone();
+        if target_url.contains("http") {
+            return WebResponse::BadReq(
+                "Target should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        println!(
+            "Handling remove request from {} for target {}",
+            from_url, target_url
+        );
+
+        let mut clients = self.known_client.lock().unwrap();
+
+        if let Some(from_client) = clients.iter().position(|v| v.url == from_url) {
+            // Remove the failed node from the notifying client
+            clients[from_client].removefrom(&target_url);
+
+            let mut replacement_url = String::new();
+
+            // Check if the unresponsive node had children to reassign, if not we don't need to change any more connections
+            if let Some(target_client) = clients.iter().position(|v| v.url == target_url) {
+                if clients[target_client].refcount != 0 {
+                    println!(
+                        "Client {} has {} children to reassign",
+                        target_url, clients[target_client].refcount
+                    );
+
+                    println!(
+                        "Current clients: {:?}",
+                        clients
+                            .iter()
+                            .map(|v| format!(
+                                "{} (refcount {}, depth {}, children {:?})",
+                                v.url, v.refcount, v.depth, v.child
+                            ))
+                            .collect::<Vec<String>>()
+                    );
+
+                    // Find a replacement client, should be a client without children
+                    let replacement_client = clients
+                        .iter()
+                        .enumerate()
+                        .max_by_key(|(_, v)| v.depth)
+                        .map(|(v, _)| v);
+
+                    if let Some(replacement_client) = replacement_client {
+                        replacement_url = clients[replacement_client].url.clone();
+
+                        println!(
+                            "Found replacement client {} for failed node {}",
+                            replacement_url, target_url
+                        );
+
+                        // If the found replacement is not the child of the failed node, we need to disconnect it from its parent
+                        if !clients[target_client].child.contains(&replacement_url) {
+                            println!(
+                                "Replacement client {} is not a child of the failed node {}, disconnecting from its parent",
+                                replacement_url, target_url
+                            );
+                            if let Some(parent_client) = clients
+                                .iter()
+                                .position(|v| v.child.contains(&replacement_url))
+                            {
+                                clients[parent_client].removefrom(&replacement_url);
+                                // Notify the parent of the replacement about the disconnection
+                                let request_url = format!(
+                                    "http://{}/disconnect?target={}",
+                                    clients[parent_client].url, replacement_url
+                                );
+                                let _resp = ApiResponse::query(&request_url);
+                            }
+                        }
+
+                        // Connect the notifying client to the replacement (Scrape target send with WebRespone later)
+                        clients[from_client].mapto(replacement_url.clone());
+                        let depth = clients[from_client].depth + 1;
+                        clients[replacement_client].set_depth(depth);
+
+                        // Connect the replacement to the children of the failed node
+                        let mut children: Vec<String> = clients[target_client].child.clone();
+                        children.retain(|x| x != &replacement_url);
+
+                        println!(
+                            "Reassigning children {:?} from failed node {} to replacement node {}",
+                            children, target_url, replacement_url
+                        );
+
+                        for child in children.iter().cloned() {
+                            clients[replacement_client].mapto(child);
+                        }
+                        // Notify the replacement about its new children
+                        let children_param = children.join("&");
+                        // Get the sampling periods of the children nodes
+                        let mut periods: Vec<String> = Vec::new();
+                        for child in &children {
+                            let period_url = format!("http://{}/period", child);
+                            let resp = ApiResponse::query(&period_url);
+                            if let Ok(resp) = resp {
+                                periods.push(resp.operation);
+                            } else {
+                                periods.push("1000".to_string());
+                            }
+                        }
+                        let periods_param = periods.join("&");
+
+                        let request_url = format!(
+                            "http://{}/join/multiple?to={}+period={}",
+                            replacement_url, children_param, periods_param
+                        );
+                        let _resp = ApiResponse::query(&request_url);
+                    }
+                }
+            }
+
+            clients.retain(|x| x.url != target_url);
+
+            // Get period of the replacement node
+            let request_url = format!("http://{}/period", replacement_url);
+            let resp = ApiResponse::query(&request_url);
+
+            return WebResponse::Success(replacement_url + "&" + &resp.unwrap().operation);
+        } else {
+            return WebResponse::BadReq(format!("No such from client {}", from_url));
+        }
+    }
+
+    // Remove the proxy from the scrape list
+    fn handle_disconnect(&self, req: &Request) -> WebResponse {
+        let target_url = req.get_param("target");
+        if target_url.is_none() {
+            return WebResponse::BadReq("No target parameter passed".to_string());
+        }
+
+        let mut target_url: String = target_url.unwrap().clone();
+
+        if !target_url.contains("http") {
+            target_url = format!("http://{}/job", target_url);
+        }
+        if let Err(e) = ExporterFactory::remove_scrape(self.factory.clone(), &target_url) {
+            return WebResponse::BadReq(format!("Failed to remove {}: {}", target_url, e));
+        }
+
+        WebResponse::Success(format!("Removed {} from scraping", target_url))
+    }
+
+    // Get period of the Exporter Factory
+    fn handle_period(&self, _req: &Request) -> WebResponse {
+        let period = self.factory.period.read().unwrap();
+        WebResponse::Success(period.to_string())
     }
 
     fn handle_job(&self, req: &Request) -> WebResponse {
@@ -1091,8 +1323,12 @@ impl Web {
                 "join" => match resource.as_str() {
                     "" => self.handle_join(request),
                     "list" => self.handle_join_list(request),
+                    "multiple" => self.handle_join_multiple(request),
                     _ => WebResponse::BadReq(url),
                 },
+                "remove" => self.handle_remove(request),
+                "disconnect" => self.handle_disconnect(request),
+                "period" => self.handle_period(request),
                 "alarms" => match resource.as_str() {
                     "" => self.handle_alarms(request),
                     "add" => self.handle_add_alarms(request),
