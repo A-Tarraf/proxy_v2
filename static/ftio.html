@@ -7,36 +7,70 @@
         </div>
     </section>
     <h2>Logs:</h2>
+    <div id="ftio-logs" class="ftio-logs">
 
-    <script src="ftioTemplate.js"></script>
+        <script src="ftioTemplate.js"></script>
 
-    <script>
-        async function loadFTIOForm() {
-            fetch('ftioTemplate.html')
-                .then(response => {
-                    // When the page is loaded convert it to text
-                    return response.text()
-                })
-                .then(html => {
-                    // Initialize the DOM parser
-                    const parser = new DOMParser()
+        <script>
+            async function loadFTIOForm() {
+                fetch('ftioTemplate.html')
+                    .then(response => {
+                        // When the page is loaded convert it to text
+                        return response.text()
+                    })
+                    .then(html => {
+                        const parser = new DOMParser()
 
-                    // Parse the text
-                    const doc = parser.parseFromString(html, "text/html")
+                        const doc = parser.parseFromString(html, "text/html")
 
-                    // You can now even select part of that html as you would in the regular DOM
-                    const snippet = doc.getElementById('ftioParameters');
-                    document.getElementById('ftio-container').prepend(snippet.cloneNode(true));
+                        const snippet = doc.getElementById('ftioParameters');
+                        document.getElementById('ftio-container').prepend(snippet.cloneNode(true));
 
-                    // After injecting HTML, initialize JS logic
-                    initFTIOTemplate('/ftio/args');
-                })
-                .catch(error => {
-                    console.error('Failed to fetch page: ', error)
-                })
-            
-        }
+                        initFTIOTemplate('/ftio/args');
+                    })
+                    .catch(error => {
+                        console.error('Failed to fetch page: ', error)
+                    })
 
-        loadFTIOForm();
-    </script>
+            }
+
+            async function fetchLogs() {
+                fetch('/ftio/logs').then(response => {
+                    return response.json();
+                }).then(data => {
+                    const logContainer = document.getElementById('ftio-logs');
+                    logContainer.innerHTML = '';
+
+                    data.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.textContent = log;
+                        logEntry.style.marginBottom = '0px';
+                        if (log.includes('FTIO ZMQ') || log.includes('Received')) {
+                            logEntry.style.color = '#2cd16b';
+                        } else if (log.includes('Processing')) {
+                            logEntry.style.color = '#227ab5';
+                            logEntry.style.marginBottom = '7px';
+                        } else if (log.includes('Parsing time')) {
+                            logEntry.style.color = '#2cbed1';
+                        } else if (log.includes('Warning') || log.includes('Failed')) {
+                            logEntry.style.color = '#b5243a';
+                        } else {
+                            logEntry.style.color = '#dbdbdb';
+                            
+                        }
+
+                        logContainer.appendChild(logEntry);
+                    });
+
+                }).catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+            }
+
+            fetchLogs();
+
+            setInterval(fetchLogs, 3000);
+
+            loadFTIOForm();
+        </script>
 </main>

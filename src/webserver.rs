@@ -961,10 +961,18 @@ impl Web {
             }
             "POST" | "PUT" => match rouille::input::json_input::<crate::ftio::FtioArguments>(req) {
                 Ok(new_args) => {
+                    let output_store = self.factory.ftio_client.server_logs.clone();
+                    let mut logs = output_store.write().unwrap();
+                    logs.push(format!("FTIO arguments saved: {:?}", new_args));
                     self.factory.ftio_client.set_arguments(new_args);
                     WebResponse::Success("FTIO args updated".to_string())
                 }
-                Err(e) => WebResponse::BadReq(format!("Invalid FTIO args JSON: {}", e)),
+                Err(e) => {
+                    let output_store = self.factory.ftio_client.server_logs.clone();
+                    let mut logs = output_store.write().unwrap();
+                    logs.push(format!("Failed to save FTIO arguments: {}", e));
+                    WebResponse::BadReq(format!("Invalid FTIO args JSON: {}", e))
+                }
             },
             _ => WebResponse::BadReq("Unsupported method".to_string()),
         }
@@ -1017,7 +1025,14 @@ impl Web {
                 }
             }
         }
-        return WebResponse::BadReq("A GET parameter for jobid, metricid and args must be passed".to_string());
+        return WebResponse::BadReq(
+            "A GET parameter for jobid, metricid and args must be passed".to_string(),
+        );
+    }
+
+    fn handle_ftio_logs(&self, _req: &Request) -> WebResponse {
+        let logs = self.factory.ftio_client.get_logs();
+        WebResponse::Native(Response::json(&logs))
     }
 
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
@@ -1316,6 +1331,7 @@ impl Web {
                 "ftio" => match resource.as_str() {
                     "args" => self.handle_ftio_get_args(request),
                     "modified_args" => self.handle_ftio_modified_args(request),
+                    "logs" => self.handle_ftio_logs(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

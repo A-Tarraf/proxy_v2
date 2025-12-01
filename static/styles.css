@@ -260,3 +260,31 @@ input[type="number"] {
 .info-symbol:hover {
     color: #51dcff;
 }
+
+.ftio-logs {
+	background-color: #3a3a3a;
+	border: 5px solid #3a3a3a;
+	border-radius: 10px;
+	padding: 5px;
+	box-sizing: border-box;
+	height: 750px;
+	overflow-y: auto;
+	font-family: monospace;
+	white-space: pre-wrap; /* Preserve whitespace and wrap lines */
+	color: #dbdbdb;
+	font-size: medium;
+}
+
+#ftio-logs::after {
+  content: "";
+  display: block;
+  height: 5px;
+  width: 100%;
+}
+
+#ftio-logs::before {
+  content: "";
+  display: block;
+  height: 5px;
+  width: 100%;
+}

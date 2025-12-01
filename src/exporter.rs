@@ -686,10 +686,31 @@ impl ExporterFactory {
         let ftio_client = Arc::new(FtioClient::new("tcp://127.0.0.1:5555"));
         if !ftio_client.ping_server() && which::which("admire_proxy_zmq").is_ok() {
             println!("FTIO server not responding, attempting to start it...");
-            Command::new("admire_proxy_zmq")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn()?;
+            let mut child = Command::new("admire_proxy_zmq")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+
+            if let Some(stdout) = child.stdout.take() {
+                let output_store = ftio_client.server_logs.clone();
+                std::thread::spawn(move || {
+                    use std::io::{BufRead, BufReader};
+                    let reader = BufReader::new(stdout);
+                    for line in reader.lines() {
+                        if let Ok(l) = line {
+                            let mut logs = output_store.write().unwrap();
+                            logs.push(l);
+
+                            // Keep only the last 1000 lines
+                            if logs.len() > 1000 {
+                                let remove = logs.len() - 1000;
+                                logs.drain(0..remove);
+                            }
+                        }
+                    }
+                });
+            }
         }
 
         let (main_job_trace, node_job_trace) = if aggregate {

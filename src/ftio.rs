@@ -177,6 +177,7 @@ pub struct FtioClient {
     context: Arc<zmq::Context>,
     address: String,
     arguments: RwLock<FtioArguments>,
+    pub server_logs: Arc<RwLock<Vec<String>>>,
 }
 
 impl FtioClient {
@@ -186,7 +187,12 @@ impl FtioClient {
             context: Arc::new(zmq::Context::new()),
             address: address.to_string(),
             arguments: RwLock::new(FtioArguments::default()),
+            server_logs: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    pub fn get_logs(&self) -> Vec<String> {
+        self.server_logs.read().unwrap().clone()
     }
 
     pub fn get_arguments(&self) -> std::sync::RwLockReadGuard<'_, FtioArguments> {
@@ -217,7 +223,7 @@ impl FtioClient {
         let mut buf = Vec::new();
         rmp_serde::encode::write(&mut buf, &payload)?;
 
-        println!("Sending {} bytes to FTIO server", buf.len());
+        //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;
@@ -240,7 +246,7 @@ impl FtioClient {
         let mut buf = Vec::new();
         rmp_serde::encode::write(&mut buf, &payload)?;
 
-        println!("Sending {} bytes to FTIO server", buf.len());
+        //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;
