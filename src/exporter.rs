@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::proxy_common;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
+use crate::{ftio, proxy_common};
 
 use crate::profiles::ProfileView;
 use crate::trace::{Trace, TraceView};
@@ -682,10 +682,10 @@ impl ExporterFactory {
         };
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
+        let ftio_client = Arc::new(FtioClient::new());
 
-        let ftio_client = Arc::new(FtioClient::new("tcp://127.0.0.1:5555"));
-        if !ftio_client.ping_server() && which::which("admire_proxy_zmq").is_ok() {
-            println!("FTIO server not responding, attempting to start it...");
+        if which::which("admire_proxy_zmq").is_ok() {
+            log::warn!("FTIO server not responding, attempting to start it...");
             let mut child = Command::new("admire_proxy_zmq")
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
@@ -693,16 +693,24 @@ impl ExporterFactory {
                 .spawn()?;
 
             if let Some(stdout) = child.stdout.take() {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines_iter = reader.lines();
+
+                // Read the first line
+                if let Some(Ok(first_line)) = lines_iter.next() {
+                    let fixed_endpoint = first_line.trim().replace("0.0.0.0", "127.0.0.1");
+                    ftio_client.set_address(&fixed_endpoint);
+                }
+
                 let output_store = ftio_client.server_logs.clone();
+
+                // Move the iterator into a new thread
                 std::thread::spawn(move || {
-                    use std::io::{BufRead, BufReader};
-                    let reader = BufReader::new(stdout);
-                    for line in reader.lines() {
+                    for line in lines_iter {
                         if let Ok(l) = line {
                             let mut logs = output_store.write().unwrap();
                             logs.push(l);
-
-                            // Keep only the last 1000 lines
                             if logs.len() > 1000 {
                                 let remove = logs.len() - 1000;
                                 logs.drain(0..remove);

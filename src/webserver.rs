@@ -616,7 +616,6 @@ impl Web {
     }
 
     fn handle_remove(&self, req: &Request) -> WebResponse {
-
         let from_url = req.get_param("from");
         if from_url.is_none() {
             return WebResponse::BadReq("No from parameter passed".to_string());
@@ -984,10 +983,11 @@ impl Web {
         if let Some(jobid) = req.get_param("jobid") {
             if let Some(metricid) = req.get_param("metricid") {
                 if let Some(args_str) = req.get_param("args") {
-                    let modified_args = match serde_json::from_str::<crate::ftio::FtioArguments>(&args_str) {
-                        Ok(v) => v,
-                        Err(e) => return badreq(&format!("Invalid FTIO args JSON: {}", e)),
-                    };
+                    let modified_args =
+                        match serde_json::from_str::<crate::ftio::FtioArguments>(&args_str) {
+                            Ok(v) => v,
+                            Err(e) => return badreq(&format!("Invalid FTIO args JSON: {}", e)),
+                        };
 
                     let export = match self.factory.trace_store.export(&jobid) {
                         Ok(v) => v,
@@ -1001,7 +1001,12 @@ impl Web {
 
                     let json_values = match serde_json::to_value(values) {
                         Ok(v) => v,
-                        Err(e) => return badreq(&format!("Error serializing metric '{}': {}", metricid, e)),
+                        Err(e) => {
+                            return badreq(&format!(
+                                "Error serializing metric '{}': {}",
+                                metricid, e
+                            ))
+                        }
                     };
 
                     let mut single_metric = HashMap::new();
@@ -1016,11 +1021,14 @@ impl Web {
                         Err(e) => return badreq(&format!("FTIO processing error: {}", e)),
                     };
 
-                    let decoded: Vec<crate::trace::FtioModel> = match rmp_serde::from_slice(&ftio_result) {
-                        Ok(v) => v,
-                        Err(e) => return badreq(&format!("Failed to decode FTIO output: {}", e)),
-                    };
-                    
+                    let decoded: Vec<crate::trace::FtioModel> =
+                        match rmp_serde::from_slice(&ftio_result) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return badreq(&format!("Failed to decode FTIO output: {}", e))
+                            }
+                        };
+
                     return WebResponse::Native(Response::json(&decoded[0]));
                 }
             }
@@ -1033,6 +1041,38 @@ impl Web {
     fn handle_ftio_logs(&self, _req: &Request) -> WebResponse {
         let logs = self.factory.ftio_client.get_logs();
         WebResponse::Native(Response::json(&logs))
+    }
+
+    fn handle_ftio_port(&self, req: &Request) -> WebResponse {
+        match req.method() {
+            "GET" => {
+                if let Some(port) = self.factory.ftio_client.get_port() {
+                    WebResponse::Success(port.to_string())
+                } else {
+                    WebResponse::BadReq("FTIO port not set".to_string())
+                }
+            }
+            "POST" | "PUT" => {
+                match rouille::input::json_input::<serde_json::Value>(req) {
+                    Ok(body) => {
+                        if let Some(port_str) = body.get("port").and_then(|v| v.as_str()) {
+                            match self.factory.ftio_client.send_new_address(port_str) {
+                                Ok(_) => {
+                                    WebResponse::Success("FTIO port updated".to_string())
+                                }
+                                Err(e) => {
+                                    WebResponse::BadReq(format!("Failed to set FTIO port: {}", e))
+                                }
+                            }
+                        } else {
+                            WebResponse::BadReq("No 'port' field in JSON".to_string())
+                        }
+                    }
+                    Err(e) => WebResponse::BadReq(format!("Invalid JSON body: {}", e)),
+                }
+            }
+            _ => WebResponse::BadReq("Unsupported method".to_string()),
+        }
     }
 
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
@@ -1332,6 +1372,7 @@ impl Web {
                     "args" => self.handle_ftio_get_args(request),
                     "modified_args" => self.handle_ftio_modified_args(request),
                     "logs" => self.handle_ftio_logs(request),
+                    "port" => self.handle_ftio_port(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),

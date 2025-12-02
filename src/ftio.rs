@@ -1,7 +1,10 @@
 use clap::builder::Str;
 use rmp_serde::{decode, encode};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::{Arc, RwLock}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use crate::trace::TraceExport;
 
@@ -175,20 +178,25 @@ impl FtioArguments {
 
 pub struct FtioClient {
     context: Arc<zmq::Context>,
-    address: String,
+    address: RwLock<Option<String>>,
     arguments: RwLock<FtioArguments>,
     pub server_logs: Arc<RwLock<Vec<String>>>,
 }
 
 impl FtioClient {
-    pub fn new(address: &str) -> Self {
-        println!("FTIO client created");
+    pub fn new() -> Self {
         Self {
             context: Arc::new(zmq::Context::new()),
-            address: address.to_string(),
+            address: RwLock::new(None),
             arguments: RwLock::new(FtioArguments::default()),
             server_logs: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    pub fn get_port(&self) -> Option<String> {
+        let address = self.address.read().unwrap();
+        let addr = address.as_ref()?;
+        addr.rsplit(':').next().map(|port| port.to_string())
     }
 
     pub fn get_logs(&self) -> Vec<String> {
@@ -204,6 +212,11 @@ impl FtioClient {
         *args = new_args;
     }
 
+    pub fn set_address(&self, addr: &str) {
+        let mut address = self.address.write().unwrap();
+        *address = Some(addr.to_string());
+    }
+
     pub fn send_receive_modified(
         &self,
         args: FtioArguments,
@@ -212,7 +225,15 @@ impl FtioClient {
         let socket = self.context.socket(zmq::REQ)?;
         socket.set_rcvtimeo(1000)?;
         socket.set_sndtimeo(1000)?;
-        socket.connect(&self.address)?;
+        let address = self.address.read().unwrap();
+        if let Some(addr) = address.as_ref() {
+            socket.connect(addr)?;
+        } else {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "FTIO client address not set",
+            )));
+        }
 
         let payload = serde_json::json!({
             "argv": args.to_args(),
@@ -234,7 +255,15 @@ impl FtioClient {
         let socket = self.context.socket(zmq::REQ)?;
         socket.set_rcvtimeo(1000)?;
         socket.set_sndtimeo(1000)?;
-        socket.connect(&self.address)?;
+        let address = self.address.read().unwrap();
+        if let Some(addr) = address.as_ref() {
+            socket.connect(addr)?;
+        } else {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                "FTIO client address not set",
+            )));
+        }
 
         let args = self.get_arguments();
         let payload = serde_json::json!({
@@ -261,18 +290,55 @@ impl FtioClient {
                 return false;
             }
         };
-
         socket.set_rcvtimeo(1000).unwrap();
         socket.set_sndtimeo(1000).unwrap();
-        socket.connect(&self.address).unwrap();
-
-        if socket.send("ping", 0).is_err() {
+        let address = self.address.read().unwrap();
+        if let Some(addr) = address.as_ref() {
+            socket.connect(addr).unwrap();
+        } else {
             return false;
         }
 
-        match socket.recv_string(0) {
-            Ok(Ok(reply)) if reply == "pong" => true,
+        if socket.send("ping".as_bytes(), 0).is_err() {
+            return false;
+        }
+
+        match socket.recv_bytes(0) {
+            Ok(reply) => reply == b"pong",
             _ => false,
+        }
+    }
+
+    pub fn send_new_address(&self, new_port: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let socket = self.context.socket(zmq::REQ)?;
+        socket.set_rcvtimeo(1000)?;
+        socket.set_sndtimeo(1000)?;
+
+        let current_address = {
+            let address = self.address.read().unwrap();
+            address.clone()
+        };
+
+        let addr = current_address.ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "FTIO client address not set")
+        })?;
+
+        socket.connect(&addr)?;
+
+        let new_addr = format!("tcp://127.0.0.1:{}", new_port);
+        let msg = format!("New Address: {}", new_addr);
+        socket.send(msg.as_bytes(), 0)?;
+
+        match socket.recv_bytes(0) {
+            Ok(reply) if reply == b"Address updated" => {
+                let mut address = self.address.write().unwrap();
+                *address = Some(new_addr);
+                Ok(())
+            }
+            _ => Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to update address on FTIO server",
+            ))),
         }
     }
 }
