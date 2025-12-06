@@ -16,6 +16,12 @@
             <input type="checkbox" id="derivatebox" name="derivatebox">
             <br><br>
 
+            <label for="timebox">Use relative time:</label>
+            <span class="info-symbol"
+                title="Swap from absolute system time to relative time since the start of the job.">&#x1F6C8</span>
+            <input type="checkbox" id="timebox" name="timebox">
+            <br><br>
+
 
         </form>
     </section>
@@ -172,6 +178,7 @@
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
             const derivate = document.getElementById('derivatebox').checked;
+            const relativeTime = document.getElementById('timebox').checked;
 
             // Create the JSON request object
             const request = {
@@ -193,23 +200,54 @@
 
                     let labels = [];
                     let datapoint = [];
+                    xScale = chart.options.scales.x;
 
                     chart._startTimeStamp = data[0][0] * 1000;
                     chart._endTimeStamp = data[data.length - 1][0] * 1000;
+                    chart._duration = chart._endTimeStamp - chart._startTimeStamp;
 
-
-
-                    const currentXMin = chart.options.scales.x.min;
-                    const currentXMax = chart.options.scales.x.max;
+                    const currentXMin = xScale.min;
+                    const currentXMax = xScale.max;
 
                     chart.data.datasets[0].label = metric;
+                    chart.options.scales.y.title.text = metric;
 
+
+                    if (relativeTime){
+                        xScale.ticks.callback = (value) => {
+                            // after hour passed, zoom in removes hour display which causes it to show only minutes which is not accurate even if it should be 1 hour and 59 minutes
+                            const totalDurationInHours = chart._duration / (3600000);
+                            const totalMilliseconds = value - chart._startTimeStamp;
+                            const totalSeconds = Math.floor(totalMilliseconds / 1000);
+                            const hours = Math.floor(totalSeconds / 3600);
+                            const minutes = Math.floor((totalSeconds % 3600) / 60);
+                            const seconds = totalSeconds % 60; 
+                            const milliseconds = totalMilliseconds % 1000;
+                            let finalString = '';
+                            if (totalDurationInHours >= 1) {
+                                finalString += hours.toString().padStart(2, '0') + ':';
+                            }
+                            finalString += minutes.toString().padStart(2, '0') + ':';
+                            finalString += seconds.toString().padStart(2, '0');
+                            if (totalDurationInHours < 1) {
+                                finalString += '.' + milliseconds.toString().substring(0, 1);
+                            }
+
+                            return finalString;
+                        };
+                    }
+                    else {
+                        delete xScale.ticks.callback;
+                    }
+
+                    xScale.title.text = relativeTime ? 'Time since start' : 'Absolute Time';
+                    
                     const points = data.map(v => ({ x: v[0] * 1000, y: v[1] }));
                     chart.data.datasets[0].data = points;
                     chart.update();
 
-                    chart.options.scales.x.min = currentXMin;
-                    chart.options.scales.x.max = currentXMax;
+                    xScale.min = currentXMin;
+                    xScale.max = currentXMax;
                 })
                 .catch(error => {
                     console.error('Error:', error);
@@ -245,12 +283,14 @@
         function update_ftio() {
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
+            const derivate = document.getElementById('derivatebox').checked;
 
             // Create the JSON request object
             let request_ftio = {
                 jobid: target,
                 metricid: metric
             }
+            if (derivate) request_ftio.derivate = "deriv__"
             if (applyCustomFTIO) request_ftio.args = JSON.stringify(convertParameters());
 
             let query_params = new URLSearchParams(request_ftio).toString();
@@ -384,7 +424,7 @@
 
                         const y = yOffset + amplitudePixels * Math.cos(invariables * progress + phiOffset);
 
-                        if (reconstruct) reconstruction[x - left] += y - yOffset;
+                        if (reconstruct) reconstruction[Math.round(x - left)] += y - yOffset;
 
                         if (i >= showFTIO || chart._ftioHidden[i]) continue;
                         if (x === left) {
@@ -414,7 +454,7 @@
                 // Draw reconstructed signal if enabled
                 ctx.beginPath();
                 for (let x = left; x <= right; x += 1) {
-                    const y = reconstruction[x - left] + yOffset;
+                    const y = reconstruction[Math.round(x - left)] + yOffset;
                     if (x === left) {
                         ctx.moveTo(x, y);
                     } else {
@@ -514,7 +554,7 @@
             options: {
                 layout: {
                     padding: {
-                        left: 70,
+                        left: 35,
                         right: 70,
                         top: 10,
                         bottom: 10
@@ -526,6 +566,14 @@
                 scales: {
                     x: {
                         type: 'time',
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            font: {
+                                size: 14
+                            },
+                            padding: 20
+                        },
                         time: {
                             // Customize label display format here:
                             tooltipFormat: 'd/M/yy HH:mm:ss.SSS',
@@ -537,11 +585,19 @@
                         ticks: {
                             source: 'data',
                             autoSkip: true,
-                            maxRotation: 70,
+                            maxRotation: 65,
                             minRotation: 15
                         }
                     },
                     y: {
+                        title: {
+                            display: true,
+                            text: metric,
+                            font: {
+                                size: 14
+                            },
+                            padding: 20
+                        },
                         beginAtZero: true
                     }
                 },

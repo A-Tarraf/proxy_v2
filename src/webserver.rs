@@ -927,10 +927,16 @@ impl Web {
     fn handle_ftio_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
             if let Some(metricid) = req.get_param("metricid") {
+                let derivate: String;
+                if let Some(deriv) = req.get_param("derivate") {
+                    derivate = deriv;
+                } else {
+                    derivate = "".to_string();
+                }
                 if let Some(model) = self
                     .factory
                     .trace_store
-                    .get_metric_freq_model(jobid, metricid)
+                    .get_metric_freq_model(jobid, derivate + &metricid)
                 {
                     return WebResponse::Native(Response::json(&model));
                 } else {
@@ -982,6 +988,12 @@ impl Web {
 
         if let Some(jobid) = req.get_param("jobid") {
             if let Some(metricid) = req.get_param("metricid") {
+                let derivate: String;
+                if let Some(deriv) = req.get_param("derivate") {
+                    derivate = deriv;
+                } else {
+                    derivate = "".to_string();
+                }
                 if let Some(args_str) = req.get_param("args") {
                     let modified_args =
                         match serde_json::from_str::<crate::ftio::FtioArguments>(&args_str) {
@@ -994,23 +1006,13 @@ impl Web {
                         Err(_) => return badreq("Could not export trace data"),
                     };
 
-                    let values = match export.metrics.get(&metricid) {
+                    let values = match export.metrics.get(&(derivate.clone() + &metricid)) {
                         Some(v) => v,
-                        None => return badreq(&format!("Metric '{}' not found", metricid)),
-                    };
-
-                    let json_values = match serde_json::to_value(values) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return badreq(&format!(
-                                "Error serializing metric '{}': {}",
-                                metricid, e
-                            ))
-                        }
+                        None => return badreq(&format!("Metric '{}' not found", &(derivate + &metricid))),
                     };
 
                     let mut single_metric = HashMap::new();
-                    single_metric.insert(metricid.to_string(), json_values);
+                    single_metric.insert(derivate.clone() + &metricid, values.clone());
 
                     let ftio_result = match self
                         .factory
@@ -1052,25 +1054,21 @@ impl Web {
                     WebResponse::BadReq("FTIO port not set".to_string())
                 }
             }
-            "POST" | "PUT" => {
-                match rouille::input::json_input::<serde_json::Value>(req) {
-                    Ok(body) => {
-                        if let Some(port_str) = body.get("port").and_then(|v| v.as_str()) {
-                            match self.factory.ftio_client.send_new_address(port_str) {
-                                Ok(_) => {
-                                    WebResponse::Success("FTIO port updated".to_string())
-                                }
-                                Err(e) => {
-                                    WebResponse::BadReq(format!("Failed to set FTIO port: {}", e))
-                                }
+            "POST" | "PUT" => match rouille::input::json_input::<serde_json::Value>(req) {
+                Ok(body) => {
+                    if let Some(port_str) = body.get("port").and_then(|v| v.as_str()) {
+                        match self.factory.ftio_client.send_new_address(port_str) {
+                            Ok(_) => WebResponse::Success("FTIO port updated".to_string()),
+                            Err(e) => {
+                                WebResponse::BadReq(format!("Failed to set FTIO port: {}", e))
                             }
-                        } else {
-                            WebResponse::BadReq("No 'port' field in JSON".to_string())
                         }
+                    } else {
+                        WebResponse::BadReq("No 'port' field in JSON".to_string())
                     }
-                    Err(e) => WebResponse::BadReq(format!("Invalid JSON body: {}", e)),
                 }
-            }
+                Err(e) => WebResponse::BadReq(format!("Invalid JSON body: {}", e)),
+            },
             _ => WebResponse::BadReq("Unsupported method".to_string()),
         }
     }

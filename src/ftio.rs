@@ -176,6 +176,20 @@ impl FtioArguments {
     }
 }
 
+#[derive(Serialize)]
+struct Payload {
+    argv: Vec<String>,
+    metrics: TraceExport,
+    disable_parallel: bool,
+}
+
+#[derive(Serialize)]
+struct ModifiedPayload {
+    argv: Vec<String>,
+    metrics: HashMap<String, Vec<(f64, f64)>>,
+    disable_parallel: bool,
+}
+
 pub struct FtioClient {
     context: Arc<zmq::Context>,
     address: RwLock<Option<String>>,
@@ -220,7 +234,7 @@ impl FtioClient {
     pub fn send_receive_modified(
         &self,
         args: FtioArguments,
-        metrics: HashMap<String, serde_json::Value>,
+        metrics: HashMap<String, Vec<(f64, f64)>>,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
         socket.set_rcvtimeo(1000)?;
@@ -235,14 +249,13 @@ impl FtioClient {
             )));
         }
 
-        let payload = serde_json::json!({
-            "argv": args.to_args(),
-            "metrics": { "metrics": metrics },
-            "disable_parallel": true
-        });
+        let payload = ModifiedPayload {
+            argv: args.to_args(),
+            metrics,
+            disable_parallel: true,
+        };
 
-        let mut buf = Vec::new();
-        rmp_serde::encode::write(&mut buf, &payload)?;
+        let buf = rmp_serde::to_vec_named(&payload)?;
 
         //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
@@ -266,14 +279,13 @@ impl FtioClient {
         }
 
         let args = self.get_arguments();
-        let payload = serde_json::json!({
-            "argv": args.to_args(),
-            "metrics": export,
-            "disable_parallel": false
-        });
+        let payload = Payload {
+            argv: args.to_args(),
+            metrics: export,
+            disable_parallel: false,
+        };
 
-        let mut buf = Vec::new();
-        rmp_serde::encode::write(&mut buf, &payload)?;
+        let buf = rmp_serde::to_vec_named(&payload)?;
 
         //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
