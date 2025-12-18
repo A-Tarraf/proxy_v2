@@ -1,9 +1,5 @@
 <main>
     <h2>Settings:</h2>
-    <div id="ftio-enabled" class="ftio-params">
-        <label for="ftioEnabled">Enable FTIO:</label>
-        <input type="checkbox" id="ftioEnabled" name="ftioEnabled">
-    </div>
     <div id="ftio-port" class="ftio-params">
         <label for="ftioPort">FTIO Port: tcp://127.0.0.1:</label>
         <input type="number" id="ftioPort" name="ftioPort" min="1024" max="65535">
@@ -54,13 +50,13 @@
                     data.forEach(log => {
                         const logEntry = document.createElement('div');
                         logEntry.textContent = log;
-                        logEntry.style.marginBottom = '0px';
+                        logEntry.style.marginTop = '0px';
                         if (log.includes('FTIO ZMQ') || log.includes('Received')) {
+                            logEntry.style.marginTop = '7px';
                             logEntry.style.color = '#2cd16b';
                         } else if (log.includes('Processing')) {
                             logEntry.style.color = '#227ab5';
-                            logEntry.style.marginBottom = '7px';
-                        } else if (log.includes('Parsing time')) {
+                        } else if (log.includes('Parsing time') || log.includes('Calculation time')) {
                             logEntry.style.color = '#2cbed1';
                         } else if (log.includes('Warning') || log.includes('Failed')) {
                             logEntry.style.color = '#b5243a';

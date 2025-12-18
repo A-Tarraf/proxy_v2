@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::trace::TraceExport;
+use crate::trace::{Trace, TraceExport};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -179,15 +179,19 @@ impl FtioArguments {
 #[derive(Serialize)]
 struct Payload {
     argv: Vec<String>,
-    metrics: TraceExport,
-    disable_parallel: bool,
+    metrics: TraceExport
 }
 
 #[derive(Serialize)]
 struct ModifiedPayload {
     argv: Vec<String>,
+    metrics: TraceExportClone
+}
+
+#[derive(Serialize)]
+struct TraceExportClone {
+    infos: bool,
     metrics: HashMap<String, Vec<(f64, f64)>>,
-    disable_parallel: bool,
 }
 
 pub struct FtioClient {
@@ -234,7 +238,7 @@ impl FtioClient {
     pub fn send_receive_modified(
         &self,
         args: FtioArguments,
-        metrics: HashMap<String, Vec<(f64, f64)>>,
+        metric: HashMap<String, Vec<(f64, f64)>>,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
         socket.set_rcvtimeo(1000)?;
@@ -248,11 +252,15 @@ impl FtioClient {
                 "FTIO client address not set",
             )));
         }
+        let metrics = TraceExportClone {
+            infos: false,
+            metrics: metric,
+        };
+        
 
         let payload = ModifiedPayload {
             argv: args.to_args(),
-            metrics,
-            disable_parallel: true,
+            metrics
         };
 
         let buf = rmp_serde::to_vec_named(&payload)?;
@@ -281,8 +289,7 @@ impl FtioClient {
         let args = self.get_arguments();
         let payload = Payload {
             argv: args.to_args(),
-            metrics: export,
-            disable_parallel: false,
+            metrics: export
         };
 
         let buf = rmp_serde::to_vec_named(&payload)?;

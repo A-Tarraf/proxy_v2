@@ -29,6 +29,8 @@
         <h2>FTIO</h2>
         <form id="ftioSelect">
             <label for="ftiobox">Predict phases with FTIO:</label>
+            <span class="info-symbol"
+                title="Display the dominant frequencies calculated by Ftio. Signal labels: 'Amplitude * Cos(2*PI * Frequency * Time + Phi) (Confidence %)'">&#x1F6C8</span>
             <input type="checkbox" id="ftiobox" name="ftiobox">
             <br><br>
 
@@ -42,11 +44,15 @@
                 <br>
 
                 <label for="ftioReconstruct">Reconstruct signal:</label>
+                <span class="info-symbol"
+                title="Reconstruct the original signal based on the extracted frequencies.">&#x1F6C8</span>
                 <input type="checkbox" id="ftioReconstruct" name="ftioReconstruct">
 
                 <br>
 
                 <label for="ftiocustombox">Modify FTIO parameters:</label>
+                <span class="info-symbol"
+                title="Temporarily modify parameters sent to Ftio for a single metric.">&#x1F6C8</span>
                 <input type="checkbox" id="ftiocustombox" name="ftiocustombox">
             </div>
             <br><br>
@@ -240,7 +246,7 @@
                         delete xScale.ticks.callback;
                     }
 
-                    xScale.title.text = relativeTime ? 'Time since start' : 'Absolute Time';
+                    xScale.title.text = relativeTime ? 'Time Since Trace Start' : 'Absolute System Time';
                     
                     const points = data.map(v => ({ x: v[0] * 1000, y: v[1] }));
                     chart.data.datasets[0].data = points;
