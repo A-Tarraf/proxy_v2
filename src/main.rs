@@ -2,6 +2,7 @@ use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
 mod proxy_common;
@@ -31,6 +32,7 @@ extern crate clap;
 
 use clap::Parser;
 
+use crate::exporter::{ExperimentInstrumentation, Instrumentation, NoInstrumentation};
 #[cfg(feature = "admire")]
 use crate::icc::IccInterface;
 
@@ -77,6 +79,10 @@ struct Args {
     /// Number of branches for the hierarchical aggregation
     #[arg(short, long, default_value_t = 2)]
     branches: u64,
+
+    /// Enable experimental instrumentation (latency measurements, end-to-end measurements, etc.)
+    #[arg(long, default_value_t = false)]
+    experiment: bool,
 }
 
 fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
@@ -126,6 +132,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_trace_size / (1024.0 * 1024.0)
     );
 
+    let instrumentation: Arc<dyn Instrumentation> =
+    if args.experiment {
+        Arc::new(ExperimentInstrumentation {
+            aggregations: Mutex::new(Vec::new()),
+            endtoend: Mutex::new(Vec::new()),
+        })
+    } else {
+        Arc::new(NoInstrumentation)
+    };
+
     // The central storage is the exporter
     let factory = ExporterFactory::new(
         profile_prefix,
@@ -133,6 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_trace_size as usize,
         args.sampling_period,
         args.branches,
+        instrumentation.clone()
     )?;
 
     if let Some(urls) = args.sub_proxies {

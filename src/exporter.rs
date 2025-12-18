@@ -401,6 +401,7 @@ pub(crate) struct ExporterFactory {
     pub web_url: Arc<RwLock<Option<String>>>,
     pub period: Arc<RwLock<u64>>,
     pub branches: u64,
+    pub instrumentation: Arc<dyn Instrumentation>,
 }
 
 impl ExporterFactory {
@@ -413,7 +414,18 @@ impl ExporterFactory {
             /* Scrape all the candidates */
             if let Ok(scrapes) = self.scrapes.lock().as_mut() {
                 for (k, v) in scrapes.iter_mut() {
-                    if let Err(e) = v.scrape() {
+                    let start = std::time::Instant::now();
+                    let res = v.scrape();
+                    let duration = start.elapsed();
+                    if v.get_url_if_proxy().is_some() && duration > Duration::from_millis(1) {
+                        self.instrumentation
+                            .event(InstrumentationEvent::AggregateEnd {
+                                proxy: k.to_string(),
+                                duration,
+                            });
+                    }
+
+                    if let Err(e) = res {
                         if let Some(target_url) = v.get_url_if_proxy() {
                             log::error!(
                                 "Failed to scrape proxy {} : {}! Notifying the root server.",
@@ -656,6 +668,7 @@ impl ExporterFactory {
         max_trace_size: usize,
         period: u64,
         branches: u64,
+        instrumentation: Arc<dyn Instrumentation>,
     ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
         let main_jobdesc = JobDesc {
             jobid: "main".to_string(),
@@ -747,6 +760,7 @@ impl ExporterFactory {
             web_url: Arc::new(RwLock::new(None)),
             period: Arc::new(RwLock::new(period)),
             branches,
+            instrumentation,
         });
 
         let scrape_ref = ret.clone();
@@ -819,7 +833,8 @@ impl ExporterFactory {
         exporter: Arc<TraceView>,
         jobid: &String,
     ) -> Result<(), Box<dyn Error>> {
-        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid, self.ftio_client.clone()) {
+        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid, self.ftio_client.clone())
+        {
             self.pending_scrapes
                 .lock()
                 .unwrap()
@@ -1089,5 +1104,40 @@ impl ExporterFactory {
         perjob.exporter.delete_alarm(alarm_name)?;
 
         Ok(())
+    }
+}
+
+pub trait Instrumentation: Send + Sync {
+    fn event(&self, event: InstrumentationEvent);
+}
+pub enum InstrumentationEvent {
+    AggregateEnd { proxy: String, duration: Duration },
+    MetricEndToEnd { leaf: String, duration: Duration },
+}
+
+pub struct NoInstrumentation;
+impl Instrumentation for NoInstrumentation {
+    #[inline(always)]
+    fn event(&self, _event: InstrumentationEvent) {
+        // No-op
+    }
+}
+pub struct ExperimentInstrumentation {
+    pub aggregations: Mutex<Vec<(String, Duration)>>,
+    pub endtoend: Mutex<Vec<Duration>>,
+}
+
+impl Instrumentation for ExperimentInstrumentation {
+    fn event(&self, event: InstrumentationEvent) {
+        match event {
+            InstrumentationEvent::AggregateEnd { proxy, duration } => {
+                println!("AggregateEnd duration: {:?} for proxy: {:?}", duration, proxy);
+                self.aggregations.lock().unwrap().push((proxy, duration));
+            }
+            InstrumentationEvent::MetricEndToEnd { duration, .. } => {
+                self.endtoend.lock().unwrap().push(duration);
+            }
+            _ => {}
+        }
     }
 }
