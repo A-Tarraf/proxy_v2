@@ -218,7 +218,7 @@
                     chart.data.datasets[0].label = metric;
                     chart.options.scales.y.title.text = metric;
 
-
+                    // Calculate time format
                     if (relativeTime){
                         xScale.ticks.callback = (value) => {
                             // after hour passed, zoom in removes hour display which causes it to show only minutes which is not accurate even if it should be 1 hour and 59 minutes
@@ -246,7 +246,7 @@
                         delete xScale.ticks.callback;
                     }
 
-                    xScale.title.text = relativeTime ? 'Time Since Trace Start' : 'Absolute System Time';
+                    xScale.title.text = relativeTime ? 'Time' : 'System Time';
                     
                     const points = data.map(v => ({ x: v[0] * 1000, y: v[1] }));
                     chart.data.datasets[0].data = points;

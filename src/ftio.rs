@@ -179,13 +179,15 @@ impl FtioArguments {
 #[derive(Serialize)]
 struct Payload {
     argv: Vec<String>,
-    metrics: TraceExport
+    metrics: TraceExport,
+    disable_parallel: bool,
 }
 
 #[derive(Serialize)]
 struct ModifiedPayload {
     argv: Vec<String>,
-    metrics: TraceExportClone
+    metrics: TraceExportClone,
+    disable_parallel: bool,
 }
 
 #[derive(Serialize)]
@@ -235,14 +237,15 @@ impl FtioClient {
         *address = Some(addr.to_string());
     }
 
+    // Send one metric with custom arguments to the FTIO server and receive the response
     pub fn send_receive_modified(
         &self,
         args: FtioArguments,
         metric: HashMap<String, Vec<(f64, f64)>>,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(1000)?;
-        socket.set_sndtimeo(1000)?;
+        socket.set_rcvtimeo(3000)?;
+        socket.set_sndtimeo(3000)?;
         let address = self.address.read().unwrap();
         if let Some(addr) = address.as_ref() {
             socket.connect(addr)?;
@@ -254,28 +257,29 @@ impl FtioClient {
         }
         let metrics = TraceExportClone {
             infos: false,
-            metrics: metric,
+            metrics: metric
         };
         
 
         let payload = ModifiedPayload {
             argv: args.to_args(),
-            metrics
+            metrics,
+            disable_parallel: true,
         };
 
         let buf = rmp_serde::to_vec_named(&payload)?;
 
-        //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;
         Ok(reply)
     }
 
+    // Send metrics and arguments to the FTIO server and receive the response
     pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(1000)?;
-        socket.set_sndtimeo(1000)?;
+        socket.set_rcvtimeo(7000)?;
+        socket.set_sndtimeo(7000)?;
         let address = self.address.read().unwrap();
         if let Some(addr) = address.as_ref() {
             socket.connect(addr)?;
@@ -289,12 +293,12 @@ impl FtioClient {
         let args = self.get_arguments();
         let payload = Payload {
             argv: args.to_args(),
-            metrics: export
+            metrics: export,
+            disable_parallel: false,
         };
 
         let buf = rmp_serde::to_vec_named(&payload)?;
 
-        //println!("Sending {} bytes to FTIO server", buf.len());
         socket.send(buf, 0)?;
 
         let reply = socket.recv_bytes(0)?;

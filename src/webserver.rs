@@ -541,6 +541,94 @@ impl Web {
         WebResponse::Success(format!("Added the following nodes for scraping: {}", to))
     }
 
+    // recursive function to add a node to the subtree for binomial topology
+    fn add_node_to_subtree(
+        &self,
+        clients: &mut Vec<ClientPivot>,
+        order: u32,
+        client_url: String,
+    ) -> Option<String> {
+        if order == 0 {
+            return Some(client_url);
+        }
+
+        let children: Vec<String> = {
+            let client = clients.iter_mut().find(|c| c.url == client_url).unwrap();
+            client.child.clone()
+        };
+
+        let mut subtrees: Vec<(String, u32)> = Vec::new();
+
+        for child_url in &children {
+            if let Some(child_client) = clients.iter().find(|c| &c.url == child_url) {
+                let subtree_size = self.get_subtree_size(clients, child_client);
+                subtrees.push((child_url.clone(), subtree_size as u32));
+            }
+        }
+
+        let mut found = String::new();
+
+        for i in 0..order {
+            if !found.is_empty() {
+                subtrees.retain(|(u, _)| u != &found);
+            }
+            found.clear();
+
+            for (subtree_url, subtree_size) in &subtrees {
+                if *subtree_size == 2u32.pow(i) {
+                    found = subtree_url.clone();
+                    break;
+                }
+            }
+
+            if !found.is_empty() {
+                continue;
+            }
+
+            for (subtree_url, subtree_size) in &subtrees {
+                if *subtree_size < 2u32.pow(i) {
+                    return self.add_node_to_subtree(clients, i, subtree_url.clone());
+                }
+            }
+        }
+
+        Some(client_url)
+    }
+
+    // recursive function to get size of the subtree
+    fn get_subtree_size(&self, clients: &Vec<ClientPivot>, client: &ClientPivot) -> u64 {
+        let mut size = 1;
+
+        for child_url in &client.child {
+            if let Some(child_client) = clients.iter().find(|c| &c.url == child_url) {
+                size += self.get_subtree_size(clients, child_client);
+            }
+        }
+
+        size
+    }
+
+    // Find the target node to connect to based on the topology
+    fn get_target_node(
+        &self,
+        clients: &mut Vec<ClientPivot>,
+        max_branches: u64,
+    ) -> String {
+        if max_branches == 0 {
+            let (root_refcount, root_url) = {
+                let root = clients.iter_mut().find(|v| v.url == self.url()).unwrap();
+
+                (root.refcount, root.url.clone())
+            };
+            let target_url = self.add_node_to_subtree(clients, root_refcount, root_url.clone());
+            return target_url.unwrap();
+        } else {
+            return clients
+                .iter_mut()
+                .min_by_key(|v| v.get_depth_if_not_full(max_branches)).unwrap().url.clone();
+        }
+    }
+
     fn handle_pivot(&self, req: &Request) -> WebResponse {
         let from = req.get_param("from");
 
@@ -556,13 +644,14 @@ impl Web {
             );
         }
 
+        let max_branches = self.factory.branches;
+
         let mut clients = self.known_client.lock().unwrap();
 
         // Find the target parent node
 
-        let target = clients
-            .iter_mut()
-            .min_by_key(|v| v.get_depth_if_not_full(self.factory.branches));
+        let target_url = self.get_target_node(&mut clients, max_branches);
+        let target = clients.iter_mut().find(|v| v.url == target_url);
 
         /* let mut target = clients.iter_mut().find(|v| v.is_partial());
 
@@ -577,14 +666,6 @@ impl Web {
             target.mapto(from.to_string());
 
             depth = target.depth + 1;
-
-            log::info!(
-                "Pivot response to {} is {} with ref {} and depth {}",
-                from,
-                target.url,
-                target.refcount,
-                target.depth
-            );
 
             resp = WebResponse::Success(target.url.to_string());
         } else {
@@ -640,11 +721,6 @@ impl Web {
             );
         }
 
-        println!(
-            "Handling remove request from {} for target {}",
-            from_url, target_url
-        );
-
         let mut clients = self.known_client.lock().unwrap();
 
         if let Some(from_client) = clients.iter().position(|v| v.url == from_url) {
@@ -656,21 +732,6 @@ impl Web {
             // Check if the unresponsive node had children to reassign, if not we don't need to change any more connections
             if let Some(target_client) = clients.iter().position(|v| v.url == target_url) {
                 if clients[target_client].refcount != 0 {
-                    println!(
-                        "Client {} has {} children to reassign",
-                        target_url, clients[target_client].refcount
-                    );
-
-                    println!(
-                        "Current clients: {:?}",
-                        clients
-                            .iter()
-                            .map(|v| format!(
-                                "{} (refcount {}, depth {}, children {:?})",
-                                v.url, v.refcount, v.depth, v.child
-                            ))
-                            .collect::<Vec<String>>()
-                    );
 
                     // Find a replacement client, should be a client without children
                     let replacement_client = clients
@@ -682,17 +743,8 @@ impl Web {
                     if let Some(replacement_client) = replacement_client {
                         replacement_url = clients[replacement_client].url.clone();
 
-                        println!(
-                            "Found replacement client {} for failed node {}",
-                            replacement_url, target_url
-                        );
-
                         // If the found replacement is not the child of the failed node, we need to disconnect it from its parent
                         if !clients[target_client].child.contains(&replacement_url) {
-                            println!(
-                                "Replacement client {} is not a child of the failed node {}, disconnecting from its parent",
-                                replacement_url, target_url
-                            );
                             if let Some(parent_client) = clients
                                 .iter()
                                 .position(|v| v.child.contains(&replacement_url))
@@ -715,11 +767,6 @@ impl Web {
                         // Connect the replacement to the children of the failed node
                         let mut children: Vec<String> = clients[target_client].child.clone();
                         children.retain(|x| x != &replacement_url);
-
-                        println!(
-                            "Reassigning children {:?} from failed node {} to replacement node {}",
-                            children, target_url, replacement_url
-                        );
 
                         for child in children.iter().cloned() {
                             clients[replacement_client].mapto(child);
@@ -752,9 +799,12 @@ impl Web {
 
             // Get period of the replacement node
             let request_url = format!("http://{}/period", replacement_url);
+            if replacement_url.is_empty() {
+                return WebResponse::Success("Unresponsive node removed!".to_string());
+            }else {
             let resp = ApiResponse::query(&request_url);
-
             return WebResponse::Success(replacement_url + "&" + &resp.unwrap().operation);
+            }
         } else {
             return WebResponse::BadReq(format!("No such from client {}", from_url));
         }
@@ -781,7 +831,9 @@ impl Web {
 
     // Get period of the Exporter Factory
     fn handle_period(&self, _req: &Request) -> WebResponse {
+        println!("Handling period request");
         let period = self.factory.period.read().unwrap();
+        println!("Period is {}", *period);
         WebResponse::Success(period.to_string())
     }
 
@@ -1008,7 +1060,12 @@ impl Web {
 
                     let values = match export.metrics.get(&(derivate.clone() + &metricid)) {
                         Some(v) => v,
-                        None => return badreq(&format!("Metric '{}' not found", &(derivate + &metricid))),
+                        None => {
+                            return badreq(&format!(
+                                "Metric '{}' not found",
+                                &(derivate + &metricid)
+                            ))
+                        }
                     };
 
                     let mut single_metric = HashMap::new();

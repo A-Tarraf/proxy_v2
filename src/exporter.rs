@@ -417,7 +417,7 @@ impl ExporterFactory {
                     let start = std::time::Instant::now();
                     let res = v.scrape();
                     let duration = start.elapsed();
-                    if v.get_url_if_proxy().is_some() && duration > Duration::from_millis(1) {
+                    if duration > Duration::from_millis(1) && v.get_url_if_proxy().is_some() {
                         self.instrumentation
                             .event(InstrumentationEvent::AggregateEnd {
                                 proxy: k.to_string(),
@@ -589,6 +589,13 @@ impl ExporterFactory {
         })?;
 
         if resp.success {
+            if resp.operation == "Unresponsive node removed!".to_string() {
+                log::info!(
+                    "Notified root server about failed proxy {}",
+                    target_address
+                );
+                return Ok(());
+            }
             let response: Vec<&str> = resp.operation.split('&').collect();
 
             let target_url = "http://".to_string()
@@ -1109,6 +1116,7 @@ impl ExporterFactory {
 
 pub trait Instrumentation: Send + Sync {
     fn event(&self, event: InstrumentationEvent);
+    fn set_proxy_name(&self, _name: &str);
 }
 pub enum InstrumentationEvent {
     AggregateEnd { proxy: String, duration: Duration },
@@ -1121,23 +1129,88 @@ impl Instrumentation for NoInstrumentation {
     fn event(&self, _event: InstrumentationEvent) {
         // No-op
     }
+    #[inline(always)]
+    fn set_proxy_name(&self, _name: &str) {
+        // No-op
+    }
+}
+impl ExperimentInstrumentation {
+    pub fn new(duration: u64) -> Self {
+        ExperimentInstrumentation {
+            aggregations: Mutex::new(Vec::new()),
+            end_to_end: Mutex::new(Vec::new()),
+            proxy_name: Mutex::new(None),
+            start_time: std::time::Instant::now(),
+            finished: Mutex::new(false),
+            duration,
+        }
+    }
 }
 pub struct ExperimentInstrumentation {
-    pub aggregations: Mutex<Vec<(String, Duration)>>,
-    pub endtoend: Mutex<Vec<Duration>>,
+    pub aggregations: Mutex<Vec<(String, u64, Vec<Duration>)>>,
+    pub end_to_end: Mutex<Vec<Duration>>,
+    pub proxy_name: Mutex<Option<String>>,
+    pub start_time: std::time::Instant,
+    pub finished: Mutex<bool>,
+    pub duration: u64,
 }
-
 impl Instrumentation for ExperimentInstrumentation {
     fn event(&self, event: InstrumentationEvent) {
         match event {
             InstrumentationEvent::AggregateEnd { proxy, duration } => {
-                println!("AggregateEnd duration: {:?} for proxy: {:?}", duration, proxy);
-                self.aggregations.lock().unwrap().push((proxy, duration));
+                if self.finished.lock().unwrap().to_owned() {
+                    return;
+                }
+
+                if self.start_time.elapsed() > Duration::from_secs(self.duration) {
+                    let mut total_duration = Duration::from_secs(0);
+                    for proxy_scrapes in self.aggregations.lock().unwrap().iter() {
+                        total_duration += proxy_scrapes.2.iter().sum::<Duration>();
+                    }
+                    println!(
+                        "Proxy: {:?} spent a total time of {:?} aggregating over {:?}",
+                        self.proxy_name
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap_or(&"Unknown".to_string()),
+                        total_duration,
+                        self.start_time.elapsed()
+                    );
+                    println!("Per-proxy aggregation times:");
+                    for proxy_scrapes in self.aggregations.lock().unwrap().iter() {
+                        let sum: Duration = proxy_scrapes.2.iter().sum();
+                        let avg: Duration = sum / (proxy_scrapes.1 as u32);
+                        println!(
+                            "  Proxy: {} - Count: {} - Total: {:?} - Avg: {:?}",
+                            proxy_scrapes.0, proxy_scrapes.1, sum, avg
+                        );
+                    }
+                    let mut guard = self.finished.lock().unwrap();
+                    *guard = true;
+                    return;
+                }
+
+                for proxy_scrapes in self.aggregations.lock().unwrap().iter_mut() {
+                    if proxy_scrapes.0 == proxy {
+                        proxy_scrapes.1 += 1;
+                        proxy_scrapes.2.push(duration);
+                        return;
+                    }
+                }
+                self.aggregations
+                    .lock()
+                    .unwrap()
+                    .push((proxy, 1, vec![duration]));
             }
             InstrumentationEvent::MetricEndToEnd { duration, .. } => {
-                self.endtoend.lock().unwrap().push(duration);
+                self.end_to_end.lock().unwrap().push(duration);
             }
             _ => {}
         }
+    }
+    fn set_proxy_name(&self, name: &str) {
+        let mut guard = self.proxy_name.lock().unwrap();
+        *guard = Some(name.to_string());
     }
 }

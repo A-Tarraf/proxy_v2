@@ -76,13 +76,13 @@ struct Args {
     #[arg(short = 'S', long, default_value_t = 1000)]
     sampling_period: u64,
 
-    /// Number of branches for the hierarchical aggregation
+    /// Number of branches for the hierarchical aggregation, 0 = binomial tree, > 0 = k-ary tree
     #[arg(short, long, default_value_t = 2)]
     branches: u64,
 
-    /// Enable experimental instrumentation (latency measurements, end-to-end measurements, etc.)
-    #[arg(long, default_value_t = false)]
-    experiment: bool,
+    /// Duration to run instrumentation in seconds (default 0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    instrumentation: u64,
 }
 
 fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
@@ -133,11 +133,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let instrumentation: Arc<dyn Instrumentation> =
-    if args.experiment {
-        Arc::new(ExperimentInstrumentation {
-            aggregations: Mutex::new(Vec::new()),
-            endtoend: Mutex::new(Vec::new()),
-        })
+    if args.instrumentation > 0 {
+        Arc::new(ExperimentInstrumentation::new(args.instrumentation))
     } else {
         Arc::new(NoInstrumentation)
     };
@@ -178,6 +175,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let web = Web::new(args.port, factory.clone());
 
     let web_url = web.url();
+
+    if args.instrumentation > 0 {
+        instrumentation.set_proxy_name(&web_url);
+    }
 
     // If this proxy is the root (no root_proxy provided), set its own URL
     if args.root_proxy.is_none() {

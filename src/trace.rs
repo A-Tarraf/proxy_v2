@@ -1093,7 +1093,6 @@ impl TraceView {
             }
             return Ok(());
         }
-        log::warn!("FTIO server not responding. Fallback to CLI.");
 
         self.generate_fallback_ftio_model(jobid)?;
         
