@@ -91,3 +91,4 @@ By contributing, you agree that your contributions will be licensed under the sa
 We sincerely thank the following contributors for their valuable contributions:
 - [Jean-Baptiste Bensard](https://github.com/besnardjb)
 - [Ahmad Tarraf](https://github.com/a-tarraf)
+- [Tim Dieringer](https://github.com/Tim-Dieringer): bachelor thesis: topology expansion and ftio integration

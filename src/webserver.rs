@@ -11,9 +11,10 @@ use rouille::{Request, Response};
 use serde::Deserialize;
 use static_files::Resource;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::Path;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::squeue;
 
@@ -27,6 +28,7 @@ struct ClientPivot {
     url: String,
     refcount: u32,
     child: Vec<String>,
+    depth: i32,
 }
 
 impl ClientPivot {
@@ -35,6 +37,7 @@ impl ClientPivot {
             url,
             refcount: 0,
             child: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -43,20 +46,38 @@ impl ClientPivot {
         self.child.push(child_url);
     }
 
-    fn is_partial(&self) -> bool {
-        if (self.refcount < 2) && (1 < self.refcount) {
+    fn removefrom(&mut self, child_url: &String) {
+        self.refcount -= 1;
+        self.child.retain(|x| x != child_url);
+    }
+
+    #[allow(unused)]
+    fn is_partial(&self, max_branches: u64) -> bool {
+        if (self.refcount < max_branches as u32) && (0 < self.refcount) {
+            return true;
+        }
+        false
+    }
+
+    #[allow(unused)]
+    fn is_free(&self, max_branches: u64) -> bool {
+        if self.refcount < max_branches as u32 {
             return true;
         }
 
         false
     }
 
-    fn is_free(&self) -> bool {
-        if self.refcount < 2 {
-            return true;
-        }
+    fn set_depth(&mut self, depth: i32) {
+        self.depth = depth;
+    }
 
-        false
+    fn get_depth_if_not_full(&self, max_branches: u64) -> i32 {
+        if self.refcount < max_branches as u32 {
+            return self.depth;
+        } else {
+            return i32::MAX;
+        }
     }
 }
 
@@ -377,6 +398,20 @@ impl Web {
         WebResponse::BadReq("No job GET parameter passed".to_string())
     }
 
+    fn handle_tracesize(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            match self.factory.trace_store.get_trace_sizes(&jobid) {
+                Some(size) => {
+                    return WebResponse::Native(Response::json(&size));
+                }
+                None => {
+                    return WebResponse::BadReq(format!("No such jobid {}", jobid));
+                }
+            }
+        }
+        WebResponse::BadReq("No job GET parameter passed".to_string())
+    }
+
     fn handle_traceplot(&self, req: &Request) -> WebResponse {
         #[derive(Deserialize)]
         struct Plotdef {
@@ -463,6 +498,137 @@ impl Web {
         WebResponse::Success(format!("Added {} for scraping", to))
     }
 
+    fn handle_join_multiple(&self, req: &Request) -> WebResponse {
+        let to = req.get_param("to");
+
+        if to.is_none() {
+            return WebResponse::BadReq("No to parameter passed".to_string());
+        }
+
+        let to = to.unwrap();
+
+        if to.contains("http") {
+            return WebResponse::BadReq(
+                "To should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        // Split multiple targets by &
+        let targets: Vec<&str> = to.split('&').collect();
+
+        // Split periods by & if provided
+        let periods: Vec<u64> = match req.get_param("period") {
+            Some(p) => p
+                .split('&')
+                .map(|s| s.parse::<u64>().unwrap_or(1000))
+                .collect(),
+            None => vec![1000; targets.len()],
+        };
+
+        for (i, target) in targets.iter().enumerate() {
+            let period = if i < periods.len() { periods[i] } else { 1000 };
+
+            if let Err(e) =
+                ExporterFactory::add_scrape(self.factory.clone(), &target.to_string(), period)
+            {
+                return WebResponse::BadReq(format!(
+                    "Failed to add {} for scraping : {}",
+                    target, e
+                ));
+            }
+        }
+
+        WebResponse::Success(format!("Added the following nodes for scraping: {}", to))
+    }
+
+    // recursive function to add a node to the subtree for binomial topology
+    fn add_node_to_subtree(
+        &self,
+        clients: &mut Vec<ClientPivot>,
+        order: u32,
+        client_url: String,
+    ) -> Option<String> {
+        if order == 0 {
+            return Some(client_url);
+        }
+
+        let children: Vec<String> = {
+            let client = clients.iter_mut().find(|c| c.url == client_url).unwrap();
+            client.child.clone()
+        };
+
+        let mut subtrees: Vec<(String, u32)> = Vec::new();
+
+        for child_url in &children {
+            if let Some(child_client) = clients.iter().find(|c| &c.url == child_url) {
+                let subtree_size = self.get_subtree_size(clients, child_client);
+                subtrees.push((child_url.clone(), subtree_size as u32));
+            }
+        }
+
+        let mut found = String::new();
+
+        for i in 0..order {
+            if !found.is_empty() {
+                subtrees.retain(|(u, _)| u != &found);
+            }
+            found.clear();
+
+            for (subtree_url, subtree_size) in &subtrees {
+                if *subtree_size == 2u32.pow(i) {
+                    found = subtree_url.clone();
+                    break;
+                }
+            }
+
+            if !found.is_empty() {
+                continue;
+            }
+
+            for (subtree_url, subtree_size) in &subtrees {
+                if *subtree_size < 2u32.pow(i) {
+                    return self.add_node_to_subtree(clients, i, subtree_url.clone());
+                }
+            }
+        }
+
+        Some(client_url)
+    }
+
+    // recursive function to get size of the subtree
+    fn get_subtree_size(&self, clients: &Vec<ClientPivot>, client: &ClientPivot) -> u64 {
+        let mut size = 1;
+
+        for child_url in &client.child {
+            if let Some(child_client) = clients.iter().find(|c| &c.url == child_url) {
+                size += self.get_subtree_size(clients, child_client);
+            }
+        }
+
+        size
+    }
+
+    // Find the target node to connect to based on the topology
+    fn get_target_node(
+        &self,
+        clients: &mut Vec<ClientPivot>,
+        max_branches: u64,
+    ) -> String {
+        if max_branches == 0 {
+            let (root_refcount, root_url) = {
+                let root = clients.iter_mut().find(|v| v.url == self.url()).unwrap();
+
+                (root.refcount, root.url.clone())
+            };
+            let target_url = self.add_node_to_subtree(clients, root_refcount, root_url.clone());
+            return target_url.unwrap();
+        } else {
+            return clients
+                .iter_mut()
+                .min_by_key(|v| v.get_depth_if_not_full(max_branches)).unwrap().url.clone();
+        }
+    }
+
     fn handle_pivot(&self, req: &Request) -> WebResponse {
         let from = req.get_param("from");
 
@@ -478,32 +644,38 @@ impl Web {
             );
         }
 
+        let max_branches = self.factory.branches;
+
         let mut clients = self.known_client.lock().unwrap();
 
-        let mut target = clients.iter_mut().find(|v| v.is_partial());
+        // Find the target parent node
+
+        let target_url = self.get_target_node(&mut clients, max_branches);
+        let target = clients.iter_mut().find(|v| v.url == target_url);
+
+        /* let mut target = clients.iter_mut().find(|v| v.is_partial());
 
         if target.is_none() {
             target = clients.iter_mut().find(|v| v.is_free());
-        }
+        } */
 
         let resp: WebResponse;
+        let mut depth = -1;
 
         if let Some(target) = target {
             target.mapto(from.to_string());
 
-            log::info!(
-                "Pivot response to {} is {} with ref {}",
-                from,
-                target.url,
-                target.refcount
-            );
+            depth = target.depth + 1;
 
             resp = WebResponse::Success(target.url.to_string());
         } else {
             resp = WebResponse::BadReq("Did not match any server".to_string());
         }
 
-        clients.push(ClientPivot::new(from));
+        let mut new_client = ClientPivot::new(from);
+        new_client.set_depth(depth);
+
+        clients.push(new_client);
 
         resp
     }
@@ -522,6 +694,147 @@ impl Web {
         }
 
         WebResponse::Native(Response::json(&resp))
+    }
+
+    fn handle_remove(&self, req: &Request) -> WebResponse {
+        let from_url = req.get_param("from");
+        if from_url.is_none() {
+            return WebResponse::BadReq("No from parameter passed".to_string());
+        }
+
+        let from_url: String = from_url.unwrap().clone();
+        if from_url.contains("http") {
+            return WebResponse::BadReq(
+                "From should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        let target_url = req.get_param("target");
+        if target_url.is_none() {
+            return WebResponse::BadReq("No target parameter passed".to_string());
+        }
+
+        let target_url: String = target_url.unwrap().clone();
+        if target_url.contains("http") {
+            return WebResponse::BadReq(
+                "Target should not be an URL (with http://) but host:port".to_string(),
+            );
+        }
+
+        let mut clients = self.known_client.lock().unwrap();
+
+        if let Some(from_client) = clients.iter().position(|v| v.url == from_url) {
+            // Remove the failed node from the notifying client
+            clients[from_client].removefrom(&target_url);
+
+            let mut replacement_url = String::new();
+
+            // Check if the unresponsive node had children to reassign, if not we don't need to change any more connections
+            if let Some(target_client) = clients.iter().position(|v| v.url == target_url) {
+                if clients[target_client].refcount != 0 {
+
+                    // Find a replacement client, should be a client without children
+                    let replacement_client = clients
+                        .iter()
+                        .enumerate()
+                        .max_by_key(|(_, v)| v.depth)
+                        .map(|(v, _)| v);
+
+                    if let Some(replacement_client) = replacement_client {
+                        replacement_url = clients[replacement_client].url.clone();
+
+                        // If the found replacement is not the child of the failed node, we need to disconnect it from its parent
+                        if !clients[target_client].child.contains(&replacement_url) {
+                            if let Some(parent_client) = clients
+                                .iter()
+                                .position(|v| v.child.contains(&replacement_url))
+                            {
+                                clients[parent_client].removefrom(&replacement_url);
+                                // Notify the parent of the replacement about the disconnection
+                                let request_url = format!(
+                                    "http://{}/disconnect?target={}",
+                                    clients[parent_client].url, replacement_url
+                                );
+                                let _resp = ApiResponse::query(&request_url);
+                            }
+                        }
+
+                        // Connect the notifying client to the replacement (Scrape target send with WebRespone later)
+                        clients[from_client].mapto(replacement_url.clone());
+                        let depth = clients[from_client].depth + 1;
+                        clients[replacement_client].set_depth(depth);
+
+                        // Connect the replacement to the children of the failed node
+                        let mut children: Vec<String> = clients[target_client].child.clone();
+                        children.retain(|x| x != &replacement_url);
+
+                        for child in children.iter().cloned() {
+                            clients[replacement_client].mapto(child);
+                        }
+                        // Notify the replacement about its new children
+                        let children_param = children.join("&");
+                        // Get the sampling periods of the children nodes
+                        let mut periods: Vec<String> = Vec::new();
+                        for child in &children {
+                            let period_url = format!("http://{}/period", child);
+                            let resp = ApiResponse::query(&period_url);
+                            if let Ok(resp) = resp {
+                                periods.push(resp.operation);
+                            } else {
+                                periods.push("1000".to_string());
+                            }
+                        }
+                        let periods_param = periods.join("&");
+
+                        let request_url = format!(
+                            "http://{}/join/multiple?to={}+period={}",
+                            replacement_url, children_param, periods_param
+                        );
+                        let _resp = ApiResponse::query(&request_url);
+                    }
+                }
+            }
+
+            clients.retain(|x| x.url != target_url);
+
+            // Get period of the replacement node
+            let request_url = format!("http://{}/period", replacement_url);
+            if replacement_url.is_empty() {
+                return WebResponse::Success("Unresponsive node removed!".to_string());
+            }else {
+            let resp = ApiResponse::query(&request_url);
+            return WebResponse::Success(replacement_url + "&" + &resp.unwrap().operation);
+            }
+        } else {
+            return WebResponse::BadReq(format!("No such from client {}", from_url));
+        }
+    }
+
+    // Remove the proxy from the scrape list
+    fn handle_disconnect(&self, req: &Request) -> WebResponse {
+        let target_url = req.get_param("target");
+        if target_url.is_none() {
+            return WebResponse::BadReq("No target parameter passed".to_string());
+        }
+
+        let mut target_url: String = target_url.unwrap().clone();
+
+        if !target_url.contains("http") {
+            target_url = format!("http://{}/job", target_url);
+        }
+        if let Err(e) = ExporterFactory::remove_scrape(self.factory.clone(), &target_url) {
+            return WebResponse::BadReq(format!("Failed to remove {}: {}", target_url, e));
+        }
+
+        WebResponse::Success(format!("Removed {} from scraping", target_url))
+    }
+
+    // Get period of the Exporter Factory
+    fn handle_period(&self, _req: &Request) -> WebResponse {
+        println!("Handling period request");
+        let period = self.factory.period.read().unwrap();
+        println!("Period is {}", *period);
+        WebResponse::Success(period.to_string())
     }
 
     fn handle_job(&self, req: &Request) -> WebResponse {
@@ -665,13 +978,156 @@ impl Web {
 
     fn handle_ftio_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
-            if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
-                return WebResponse::Native(Response::json(&model));
-            } else {
-                return WebResponse::BadReq("No such jobid".to_string());
+            if let Some(metricid) = req.get_param("metricid") {
+                let derivate: String;
+                if let Some(deriv) = req.get_param("derivate") {
+                    derivate = deriv;
+                } else {
+                    derivate = "".to_string();
+                }
+                if let Some(model) = self
+                    .factory
+                    .trace_store
+                    .get_metric_freq_model(jobid, derivate + &metricid)
+                {
+                    return WebResponse::Native(Response::json(&model));
+                } else {
+                    return WebResponse::BadReq(
+                        "This jobid or metric does not have a ftio model stored".to_string(),
+                    );
+                }
             }
         }
         WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string())
+
+        /* if let Some(jobid) = req.get_param("jobid") {
+                if let Some(model) = self.factory.trace_store.get_job_freq_model(jobid) {
+                    return WebResponse::Native(Response::json(&model));
+                } else {
+                    return WebResponse::BadReq("No such jobid".to_string());
+                }
+        }
+        WebResponse::BadReq("A GET parameter for a reference jobid must be passed".to_string()) */
+    }
+
+    fn handle_ftio_get_args(&self, req: &Request) -> WebResponse {
+        match req.method() {
+            "GET" => {
+                let args = self.factory.ftio_client.get_arguments();
+                WebResponse::Native(Response::json(&*args))
+            }
+            "POST" | "PUT" => match rouille::input::json_input::<crate::ftio::FtioArguments>(req) {
+                Ok(new_args) => {
+                    let output_store = self.factory.ftio_client.server_logs.clone();
+                    let mut logs = output_store.write().unwrap();
+                    logs.push(format!("FTIO arguments saved: {:?}", new_args));
+                    self.factory.ftio_client.set_arguments(new_args);
+                    WebResponse::Success("FTIO args updated".to_string())
+                }
+                Err(e) => {
+                    let output_store = self.factory.ftio_client.server_logs.clone();
+                    let mut logs = output_store.write().unwrap();
+                    logs.push(format!("Failed to save FTIO arguments: {}", e));
+                    WebResponse::BadReq(format!("Invalid FTIO args JSON: {}", e))
+                }
+            },
+            _ => WebResponse::BadReq("Unsupported method".to_string()),
+        }
+    }
+
+    fn handle_ftio_modified_args(&self, req: &Request) -> WebResponse {
+        let badreq = |msg: &str| WebResponse::BadReq(msg.to_string());
+
+        if let Some(jobid) = req.get_param("jobid") {
+            if let Some(metricid) = req.get_param("metricid") {
+                let derivate: String;
+                if let Some(deriv) = req.get_param("derivate") {
+                    derivate = deriv;
+                } else {
+                    derivate = "".to_string();
+                }
+                if let Some(args_str) = req.get_param("args") {
+                    let modified_args =
+                        match serde_json::from_str::<crate::ftio::FtioArguments>(&args_str) {
+                            Ok(v) => v,
+                            Err(e) => return badreq(&format!("Invalid FTIO args JSON: {}", e)),
+                        };
+
+                    let export = match self.factory.trace_store.export(&jobid) {
+                        Ok(v) => v,
+                        Err(_) => return badreq("Could not export trace data"),
+                    };
+
+                    let values = match export.metrics.get(&(derivate.clone() + &metricid)) {
+                        Some(v) => v,
+                        None => {
+                            return badreq(&format!(
+                                "Metric '{}' not found",
+                                &(derivate + &metricid)
+                            ))
+                        }
+                    };
+
+                    let mut single_metric = HashMap::new();
+                    single_metric.insert(derivate.clone() + &metricid, values.clone());
+
+                    let ftio_result = match self
+                        .factory
+                        .ftio_client
+                        .send_receive_modified(modified_args, single_metric)
+                    {
+                        Ok(data) => data,
+                        Err(e) => return badreq(&format!("FTIO processing error: {}", e)),
+                    };
+
+                    let decoded: Vec<crate::trace::FtioModel> =
+                        match rmp_serde::from_slice(&ftio_result) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return badreq(&format!("Failed to decode FTIO output: {}", e))
+                            }
+                        };
+
+                    return WebResponse::Native(Response::json(&decoded[0]));
+                }
+            }
+        }
+        return WebResponse::BadReq(
+            "A GET parameter for jobid, metricid and args must be passed".to_string(),
+        );
+    }
+
+    fn handle_ftio_logs(&self, _req: &Request) -> WebResponse {
+        let logs = self.factory.ftio_client.get_logs();
+        WebResponse::Native(Response::json(&logs))
+    }
+
+    fn handle_ftio_port(&self, req: &Request) -> WebResponse {
+        match req.method() {
+            "GET" => {
+                if let Some(port) = self.factory.ftio_client.get_port() {
+                    WebResponse::Success(port.to_string())
+                } else {
+                    WebResponse::BadReq("FTIO port not set".to_string())
+                }
+            }
+            "POST" | "PUT" => match rouille::input::json_input::<serde_json::Value>(req) {
+                Ok(body) => {
+                    if let Some(port_str) = body.get("port").and_then(|v| v.as_str()) {
+                        match self.factory.ftio_client.send_new_address(port_str) {
+                            Ok(_) => WebResponse::Success("FTIO port updated".to_string()),
+                            Err(e) => {
+                                WebResponse::BadReq(format!("Failed to set FTIO port: {}", e))
+                            }
+                        }
+                    } else {
+                        WebResponse::BadReq("No 'port' field in JSON".to_string())
+                    }
+                }
+                Err(e) => WebResponse::BadReq(format!("Invalid JSON body: {}", e)),
+            },
+            _ => WebResponse::BadReq("Unsupported method".to_string()),
+        }
     }
 
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
@@ -948,7 +1404,9 @@ impl Web {
                     "read" => self.handle_traceread(request),
                     "plot" => self.handle_traceplot(request),
                     "metrics" => self.handle_tracemetrics(request),
+                    "size" => self.handle_tracesize(request),
                     "json" => self.handle_get_json_trace(request),
+                    "ftio" => self.handle_ftio_get_model(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "profiles" => match resource.as_str() {
@@ -960,10 +1418,16 @@ impl Web {
                     _ => WebResponse::BadReq(url),
                 },
                 "model" => match resource.as_str() {
-                    "ftio" => self.handle_ftio_get_model(request),
                     "download" => self.handle_extrap_get_jsonl(request),
                     "get" => self.handle_extrap_get_model(request),
                     "plot" => self.handle_extrap_plot_model(request),
+                    _ => WebResponse::BadReq(url),
+                },
+                "ftio" => match resource.as_str() {
+                    "args" => self.handle_ftio_get_args(request),
+                    "modified_args" => self.handle_ftio_modified_args(request),
+                    "logs" => self.handle_ftio_logs(request),
+                    "port" => self.handle_ftio_port(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),
@@ -971,8 +1435,12 @@ impl Web {
                 "join" => match resource.as_str() {
                     "" => self.handle_join(request),
                     "list" => self.handle_join_list(request),
+                    "multiple" => self.handle_join_multiple(request),
                     _ => WebResponse::BadReq(url),
                 },
+                "remove" => self.handle_remove(request),
+                "disconnect" => self.handle_disconnect(request),
+                "period" => self.handle_period(request),
                 "alarms" => match resource.as_str() {
                     "" => self.handle_alarms(request),
                     "add" => self.handle_add_alarms(request),

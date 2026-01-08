@@ -25,6 +25,7 @@ use std::io::Write;
 
 mod exporter;
 mod extrap;
+mod ftio;
 mod profiles;
 mod scrapper;
 mod systemmetrics;
@@ -32,7 +33,7 @@ use exporter::ExporterFactory;
 
 use rayon::iter::*;
 
-use crate::{proxy_common::offset_time_serie, trace::TraceView};
+use crate::{exporter::NoInstrumentation, proxy_common::offset_time_serie, trace::TraceView};
 
 #[derive(Parser)]
 struct Cli {
@@ -65,7 +66,7 @@ struct TraceExporter {
 
 impl TraceExporter {
     fn new(path: &Path) -> Result<TraceExporter, ProxyErr> {
-        let factory = ExporterFactory::new(path.to_path_buf(), false, 1024 * 1024 * 32)?;
+        let factory = ExporterFactory::new(path.to_path_buf(), false, 1024 * 1024 * 32, 1000, 2, Arc::new(NoInstrumentation))?;
         Ok(TraceExporter { factory })
     }
 

@@ -2,6 +2,7 @@ use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
 mod proxy_common;
@@ -18,6 +19,7 @@ mod squeue;
 mod webserver;
 use webserver::Web;
 
+mod ftio;
 mod extrap;
 mod icc;
 mod profiles;
@@ -30,6 +32,7 @@ extern crate clap;
 
 use clap::Parser;
 
+use crate::exporter::{ExperimentInstrumentation, Instrumentation, NoInstrumentation};
 #[cfg(feature = "admire")]
 use crate::icc::IccInterface;
 
@@ -72,6 +75,14 @@ struct Args {
     /// Sampling period in MS
     #[arg(short = 'S', long, default_value_t = 1000)]
     sampling_period: u64,
+
+    /// Number of branches for the hierarchical aggregation, 0 = binomial tree, > 0 = k-ary tree
+    #[arg(short, long, default_value_t = 2)]
+    branches: u64,
+
+    /// Duration to run instrumentation in seconds (default 0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    instrumentation: u64,
 }
 
 fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
@@ -121,11 +132,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_trace_size / (1024.0 * 1024.0)
     );
 
+    let instrumentation: Arc<dyn Instrumentation> =
+    if args.instrumentation > 0 {
+        Arc::new(ExperimentInstrumentation::new(args.instrumentation))
+    } else {
+        Arc::new(NoInstrumentation)
+    };
+
     // The central storage is the exporter
     let factory = ExporterFactory::new(
         profile_prefix,
         !args.inhibit_profile_agreggation,
         max_trace_size as usize,
+        args.sampling_period,
+        args.branches,
+        instrumentation.clone()
     )?;
 
     if let Some(urls) = args.sub_proxies {
@@ -155,11 +176,34 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let web_url = web.url();
 
+    if args.instrumentation > 0 {
+        instrumentation.set_proxy_name(&web_url);
+    }
+
+    // If this proxy is the root (no root_proxy provided), set its own URL
+    if args.root_proxy.is_none() {
+        {
+            let mut web_guard = factory.web_url.write().unwrap();
+            *web_guard = Some(web_url.clone());
+        }
+        {
+            let mut root_guard = factory.root_proxy.write().unwrap();
+            *root_guard = Some(web_url.clone());
+        }
+
+        log::info!("Root proxy URL set to {}", web_url);
+    }
+
     thread::spawn(move || {
         /* Wait for server to start before joining as the server will back-connect  */
         sleep(Duration::from_secs(3));
         if let Some(root) = args.root_proxy {
             let (url, period) = parse_period(&root, args.sampling_period);
+
+            if let Err(e) = ExporterFactory::set_data(factory.clone(), &url, &web_url, period) {
+                log::error!("Failed to set data: {}", e);
+                exit(1);
+            }
 
             if let Err(e) = ExporterFactory::join(&url, &web_url, period) {
                 log::error!("Failed to register in root server {}: {}", root, e);

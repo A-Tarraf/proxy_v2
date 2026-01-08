@@ -2,19 +2,22 @@ use retry::{delay::Fixed, retry};
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::proxy_common;
 use crate::proxywireprotocol::{
     ApiResponse, CounterSnapshot, CounterType, JobDesc, JobProfile, ValueAlarm, ValueAlarmTrigger,
 };
+use crate::{ftio, proxy_common};
 
 use crate::profiles::ProfileView;
 use crate::trace::{Trace, TraceView};
 
 use super::proxy_common::{hostname, ProxyErr};
+
+use crate::ftio::FtioClient;
 
 use crate::scrapper::{ProxyScraper, ProxyScraperSnapshot};
 
@@ -392,6 +395,13 @@ pub(crate) struct ExporterFactory {
     max_trace_size: usize,
     /// This is where the traces are stored
     pub trace_store: Arc<TraceView>,
+    /// Client to FTIO server
+    pub ftio_client: Arc<FtioClient>,
+    pub root_proxy: Arc<RwLock<Option<String>>>,
+    pub web_url: Arc<RwLock<Option<String>>>,
+    pub period: Arc<RwLock<u64>>,
+    pub branches: u64,
+    pub instrumentation: Arc<dyn Instrumentation>,
 }
 
 impl ExporterFactory {
@@ -404,7 +414,35 @@ impl ExporterFactory {
             /* Scrape all the candidates */
             if let Ok(scrapes) = self.scrapes.lock().as_mut() {
                 for (k, v) in scrapes.iter_mut() {
-                    if let Err(e) = v.scrape() {
+                    let start = std::time::Instant::now();
+                    let res = v.scrape();
+                    let duration = start.elapsed();
+                    if duration > Duration::from_millis(1) && v.get_url_if_proxy().is_some() {
+                        self.instrumentation
+                            .event(InstrumentationEvent::AggregateEnd {
+                                proxy: k.to_string(),
+                                duration,
+                            });
+                    }
+
+                    if let Err(e) = res {
+                        if let Some(target_url) = v.get_url_if_proxy() {
+                            log::error!(
+                                "Failed to scrape proxy {} : {}! Notifying the root server.",
+                                k,
+                                e
+                            );
+                            if let Some(root_url) = self.root_proxy.read().unwrap().as_ref() {
+                                if let Some(my_url) = self.web_url.read().unwrap().as_ref() {
+                                    if let Err(e) = ExporterFactory::remove_proxy_scrape(
+                                        self, root_url, my_url, target_url,
+                                    ) {
+                                        log::error!("Failed to notify root server about non responsive proxy {}: {}", target_url, e);
+                                    }
+                                }
+                            }
+                        }
+
                         log::debug!("Failed to scrape {} : {}", k, e);
                         to_delete.push(k.to_string());
                     }
@@ -441,6 +479,21 @@ impl ExporterFactory {
             .unwrap()
             .insert(new.url().to_string(), new);
         Ok(())
+    }
+
+    #[allow(unused)]
+    /// Remove a scrape from the scrape list
+    pub(crate) fn remove_scrape(
+        factory: Arc<ExporterFactory>,
+        url: &String,
+    ) -> Result<(), Box<dyn Error>> {
+        match factory.scrapes.lock().unwrap().remove(url) {
+            Some(_) => Ok(()),
+            None => Err(ProxyErr::newboxed(format!(
+                "No such scrape {} to remove",
+                url
+            ))),
+        }
     }
 
     #[allow(unused)]
@@ -499,10 +552,130 @@ impl ExporterFactory {
         }
     }
 
+    fn remove_proxy_scrape(
+        &self,
+        root_server: &String,
+        my_server_address: &String,
+        target_address: &String,
+    ) -> Result<(), ProxyErr> {
+        let mut target_address = target_address.to_string();
+        if target_address.starts_with("http://") {
+            target_address = target_address.replace("http://", "");
+        }
+        if target_address.ends_with("/job") {
+            target_address = target_address.replace("/job", "");
+        }
+
+        let mut pivot_url = root_server.to_string()
+            + "/remove?from="
+            + my_server_address
+            + "&target="
+            + &target_address;
+
+        println!("pivot_url: {}", pivot_url);
+
+        if !pivot_url.starts_with("http") {
+            pivot_url = format!("http://{}", pivot_url);
+        }
+
+        println!(
+            "Notifying root server {} about failed proxy {}, we are {}",
+            root_server, target_address, my_server_address
+        );
+
+        /* We add some delay as the root server may get smashed */
+        let resp = retry(Fixed::from_millis(2000).take(5), || {
+            ApiResponse::query(&pivot_url)
+        })?;
+
+        if resp.success {
+            if resp.operation == "Unresponsive node removed!".to_string() {
+                log::info!(
+                    "Notified root server about failed proxy {}",
+                    target_address
+                );
+                return Ok(());
+            }
+            let response: Vec<&str> = resp.operation.split('&').collect();
+
+            let target_url = "http://".to_string()
+                + my_server_address
+                + "/join?to="
+                + response[0]
+                + "&period="
+                + response[1];
+
+            match ApiResponse::query(&target_url) {
+                Ok(_) => {
+                    log::info!(
+                        "Letting proxy {} join with period {}",
+                        response[0],
+                        response[1]
+                    );
+                    return Ok(());
+                }
+                Err(e) => return Err(ProxyErr::from(e)),
+            }
+        } else {
+            Err(ProxyErr::new(
+                format!(
+                    "Failed to notify root server about failed proxy {}",
+                    target_address
+                )
+                .as_str(),
+            ))
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set_data(
+        factory: Arc<ExporterFactory>,
+        root: &String,
+        my_server_address: &String,
+        period: u64,
+    ) -> Result<(), ProxyErr> {
+        {
+            let mut p = factory.period.write().unwrap();
+            *p = period;
+        }
+
+        let mut root_url = root.to_string();
+        if !root_url.starts_with("http") {
+            root_url = format!("http://{}", root_url);
+        }
+
+        let mut web_url = my_server_address.to_string();
+
+        match factory.root_proxy.write() {
+            Ok(mut guard) => {
+                *guard = Some(root_url);
+                match factory.web_url.write() {
+                    Ok(mut web_guard) => {
+                        *web_guard = Some(web_url);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        return Err(ProxyErr::new(
+                            format!("Failed to set web url: {}", e).as_str(),
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(ProxyErr::new(
+                    format!("Failed to set root proxy: {}", e).as_str(),
+                ));
+            }
+        }
+    }
+
     pub(crate) fn new(
         profile_prefix: PathBuf,
         aggregate: bool,
         max_trace_size: usize,
+        period: u64,
+        branches: u64,
+        instrumentation: Arc<dyn Instrumentation>,
     ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
         let main_jobdesc = JobDesc {
             jobid: "main".to_string(),
@@ -529,6 +702,44 @@ impl ExporterFactory {
         };
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
+        let ftio_client = Arc::new(FtioClient::new());
+
+        if which::which("admire_proxy_zmq").is_ok() {
+            log::warn!("FTIO server not responding, attempting to start it...");
+            let mut child = Command::new("admire_proxy_zmq")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+
+            if let Some(stdout) = child.stdout.take() {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines_iter = reader.lines();
+
+                // Read the first line
+                if let Some(Ok(first_line)) = lines_iter.next() {
+                    let fixed_endpoint = first_line.trim().replace("0.0.0.0", "127.0.0.1");
+                    ftio_client.set_address(&fixed_endpoint);
+                }
+
+                let output_store = ftio_client.server_logs.clone();
+
+                // Move the iterator into a new thread
+                std::thread::spawn(move || {
+                    for line in lines_iter {
+                        if let Ok(l) = line {
+                            let mut logs = output_store.write().unwrap();
+                            logs.push(l);
+                            if logs.len() > 1000 {
+                                let remove = logs.len() - 1000;
+                                logs.drain(0..remove);
+                            }
+                        }
+                    }
+                });
+            }
+        }
 
         let (main_job_trace, node_job_trace) = if aggregate {
             trace_store.clear(&main_jobdesc)?;
@@ -551,6 +762,12 @@ impl ExporterFactory {
             trace_store: trace_store.clone(),
             aggregator: aggregate,
             max_trace_size,
+            ftio_client: ftio_client.clone(),
+            root_proxy: Arc::new(RwLock::new(None)),
+            web_url: Arc::new(RwLock::new(None)),
+            period: Arc::new(RwLock::new(period)),
+            branches,
+            instrumentation,
         });
 
         let scrape_ref = ret.clone();
@@ -623,7 +840,8 @@ impl ExporterFactory {
         exporter: Arc<TraceView>,
         jobid: &String,
     ) -> Result<(), Box<dyn Error>> {
-        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid) {
+        if let Ok(ftio_scrapper) = ProxyScraper::newftio(exporter, jobid, self.ftio_client.clone())
+        {
             self.pending_scrapes
                 .lock()
                 .unwrap()
@@ -893,5 +1111,106 @@ impl ExporterFactory {
         perjob.exporter.delete_alarm(alarm_name)?;
 
         Ok(())
+    }
+}
+
+pub trait Instrumentation: Send + Sync {
+    fn event(&self, event: InstrumentationEvent);
+    fn set_proxy_name(&self, _name: &str);
+}
+pub enum InstrumentationEvent {
+    AggregateEnd { proxy: String, duration: Duration },
+    MetricEndToEnd { leaf: String, duration: Duration },
+}
+
+pub struct NoInstrumentation;
+impl Instrumentation for NoInstrumentation {
+    #[inline(always)]
+    fn event(&self, _event: InstrumentationEvent) {
+        // No-op
+    }
+    #[inline(always)]
+    fn set_proxy_name(&self, _name: &str) {
+        // No-op
+    }
+}
+impl ExperimentInstrumentation {
+    pub fn new(duration: u64) -> Self {
+        ExperimentInstrumentation {
+            aggregations: Mutex::new(Vec::new()),
+            end_to_end: Mutex::new(Vec::new()),
+            proxy_name: Mutex::new(None),
+            start_time: std::time::Instant::now(),
+            finished: Mutex::new(false),
+            duration,
+        }
+    }
+}
+pub struct ExperimentInstrumentation {
+    pub aggregations: Mutex<Vec<(String, u64, Vec<Duration>)>>,
+    pub end_to_end: Mutex<Vec<Duration>>,
+    pub proxy_name: Mutex<Option<String>>,
+    pub start_time: std::time::Instant,
+    pub finished: Mutex<bool>,
+    pub duration: u64,
+}
+impl Instrumentation for ExperimentInstrumentation {
+    fn event(&self, event: InstrumentationEvent) {
+        match event {
+            InstrumentationEvent::AggregateEnd { proxy, duration } => {
+                if self.finished.lock().unwrap().to_owned() {
+                    return;
+                }
+
+                if self.start_time.elapsed() > Duration::from_secs(self.duration) {
+                    let mut total_duration = Duration::from_secs(0);
+                    for proxy_scrapes in self.aggregations.lock().unwrap().iter() {
+                        total_duration += proxy_scrapes.2.iter().sum::<Duration>();
+                    }
+                    println!(
+                        "Proxy: {:?} spent a total time of {:?} aggregating over {:?}",
+                        self.proxy_name
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap_or(&"Unknown".to_string()),
+                        total_duration,
+                        self.start_time.elapsed()
+                    );
+                    println!("Per-proxy aggregation times:");
+                    for proxy_scrapes in self.aggregations.lock().unwrap().iter() {
+                        let sum: Duration = proxy_scrapes.2.iter().sum();
+                        let avg: Duration = sum / (proxy_scrapes.1 as u32);
+                        println!(
+                            "  Proxy: {} - Count: {} - Total: {:?} - Avg: {:?}",
+                            proxy_scrapes.0, proxy_scrapes.1, sum, avg
+                        );
+                    }
+                    let mut guard = self.finished.lock().unwrap();
+                    *guard = true;
+                    return;
+                }
+
+                for proxy_scrapes in self.aggregations.lock().unwrap().iter_mut() {
+                    if proxy_scrapes.0 == proxy {
+                        proxy_scrapes.1 += 1;
+                        proxy_scrapes.2.push(duration);
+                        return;
+                    }
+                }
+                self.aggregations
+                    .lock()
+                    .unwrap()
+                    .push((proxy, 1, vec![duration]));
+            }
+            InstrumentationEvent::MetricEndToEnd { duration, .. } => {
+                self.end_to_end.lock().unwrap().push(duration);
+            }
+            _ => {}
+        }
+    }
+    fn set_proxy_name(&self, name: &str) {
+        let mut guard = self.proxy_name.lock().unwrap();
+        *guard = Some(name.to_string());
     }
 }

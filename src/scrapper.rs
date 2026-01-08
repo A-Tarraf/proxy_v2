@@ -4,6 +4,7 @@ use crate::proxy_common::{unix_ts_us, ProxyErr};
 use crate::proxywireprotocol::{CounterSnapshot, CounterType, JobDesc, JobProfile};
 use crate::trace::{Trace, TraceView};
 use crate::ExporterFactory;
+use crate::ftio::FtioClient;
 use core::fmt;
 use reqwest::blocking::Client;
 use serde::Serialize;
@@ -28,6 +29,7 @@ enum ScraperType {
     Ftio {
         traces: Arc<TraceView>,
         jobid: String,
+        ftio_client: Arc<FtioClient>,
     },
 }
 
@@ -43,6 +45,7 @@ impl fmt::Display for ScraperType {
             ScraperType::Ftio {
                 traces: _,
                 jobid: _,
+                ftio_client: _,
             } => write!(f, "FTIO"),
         }
     }
@@ -135,16 +138,18 @@ impl ProxyScraper {
     pub(crate) fn newftio(
         traces: Arc<TraceView>,
         jobid: &String,
+        ftio_client: Arc<FtioClient>,
     ) -> Result<ProxyScraper, ProxyErr> {
         Ok(ProxyScraper {
             target_url: format!("/FTIO/{}", jobid),
             state: HashMap::new(),
             factory: None,
-            period: 30000,
+            period: 10000,
             last_scrape: 0,
             ttype: ScraperType::Ftio {
                 traces,
                 jobid: jobid.to_string(),
+                ftio_client,
             },
         })
     }
@@ -161,6 +166,13 @@ impl ProxyScraper {
 
     pub(crate) fn url(&self) -> &String {
         &self.target_url
+    }
+
+    pub(crate) fn get_url_if_proxy(&self) -> Option<&String> {
+        match &self.ttype {
+            ScraperType::Proxy => Some(&self.target_url),
+            _ => None,
+        }
     }
 
     fn scrape_proxy(&mut self) -> Result<(), Box<dyn Error>> {
@@ -358,8 +370,8 @@ impl ProxyScraper {
         Ok(())
     }
 
-    fn scrape_ftio(&mut self, traces: Arc<TraceView>, jobid: String) -> Result<(), Box<dyn Error>> {
-        traces.generate_ftio_model(&jobid)?;
+    fn scrape_ftio(&mut self, traces: Arc<TraceView>, jobid: String, ftio_client: Arc<FtioClient>) -> Result<(), Box<dyn Error>> {
+        traces.generate_ftio_model(&jobid, ftio_client)?;
         Ok(())
     }
 
@@ -384,8 +396,8 @@ impl ProxyScraper {
             ScraperType::Trace { exporter, trace } => {
                 self.scrape_trace(exporter.clone(), trace.clone())?;
             }
-            ScraperType::Ftio { traces, jobid } => {
-                self.scrape_ftio(traces.clone(), jobid.clone())?;
+            ScraperType::Ftio { traces, jobid, ftio_client} => {
+                self.scrape_ftio(traces.clone(), jobid.clone(), ftio_client.clone())?;
             }
         }
 

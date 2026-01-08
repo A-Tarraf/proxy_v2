@@ -1,0 +1,113 @@
+<main>
+    <h2>Settings:</h2>
+    <div id="ftio-port" class="ftio-params">
+        <label for="ftioPort">FTIO Port: tcp://127.0.0.1:</label>
+        <input type="number" id="ftioPort" name="ftioPort" min="1024" max="65535">
+        <button type="button" id="savePortBtn" onclick="savePort()">Save Port</button>
+    </div>
+    <h2>Parameters:</h2>
+    <section id="ftio-container">
+        <div id="saveButtonGroup" class="ftio-params">
+            <label for="saveBtn">Save Parameters: </label>
+            <button type="button" id="saveBtn">Save</button>
+        </div>
+    </section>
+    <h2>Logs:</h2>
+    <div id="ftio-logs" class="ftio-logs">
+
+        <script src="ftioTemplate.js"></script>
+
+        <script>
+            async function loadFTIOForm() {
+                fetch('ftioTemplate.html')
+                    .then(response => {
+                        // When the page is loaded convert it to text
+                        return response.text()
+                    })
+                    .then(html => {
+                        const parser = new DOMParser()
+
+                        const doc = parser.parseFromString(html, "text/html")
+
+                        const snippet = doc.getElementById('ftioParameters');
+                        document.getElementById('ftio-container').prepend(snippet.cloneNode(true));
+
+                        initFTIOTemplate('/ftio/args');
+                    })
+                    .catch(error => {
+                        console.error('Failed to fetch page: ', error)
+                    })
+
+            }
+
+            async function fetchLogs() {
+                fetch('/ftio/logs').then(response => {
+                    return response.json();
+                }).then(data => {
+                    const logContainer = document.getElementById('ftio-logs');
+                    logContainer.innerHTML = '';
+
+                    data.forEach(log => {
+                        const logEntry = document.createElement('div');
+                        logEntry.textContent = log;
+                        logEntry.style.marginTop = '0px';
+                        if (log.includes('FTIO ZMQ') || log.includes('Received')) {
+                            logEntry.style.marginTop = '7px';
+                            logEntry.style.color = '#2cd16b';
+                        } else if (log.includes('Processing')) {
+                            logEntry.style.color = '#227ab5';
+                        } else if (log.includes('Parsing time') || log.includes('Calculation time')) {
+                            logEntry.style.color = '#2cbed1';
+                        } else if (log.includes('Warning') || log.includes('Failed')) {
+                            logEntry.style.color = '#b5243a';
+                        } else {
+                            logEntry.style.color = '#dbdbdb';
+                        }
+
+                        logContainer.appendChild(logEntry);
+                    });
+
+                }).catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+            }
+
+            async function fetchPort() {
+                fetch('/ftio/port', { method: 'GET' })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Fetched FTIO port:', data.operation);
+                        document.getElementById('ftioPort').value = data.operation;
+                    }
+                    ).catch(error => {
+                        console.error('Error fetching FTIO port:', error);
+                    });
+            }
+
+            async function savePort() {
+                const port = document.getElementById('ftioPort').value;
+                fetch('/ftio/port', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ port: port }),
+                }).then(response => {
+                    if (response.ok) {
+                        alert('FTIO port saved successfully!');
+                    } else {
+                        alert('Failed to save FTIO port.');
+                    }
+                }).catch(error => {
+                    console.error('Error saving FTIO port:', error);
+                });
+            }
+
+            fetchPort();
+            fetchLogs();
+
+            setInterval(fetchLogs, 3000);
+
+            loadFTIOForm();
+        </script>
+</main>

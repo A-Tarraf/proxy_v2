@@ -247,3 +247,44 @@ input[type="number"] {
     word-wrap: break-word; /* Allow long words to break and wrap onto the next line */
 }
 
+.ftio-params {
+	margin-bottom: 10px;
+}
+
+.info-symbol {
+    color: #555;
+    transition: color 0.2s ease;
+    cursor: help;
+}
+
+.info-symbol:hover {
+    color: #51dcff;
+}
+
+.ftio-logs {
+	background-color: #2b2b2b;
+	border: 5px solid #2b2b2b;
+	border-radius: 10px;
+	padding: 5px;
+	box-sizing: border-box;
+	height: 750px;
+	overflow-y: auto;
+	font-family: monospace;
+	white-space: pre-wrap; /* Preserve whitespace and wrap lines */
+	color: #dbdbdb;
+	font-size: medium;
+}
+
+#ftio-logs::after {
+  content: "";
+  display: block;
+  height: 5px;
+  width: 100%;
+}
+
+#ftio-logs::before {
+  content: "";
+  display: block;
+  height: 5px;
+  width: 100%;
+}
