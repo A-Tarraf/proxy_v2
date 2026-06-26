@@ -187,13 +187,8 @@ fi
 header "Compiling MPI Wrappers"
 
 MPI_WRAPPER_LIB="${PREFIX}/lib/libmetricproxy-exporter-mpi.so"
-"${MPICC}" "-I${PREFIX}/include/" "-I${SOURCE_ROOT}/exporters/mpi/" "-L${PREFIX}/lib" "-Wl,-rpath=${PREFIX}/lib" -shared -fpic "${MPI_WRAPPERS_C}" -lproxyclient -o "${MPI_WRAPPER_LIB}"
-
-if test -f "${MPI_WRAPPER_LIB}"; then
-	echo "Successfully generated MPI wrapper library"
-else
-	error_out "Failed to generate MPI wrappers library"
-fi
+"${MPICC}" "-I${PREFIX}/include/" "-I${SOURCE_ROOT}/exporters/mpi/" "-L${PREFIX}/lib" "-Wl,-rpath=${PREFIX}/lib" -shared -fpic "${MPI_WRAPPERS_C}" -lproxyclient -o "${MPI_WRAPPER_LIB}" || error_out "Failed to compile MPI wrappers library see previous errors"
+echo "Successfully generated MPI wrapper library"
 
 #
 # Deploy the Modified Strace

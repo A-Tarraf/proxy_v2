@@ -297,7 +297,7 @@ static inline void __ensure_size_counter_is_available(char * func_name,
   return ret;
 {{endfn}}
 
-{{fnall foo MPI_Init MPI_Init_thread MPI_Finalize MPI_Pcontrol PMPI_Status_f082f}}
+{{fnall foo MPI_Init MPI_Init_thread MPI_Finalize MPI_Pcontrol PMPI_Status_f082f MPI_Group_from_session_pset MPI_Session_call_errhandler MPI_Session_get_errhandler MPI_Session_get_info MPI_Session_get_nth_pset MPI_Session_get_num_psets MPI_Session_get_pset_info MPI_Session_set_errhandler MPI_Session_set_info}}
   {{ret_type}} ret = 0;
 	{{ret_type}} (*fn_{{foo}})({{types}}) = NULL;
 	RESOLVE(tmp_fn_{{foo}}, {{foo}})
