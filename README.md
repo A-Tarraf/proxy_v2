@@ -410,6 +410,69 @@ It consists in such JSON:
 ]
 ```
 
+## Malleability Support (TBON Expand / Shrink / Graceful Leave)
+
+The proxy supports dynamic changes to the tree-based overlay network (TBON) at runtime. This is useful for malleable HPC jobs where nodes are added to or removed from an allocation while the proxy tree is live.
+
+### How the TBON Works
+
+Each node runs one `proxy_v2` process. One node is the **root** (no `--root-proxy`); the others are **children** (`--root-proxy <root-addr>`). Children register with the root at startup via `/join`, and the root periodically scrapes them.
+
+### Auto-Discovery (`--auto-root` / `--root-url-dir`)
+
+On a shared filesystem, the root proxy writes its URL to `<target-prefix>/root.url` at startup. Child proxies launched with `--auto-root` read this file instead of requiring a hardcoded `--root-proxy` address:
+
+```bash
+# Root node — writes root.url into its profile directory
+proxy_v2 --port 1337 --target-prefix /shared/proxy/root
+
+# Child node — discovers root from the shared file
+proxy_v2 --port 1337 \
+  --target-prefix /shared/proxy/$(hostname) \
+  --auto-root \
+  --root-url-dir /shared/proxy/root
+```
+
+`--root-url-dir` overrides the directory to search for `root.url`. Without it, `--auto-root` reads from `<target-prefix>/root.url`. The root URL can also be injected via the `PROXY_ROOT_URL` environment variable (takes precedence over `--auto-root`).
+
+### Graceful Leave (`/leave` endpoint)
+
+When a child proxy receives SIGTERM, it sends a `/leave?from=<my-url>` request to the root before exiting. The root immediately removes the departing node from the TBON — no waiting for a missed scrape.
+
+```
+GET http://<root>:<port>/leave?from=<child-url>
+```
+
+This is handled automatically by the signal handler; no user action is needed. In the worst case (SIGKILL / crash), the existing self-repair mechanism takes over (see below).
+
+### TBON Self-Repair (Shrink)
+
+If the root fails to scrape a child proxy (connection refused / timeout), it removes the dead node from the topology. The repair happens within one sampling period (`--sampling-period`, default 1000 ms).
+
+### Using the Proxy with DMR (Dynamic Resource Manager)
+
+Each node in the DMR allocation should run one proxy:
+
+| Role | Command |
+|------|---------|
+| Root node | `proxy_v2 --port 1337 --target-prefix <shared-fs>/root` |
+| Worker nodes (static) | `proxy_v2 --port 1337 --root-proxy <root-addr>:1337` |
+| Worker nodes (malleable) | `proxy_v2 --port 1337 --auto-root --root-url-dir <shared-fs>/root` |
+
+The instrumented application communicates with the local proxy via the UNIX socket (`proxy_run` or the `libproxyclient.so` LD_PRELOAD). No special environment variable is needed beyond `PROXY_JOB_ID` (or the SLURM / MPI job ID picked up automatically by `proxy_run`).
+
+> **Note on `libproxyclient.so` LD_PRELOAD**: The ELF constructor that auto-connects the client library on load may not fire in all build configurations. If metrics are not appearing, call `proxy_init()` explicitly early in your application or use `proxy_run` as the launcher wrapper.
+
+### Malleability Experiment
+
+An automated end-to-end test lives in `experiment/run_malleability_test.sh`. It uses a 4-node Docker cluster (`dmr01`–`dmr04`) to exercise all three scenarios in sequence:
+
+1. **Graceful leave** — SIGTERM a child; `/leave` triggers immediate TBON repair
+2. **Shrink** — SIGKILL a child; root detects the missing scrape and self-repairs
+3. **Expand** — restart the killed child with `--auto-root`; it reads `root.url` and self-registers
+
+See [`experiment/`](experiment/) for setup instructions and expected output.
+
 ## Acknowledgments
 
 This project has received funding from the European Union’s Horizon 2020 JTI-EuroHPC research and innovation programme with grant Agreement number: 956748

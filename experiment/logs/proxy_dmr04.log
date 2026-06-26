@@ -1,0 +1,5 @@
+[2026-06-26T09:14:48Z INFO  proxy_v2] Max trace size is 32 MB
+[2026-06-26T09:14:48Z INFO  proxy_v2::scrapper] Creating a scrapper to /system for a period of 1000
+[2026-06-26T09:14:48Z INFO  proxy_v2::proxy] UNIX proxy listening on /tmp/metric-proxy-0.socket
+[2026-06-26T09:14:48Z INFO  proxy_v2::webserver] Proxy webserver listening on http://dmr04:1337
+[2026-06-26T09:14:52Z INFO  proxy_v2::exporter] Joining aggregating proxy dmr01:1337 with period 100

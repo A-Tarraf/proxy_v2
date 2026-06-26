@@ -5,6 +5,7 @@ use std::process::exit;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 mod proxy_common;
 use proxy_common::{get_proxy_path, init_log};
 
@@ -35,6 +36,8 @@ use clap::Parser;
 use crate::exporter::{ExperimentInstrumentation, Instrumentation, NoInstrumentation};
 #[cfg(feature = "admire")]
 use crate::icc::IccInterface;
+
+extern crate ctrlc;
 
 /// ADMIRE project Instrumentation Proxy
 #[derive(Parser, Debug)]
@@ -83,6 +86,16 @@ struct Args {
     /// Duration to run instrumentation in seconds (default 0 = disabled)
     #[arg(long, default_value_t = 0)]
     instrumentation: u64,
+
+    /// Auto-discover the root proxy URL from <target_prefix>/root.url (written by the root proxy)
+    /// Also honoured via the PROXY_ROOT_URL environment variable.
+    #[arg(long, default_value_t = false)]
+    auto_root: bool,
+
+    /// Directory to search for root.url when using --auto-root (defaults to <target-prefix>).
+    /// Use this to point all nodes at the root proxy's profile directory on a shared filesystem.
+    #[arg(long)]
+    root_url_dir: Option<PathBuf>,
 }
 
 fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
@@ -139,6 +152,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(NoInstrumentation)
     };
 
+    // Keep the root.url file path before profile_prefix is consumed by ExporterFactory::new
+    let root_url_file = profile_prefix.join("root.url");
+
     // The central storage is the exporter
     let factory = ExporterFactory::new(
         profile_prefix,
@@ -180,8 +196,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         instrumentation.set_proxy_name(&web_url);
     }
 
-    // If this proxy is the root (no root_proxy provided), set its own URL
-    if args.root_proxy.is_none() {
+    // Resolve the effective root proxy: CLI flag > env var > auto-discovery file > none (I am root)
+    let effective_root: Option<String> = if args.root_proxy.is_some() {
+        args.root_proxy.clone()
+    } else if let Ok(env_root) = env::var("PROXY_ROOT_URL") {
+        log::info!("Using root proxy from PROXY_ROOT_URL: {}", env_root);
+        Some(env_root)
+    } else if args.auto_root {
+        let search_file = if let Some(dir) = &args.root_url_dir {
+            dir.join("root.url")
+        } else {
+            root_url_file.clone()
+        };
+        match std::fs::read_to_string(&search_file) {
+            Ok(url) => {
+                let url = url.trim().to_string();
+                log::info!("Auto-discovered root proxy from {}: {}", search_file.display(), url);
+                Some(url)
+            }
+            Err(e) => {
+                log::warn!("--auto-root set but could not read {}: {}", search_file.display(), e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // If this proxy is the root (no root resolved), publish URL for child auto-discovery
+    if effective_root.is_none() {
         {
             let mut web_guard = factory.web_url.write().unwrap();
             *web_guard = Some(web_url.clone());
@@ -190,14 +233,44 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut root_guard = factory.root_proxy.write().unwrap();
             *root_guard = Some(web_url.clone());
         }
-
         log::info!("Root proxy URL set to {}", web_url);
+
+        // Write URL to file so child proxies with --auto_root can find us
+        if let Err(e) = std::fs::write(&root_url_file, &web_url) {
+            log::warn!("Could not write root URL to {}: {}", root_url_file.display(), e);
+        } else {
+            log::info!("Root URL written to {}", root_url_file.display());
+        }
+    }
+
+    // Install graceful-leave handler: on SIGTERM/SIGINT notify root before exiting
+    {
+        let factory_sh = factory.clone();
+        let running = Arc::new(AtomicBool::new(true));
+        let running_clone = running.clone();
+        ctrlc::set_handler(move || {
+            if running_clone.swap(false, Ordering::SeqCst) {
+                if let (Some(root_url), Some(my_url)) = (
+                    factory_sh.root_proxy.read().unwrap().clone(),
+                    factory_sh.web_url.read().unwrap().clone(),
+                ) {
+                    // Only child proxies need to notify root (root_url != my_url)
+                    if root_url != my_url {
+                        let leave_url = format!("http://{}/leave?from={}", root_url, my_url);
+                        log::info!("Sending graceful leave to {}", leave_url);
+                        let _ = reqwest::blocking::get(&leave_url);
+                    }
+                }
+                exit(0);
+            }
+        })
+        .unwrap_or_else(|e| log::warn!("Failed to install signal handler: {}", e));
     }
 
     thread::spawn(move || {
-        /* Wait for server to start before joining as the server will back-connect  */
+        /* Wait for the webserver to start before joining */
         sleep(Duration::from_secs(3));
-        if let Some(root) = args.root_proxy {
+        if let Some(root) = effective_root {
             let (url, period) = parse_period(&root, args.sampling_period);
 
             if let Err(e) = ExporterFactory::set_data(factory.clone(), &url, &web_url, period) {
@@ -206,7 +279,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             if let Err(e) = ExporterFactory::join(&url, &web_url, period) {
-                log::error!("Failed to register in root server {}: {}", root, e);
+                log::error!("Failed to register in root server {}: {}", url, e);
                 exit(1);
             }
         }

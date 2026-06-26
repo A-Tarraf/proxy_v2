@@ -1,0 +1,12 @@
+[2026-06-26T09:07:30Z INFO  proxy_v2] Max trace size is 32 MB
+[2026-06-26T09:07:30Z ERROR proxy_v2::trace] Failed to load trace from /opt/hpc/install/proxy_profiles/root/traces/main.trace : attempt to read past EOF
+[2026-06-26T09:07:30Z ERROR proxy_v2::trace] Failed to load trace from /opt/hpc/install/proxy_profiles/root/traces/Node: dmr01.trace : attempt to read past EOF
+[2026-06-26T09:07:30Z ERROR proxy_v2::trace] Removing /opt/hpc/install/proxy_profiles/root/traces/main.trace
+[2026-06-26T09:07:30Z ERROR proxy_v2::trace] Removing /opt/hpc/install/proxy_profiles/root/traces/Node: dmr01.trace
+[2026-06-26T09:07:30Z INFO  proxy_v2::scrapper] Creating a scrapper to /system for a period of 1000
+[2026-06-26T09:07:30Z INFO  proxy_v2::proxy] UNIX proxy listening on /tmp/metric-proxy-0.socket
+[2026-06-26T09:07:30Z INFO  proxy_v2] Root proxy URL set to dmr01:1337
+[2026-06-26T09:07:30Z INFO  proxy_v2] Root URL written to /opt/hpc/install/proxy_profiles/root/root.url
+[2026-06-26T09:07:30Z INFO  proxy_v2::webserver] Proxy webserver listening on http://dmr01:1337
+[2026-06-26T09:11:41Z INFO  proxy_v2::extrap] Serializing ExtraP MODEL to /opt/hpc/install/proxy_profiles/root/profiles/ea352b16433cb73e8c82603f0e28546f.jsonl
+[2026-06-26T09:11:52Z INFO  proxy_v2::extrap] Serializing ExtraP MODEL to /opt/hpc/install/proxy_profiles/root/profiles/ea352b16433cb73e8c82603f0e28546f.jsonl

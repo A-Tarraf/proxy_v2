@@ -2,11 +2,18 @@ use crate::proxy_common::unix_ts;
 use crate::proxy_common::unix_ts_us;
 use crate::proxy_common::ProxyErr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
 use std::{collections::HashMap, env, error::Error};
+
+// serde helper: serialize NaN/infinite f64 as 0.0 so JSON never emits `null`.
+// The JSON scraper at the root proxy expects f64 values; null would fail deserialization.
+// Binary (UNIX-socket) format is unaffected: 0.0 is a valid f64 there too.
+fn ser_f64_nan_as_zero<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(if v.is_nan() || v.is_infinite() { 0.0 } else { *v })
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum CounterType {
@@ -15,9 +22,12 @@ pub enum CounterType {
         value: f64,
     },
     Gauge {
+        #[serde(serialize_with = "ser_f64_nan_as_zero")]
         min: f64,
+        #[serde(serialize_with = "ser_f64_nan_as_zero")]
         max: f64,
         hits: f64,
+        #[serde(serialize_with = "ser_f64_nan_as_zero")]
         total: f64,
     },
 }

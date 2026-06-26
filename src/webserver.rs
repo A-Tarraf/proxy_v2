@@ -696,13 +696,94 @@ impl Web {
         WebResponse::Native(Response::json(&resp))
     }
 
+    /// Core TBON repair logic: removes `target_url` from `from_url`'s children and
+    /// finds a replacement node to stitch the tree back together.
+    /// Returns (replacement_url, period) on success, or an error response.
+    fn repair_tbon(&self, from_url: &str, target_url: &str) -> WebResponse {
+        let mut clients = self.known_client.lock().unwrap();
+
+        let from_pos = match clients.iter().position(|v| v.url == from_url) {
+            Some(p) => p,
+            None => return WebResponse::BadReq(format!("No such from client {}", from_url)),
+        };
+
+        clients[from_pos].removefrom(&target_url.to_string());
+
+        let mut replacement_url = String::new();
+
+        if let Some(target_pos) = clients.iter().position(|v| v.url == target_url) {
+            if clients[target_pos].refcount != 0 {
+                let replacement_pos = clients
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, v)| v.depth)
+                    .map(|(i, _)| i);
+
+                if let Some(replacement_pos) = replacement_pos {
+                    replacement_url = clients[replacement_pos].url.clone();
+
+                    if !clients[target_pos].child.contains(&replacement_url) {
+                        if let Some(parent_pos) = clients
+                            .iter()
+                            .position(|v| v.child.contains(&replacement_url))
+                        {
+                            clients[parent_pos].removefrom(&replacement_url);
+                            let req_url = format!(
+                                "http://{}/disconnect?target={}",
+                                clients[parent_pos].url, replacement_url
+                            );
+                            let _resp = ApiResponse::query(&req_url);
+                        }
+                    }
+
+                    clients[from_pos].mapto(replacement_url.clone());
+                    let depth = clients[from_pos].depth + 1;
+                    clients[replacement_pos].set_depth(depth);
+
+                    let mut children: Vec<String> = clients[target_pos].child.clone();
+                    children.retain(|x| x != &replacement_url);
+
+                    for child in children.iter().cloned() {
+                        clients[replacement_pos].mapto(child);
+                    }
+
+                    let children_param = children.join("&");
+                    let mut periods: Vec<String> = Vec::new();
+                    for child in &children {
+                        let period_url = format!("http://{}/period", child);
+                        let resp = ApiResponse::query(&period_url);
+                        periods.push(if let Ok(r) = resp { r.operation } else { "1000".to_string() });
+                    }
+                    let periods_param = periods.join("&");
+
+                    let req_url = format!(
+                        "http://{}/join/multiple?to={}&period={}",
+                        replacement_url, children_param, periods_param
+                    );
+                    let _resp = ApiResponse::query(&req_url);
+                }
+            }
+        }
+
+        clients.retain(|x| x.url != target_url);
+
+        if replacement_url.is_empty() {
+            return WebResponse::Success("Unresponsive node removed!".to_string());
+        }
+
+        let period_url = format!("http://{}/period", replacement_url);
+        let period = ApiResponse::query(&period_url)
+            .map(|r| r.operation)
+            .unwrap_or_else(|_| "1000".to_string());
+        WebResponse::Success(replacement_url + "&" + &period)
+    }
+
     fn handle_remove(&self, req: &Request) -> WebResponse {
         let from_url = req.get_param("from");
         if from_url.is_none() {
             return WebResponse::BadReq("No from parameter passed".to_string());
         }
-
-        let from_url: String = from_url.unwrap().clone();
+        let from_url: String = from_url.unwrap();
         if from_url.contains("http") {
             return WebResponse::BadReq(
                 "From should not be an URL (with http://) but host:port".to_string(),
@@ -713,101 +794,65 @@ impl Web {
         if target_url.is_none() {
             return WebResponse::BadReq("No target parameter passed".to_string());
         }
-
-        let target_url: String = target_url.unwrap().clone();
+        let target_url: String = target_url.unwrap();
         if target_url.contains("http") {
             return WebResponse::BadReq(
                 "Target should not be an URL (with http://) but host:port".to_string(),
             );
         }
 
-        let mut clients = self.known_client.lock().unwrap();
+        self.repair_tbon(&from_url, &target_url)
+    }
 
-        if let Some(from_client) = clients.iter().position(|v| v.url == from_url) {
-            // Remove the failed node from the notifying client
-            clients[from_client].removefrom(&target_url);
-
-            let mut replacement_url = String::new();
-
-            // Check if the unresponsive node had children to reassign, if not we don't need to change any more connections
-            if let Some(target_client) = clients.iter().position(|v| v.url == target_url) {
-                if clients[target_client].refcount != 0 {
-
-                    // Find a replacement client, should be a client without children
-                    let replacement_client = clients
-                        .iter()
-                        .enumerate()
-                        .max_by_key(|(_, v)| v.depth)
-                        .map(|(v, _)| v);
-
-                    if let Some(replacement_client) = replacement_client {
-                        replacement_url = clients[replacement_client].url.clone();
-
-                        // If the found replacement is not the child of the failed node, we need to disconnect it from its parent
-                        if !clients[target_client].child.contains(&replacement_url) {
-                            if let Some(parent_client) = clients
-                                .iter()
-                                .position(|v| v.child.contains(&replacement_url))
-                            {
-                                clients[parent_client].removefrom(&replacement_url);
-                                // Notify the parent of the replacement about the disconnection
-                                let request_url = format!(
-                                    "http://{}/disconnect?target={}",
-                                    clients[parent_client].url, replacement_url
-                                );
-                                let _resp = ApiResponse::query(&request_url);
-                            }
-                        }
-
-                        // Connect the notifying client to the replacement (Scrape target send with WebRespone later)
-                        clients[from_client].mapto(replacement_url.clone());
-                        let depth = clients[from_client].depth + 1;
-                        clients[replacement_client].set_depth(depth);
-
-                        // Connect the replacement to the children of the failed node
-                        let mut children: Vec<String> = clients[target_client].child.clone();
-                        children.retain(|x| x != &replacement_url);
-
-                        for child in children.iter().cloned() {
-                            clients[replacement_client].mapto(child);
-                        }
-                        // Notify the replacement about its new children
-                        let children_param = children.join("&");
-                        // Get the sampling periods of the children nodes
-                        let mut periods: Vec<String> = Vec::new();
-                        for child in &children {
-                            let period_url = format!("http://{}/period", child);
-                            let resp = ApiResponse::query(&period_url);
-                            if let Ok(resp) = resp {
-                                periods.push(resp.operation);
-                            } else {
-                                periods.push("1000".to_string());
-                            }
-                        }
-                        let periods_param = periods.join("&");
-
-                        let request_url = format!(
-                            "http://{}/join/multiple?to={}+period={}",
-                            replacement_url, children_param, periods_param
-                        );
-                        let _resp = ApiResponse::query(&request_url);
-                    }
-                }
-            }
-
-            clients.retain(|x| x.url != target_url);
-
-            // Get period of the replacement node
-            let request_url = format!("http://{}/period", replacement_url);
-            if replacement_url.is_empty() {
-                return WebResponse::Success("Unresponsive node removed!".to_string());
-            }else {
-            let resp = ApiResponse::query(&request_url);
-            return WebResponse::Success(replacement_url + "&" + &resp.unwrap().operation);
-            }
-        } else {
-            return WebResponse::BadReq(format!("No such from client {}", from_url));
+    /// Called by a node that is about to leave gracefully.
+    /// The root finds the departing node's parent, triggers immediate TBON repair,
+    /// and pushes the replacement directly to the parent — no scrape timeout needed.
+    fn handle_leave(&self, req: &Request) -> WebResponse {
+        let from = req.get_param("from");
+        if from.is_none() {
+            return WebResponse::BadReq("No from parameter passed".to_string());
         }
+        let from: String = from.unwrap();
+
+        let parent_url: Option<String> = {
+            let clients = self.known_client.lock().unwrap();
+            clients.iter().find(|c| c.child.contains(&from)).map(|c| c.url.clone())
+        };
+
+        let parent_url = match parent_url {
+            Some(p) => p,
+            None => {
+                log::info!("Leave from {} — not in TBON or is root, ignoring", from);
+                return WebResponse::Success(format!("Node {} not tracked in TBON", from));
+            }
+        };
+
+        // Disconnect the leaving node from its parent's scrape list
+        let disconnect_url = format!("http://{}/disconnect?target={}", parent_url, from);
+        let _ = ApiResponse::query(&disconnect_url);
+
+        // Repair the TBON: find a replacement and wire it in
+        let repair_resp = self.repair_tbon(&parent_url, &from);
+
+        // If repair found a replacement, tell the parent to start scraping it
+        if let WebResponse::Success(ref payload) = repair_resp {
+            let parts: Vec<&str> = payload.split('&').collect();
+            if parts.len() == 2 && !parts[0].is_empty() {
+                let replacement = parts[0];
+                let period = parts[1];
+                let join_url = format!(
+                    "http://{}/join?to={}&period={}",
+                    parent_url, replacement, period
+                );
+                let _ = ApiResponse::query(&join_url);
+                log::info!(
+                    "Graceful leave: {} departed, {} wired to parent {}",
+                    from, replacement, parent_url
+                );
+            }
+        }
+
+        WebResponse::Success(format!("Node {} left gracefully", from))
     }
 
     // Remove the proxy from the scrape list
@@ -1439,6 +1484,7 @@ impl Web {
                     _ => WebResponse::BadReq(url),
                 },
                 "remove" => self.handle_remove(request),
+                "leave" => self.handle_leave(request),
                 "disconnect" => self.handle_disconnect(request),
                 "period" => self.handle_period(request),
                 "alarms" => match resource.as_str() {
