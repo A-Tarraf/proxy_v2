@@ -2,22 +2,34 @@ use crate::proxy_common::unix_ts;
 use crate::proxy_common::unix_ts_us;
 use crate::proxy_common::ProxyErr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
 use std::{collections::HashMap, env, error::Error};
 
+// serde_json serializes f64::NAN / f64::INFINITY as JSON null (JSON has no NaN).
+// Fix on the write side: sanitize to 0.0 so JSON consumers never see null.
+// This is safe for binary formats too — 0.0 is a valid f64 in all formats.
+fn ser_f64_sanitized<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64(if v.is_finite() { *v } else { 0.0 })
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum CounterType {
     Counter {
         ts: u64,
+        #[serde(serialize_with = "ser_f64_sanitized")]
         value: f64,
     },
     Gauge {
+        #[serde(serialize_with = "ser_f64_sanitized")]
         min: f64,
+        #[serde(serialize_with = "ser_f64_sanitized")]
         max: f64,
+        #[serde(serialize_with = "ser_f64_sanitized")]
         hits: f64,
+        #[serde(serialize_with = "ser_f64_sanitized")]
         total: f64,
     },
 }
@@ -823,5 +835,75 @@ impl ApiResponse {
                 .as_str(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nan_counter_serializes_to_zero_not_null() {
+        let c = CounterType::Counter {
+            ts: 0,
+            value: f64::NAN,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        assert!(
+            !json.contains("null"),
+            "NaN must not appear as JSON null: {json}"
+        );
+        assert!(
+            json.contains("0.0") || json.contains(":0,") || json.contains(":0}"),
+            "NaN must serialize to 0.0: {json}"
+        );
+    }
+
+    #[test]
+    fn inf_counter_serializes_to_zero_not_null() {
+        let c = CounterType::Counter {
+            ts: 0,
+            value: f64::INFINITY,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        assert!(
+            !json.contains("null"),
+            "Infinity must not appear as JSON null: {json}"
+        );
+    }
+
+    #[test]
+    fn nan_gauge_serializes_to_zero_not_null() {
+        let g = CounterType::Gauge {
+            min: f64::NAN,
+            max: f64::INFINITY,
+            hits: f64::NEG_INFINITY,
+            total: 42.0,
+        };
+        let json = serde_json::to_string(&g).expect("serialize");
+        assert!(
+            !json.contains("null"),
+            "Gauge with NaN/Inf must not produce JSON null: {json}"
+        );
+        // finite value must survive unchanged
+        assert!(json.contains("42"), "finite total must be preserved: {json}");
+    }
+
+    #[test]
+    fn finite_values_pass_through_unchanged() {
+        let c = CounterType::Counter {
+            ts: 1234,
+            value: 3.14,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        assert!(json.contains("3.14"), "finite value must not be modified: {json}");
+    }
+
+    #[test]
+    fn counter_merge_accumulates_value() {
+        let mut a = CounterType::Counter { ts: 0, value: 10.0 };
+        let b = CounterType::Counter { ts: 0, value: 5.0 };
+        a.merge(&b).expect("merge");
+        assert_eq!(a.value(), 15.0);
     }
 }

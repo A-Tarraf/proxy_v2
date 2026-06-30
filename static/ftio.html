@@ -12,7 +12,8 @@
             <button type="button" id="saveBtn">Save</button>
         </div>
     </section>
-    <h2>Logs:</h2>
+    <details style="margin-top: 12px;">
+        <summary style="cursor:pointer; font-size:1.1em; font-weight:bold; padding:4px 0;">Logs</summary>
     <div id="ftio-logs" class="ftio-logs">
 
         <script src="ftioTemplate.js"></script>
@@ -110,4 +111,881 @@
 
             loadFTIOForm();
         </script>
+    </div>
+    </details>
+
+    <details id="parallel-analysis" style="margin-top: 28px;">
+        <summary style="cursor:pointer; font-size:1.1em; font-weight:bold; padding:6px 0;">
+            Parallel Analysis
+        </summary>
+
+        <div style="margin-top:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label for="pa-job">Job:</label>
+            <select id="pa-job" style="min-width:200px;" onchange="paUpdateJobInfo()"></select>
+            <span id="pa-job-info" style="color:#555; font-size:0.85em;"></span>
+            <button id="pa-fetch-btn" onclick="paFetchStored()">Load Stored</button>
+            <button id="pa-run-btn" onclick="paRunAnalysis()" style="font-weight:bold;">Run Analysis</button>
+            <span id="pa-status" style="color:#666; font-size:0.9em;"></span>
+        </div>
+
+        <div id="pa-error" style="display:none; color:#b5243a; margin-top:10px; padding:8px; border:1px solid #f5c2c7; border-radius:4px; background:#fff3f3;"></div>
+
+        <div id="pa-progress-wrap" style="display:none; margin-top:10px;">
+            <progress id="pa-progress-bar" value="0" max="100" style="width:100%; height:14px;"></progress>
+        </div>
+
+        <div id="pa-results" style="display:none; margin-top:18px;">
+
+            <div id="pa-chart-note" style="color:#666; font-size:12px; margin-bottom:8px;"></div>
+            <div id="pa-plot-ctrl-scatter" class="pa-plot-ctrl" data-target="pa-scatter">
+                Height: <input type="range" min="100" max="1200" value="720" step="20" oninput="paResizePlot(this,'pa-scatter','h')"> <span class="pa-h-lbl" data-target="pa-scatter">720</span>px
+            </div>
+            <div id="pa-scatter" style="margin-top:4px; height:720px;"></div>
+            <div id="pa-plot-ctrl-heatmap" class="pa-plot-ctrl" data-target="pa-heatmap" style="margin-top:18px;">
+                Height: <input type="range" min="100" max="1200" value="210" step="20" oninput="paResizePlot(this,'pa-heatmap','h')"> <span class="pa-h-lbl" data-target="pa-heatmap">210</span>px
+            </div>
+            <div id="pa-heatmap" style="margin-top:4px; height:210px;"></div>
+            <div id="pa-plot-ctrl-phi" class="pa-plot-ctrl" data-target="pa-phi-scatter" style="margin-top:18px;">
+                Height: <input type="range" min="100" max="1200" value="360" step="20" oninput="paResizePlot(this,'pa-phi-scatter','h')"> <span class="pa-h-lbl" data-target="pa-phi-scatter">360</span>px
+            </div>
+            <div id="pa-phi-scatter" style="margin-top:4px; height:360px;"></div>
+            <div id="pa-plot-ctrl-corr" class="pa-plot-ctrl" data-target="pa-corr-heatmap" style="margin-top:18px;">
+                Height: <input type="range" min="100" max="2400" value="400" step="20" oninput="paResizePlot(this,'pa-corr-heatmap','h')"> <span class="pa-h-lbl" data-target="pa-corr-heatmap">400</span>px
+            </div>
+            <div id="pa-corr-heatmap" style="margin-top:4px;"></div>
+
+            <details id="pa-category-section" style="margin-top:18px;" open>
+                <summary style="cursor:pointer; font-weight:bold; padding:4px 0;">Category Waves (reconstructed from FTIO model)</summary>
+                <div id="pa-category-plots"></div>
+            </details>
+
+            <details style="margin-top:18px;" open>
+                <summary style="cursor:pointer; font-weight:bold; padding:4px 0;">
+                    Metric table
+                    <span id="pa-metric-filter-wrap" style="font-weight:normal; margin-left:16px;">
+                        Filter: <select id="pa-metric-filter" onchange="paFilterTable()" style="min-width:180px;">
+                            <option value="">All</option>
+                        </select>
+                    </span>
+                </summary>
+                <div style="margin-top:8px; margin-bottom:6px;">
+                    <input id="pa-table-search" type="text" placeholder="Search metrics…" oninput="paSearchTable(this.value)"
+                        style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:13px; border:1px solid #ccc; border-radius:4px;">
+                </div>
+                <div style="overflow-x:auto; max-height:340px; overflow-y:auto; border:1px solid #ddd; border-radius:4px;">
+                    <table id="pa-table" style="border-collapse:collapse; width:100%; font-size:13px; min-width:600px;">
+                        <thead style="position:sticky; top:0; z-index:1;">
+                            <tr style="background:#f0f0f0;">
+                                <th style="padding:7px 12px; text-align:left; border-bottom:1px solid #ccc;">Metric <span style="font-weight:normal; font-size:11px; color:#888;">(click to select)</span></th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">Dom. Freq (Hz)</th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">Period (s)</th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">Confidence (%)</th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">Amplitude</th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">t_start (s)</th>
+                                <th style="padding:7px 12px; text-align:right; border-bottom:1px solid #ccc;">t_end (s)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pa-tbody"></tbody>
+                    </table>
+                </div>
+                <div style="margin-top:12px; font-size:13px; color:#555; display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                    <strong>Selected metrics plot — show:</strong>
+                    <label><input type="checkbox" id="pa-sel-show-raw" checked onchange="paRenderSelectionPlot()"> Raw data</label>
+                    <label><input type="checkbox" id="pa-sel-show-dominant" onchange="paRenderSelectionPlot()"> Dominant freq</label>
+                    <label><input type="checkbox" id="pa-sel-show-recon" checked onchange="paRenderSelectionPlot()"> Reconstructed wave</label>
+                </div>
+                <div id="pa-plot-ctrl-sel" class="pa-plot-ctrl" data-target="pa-selection-plot" style="margin-top:6px;">
+                    Height: <input type="range" min="100" max="1200" value="360" step="20" oninput="paResizePlot(this,'pa-selection-plot','h')"> <span class="pa-h-lbl" data-target="pa-selection-plot">360</span>px
+                </div>
+                <div id="pa-selection-plot" style="margin-top:6px; height:360px; display:none;"></div>
+            </details>
+        </div>
+
+        <script>
+            (function () {
+                var _paAllRows = [];
+                var _paModels = {};
+                var _paCurrentJobId = '';
+
+                // Lazy-load Plotly on first expand; also populate job selector
+                document.getElementById('parallel-analysis').addEventListener('toggle', function () {
+                    if (!this.open) return;
+                    paFetchJobs();
+                    if (!window.Plotly) {
+                        var s = document.createElement('script');
+                        s.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
+                        s.onerror = function () {
+                            document.getElementById('pa-chart-note').textContent =
+                                'Charts unavailable (Plotly could not load — offline?).';
+                            ['pa-scatter','pa-heatmap','pa-phi-scatter','pa-corr-heatmap','pa-category-section'].forEach(function(id) {
+                                var el = document.getElementById(id);
+                                if (el) el.style.display = 'none';
+                            });
+                        };
+                        document.head.appendChild(s);
+                    }
+                });
+
+                var _paJobMeta = {};  // jobid → {size, lastwrite, command}
+
+                function paFmtSize(bytes) {
+                    if (bytes === undefined || bytes === null) return '';
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+                    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+                }
+
+                window.paUpdateJobInfo = function () {
+                    var jobid = document.getElementById('pa-job').value;
+                    var el = document.getElementById('pa-job-info');
+                    var meta = _paJobMeta[jobid];
+                    if (!meta) { el.textContent = ''; return; }
+                    var parts = [paFmtSize(meta.size)];
+                    if (meta.lastwrite) {
+                        var d = new Date(meta.lastwrite * 1000);
+                        parts.push('last write: ' + d.toLocaleString());
+                    }
+                    el.textContent = parts.join(' · ');
+                };
+
+                // Use /trace/list — returns [{desc:{jobid,command,...}, size, lastwrite}, ...]
+                function paFetchJobs() {
+                    fetch('/trace/list')
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            var sel = document.getElementById('pa-job');
+                            sel.innerHTML = '';
+                            if (!data || data.length === 0) {
+                                sel.innerHTML = '<option value="">No jobs</option>';
+                                return;
+                            }
+                            // Sort by lastwrite descending so newest job is first/selected
+                            data.sort(function (a, b) { return (b.lastwrite || 0) - (a.lastwrite || 0); });
+                            data.forEach(function (item) {
+                                _paJobMeta[item.desc.jobid] = { size: item.size, lastwrite: item.lastwrite, command: item.desc.command };
+                                var opt = document.createElement('option');
+                                opt.value = item.desc.jobid;
+                                opt.textContent = item.desc.jobid + ' : ' + item.desc.command;
+                                sel.appendChild(opt);
+                            });
+                            // First option (newest) is selected by default
+                            paUpdateJobInfo();
+                        })
+                        .catch(function (e) { console.error('Failed to fetch trace list:', e); });
+                }
+
+                function paFetchBody(url, method) {
+                    var opts = method === 'POST' ? { method: 'POST' } : {};
+                    return fetch(url, opts).then(function (resp) {
+                        return resp.text().then(function (text) {
+                            var data;
+                            try { data = JSON.parse(text); }
+                            catch (_) { data = { error: text || 'Unknown error' }; }
+                            return { ok: resp.ok, data: data };
+                        });
+                    });
+                }
+
+                window.paFetchStored = function () {
+                    var jobid = document.getElementById('pa-job').value;
+                    if (!jobid) return;
+                    _paCurrentJobId = jobid;
+                    paSetStatus('Loading cached results…');
+                    paShowError(null);
+                    paFetchBody('/ftio/all_models?jobid=' + encodeURIComponent(jobid), 'GET')
+                        .then(function (res) {
+                            if (!res.ok || res.data.error) {
+                                paShowError(res.data.error || 'No stored models for this job.');
+                            } else {
+                                paRender(res.data.models);
+                            }
+                        })
+                        .catch(function (e) { paShowError('Request failed: ' + e.message); })
+                        .finally(function () { paSetStatus(''); });
+                };
+
+                window.paRunAnalysis = function () {
+                    var jobid = document.getElementById('pa-job').value;
+                    if (!jobid) return;
+                    _paCurrentJobId = jobid;
+                    var btn = document.getElementById('pa-run-btn');
+                    btn.disabled = true;
+                    paShowError(null);
+
+                    var progressWrap = document.getElementById('pa-progress-wrap');
+                    var progressBar  = document.getElementById('pa-progress-bar');
+
+                    // Start run_all immediately; poll /ftio/progress for live count
+                    progressBar.value = 0;
+                    progressBar.max = 100;
+                    progressWrap.style.display = '';
+                    paSetStatus('Starting FTIO analysis…');
+                    var startTime = Date.now();
+                    var progressTotal = 0;
+
+                    var pollTimer = setInterval(function () {
+                        fetch('/ftio/progress?jobid=' + encodeURIComponent(jobid))
+                            .then(function (r) { return r.ok ? r.json() : null; })
+                            .then(function (p) {
+                                if (!p) return;
+                                var proc = p.processed || 0;
+                                var tot  = p.total || 0;
+                                if (tot > 0) {
+                                    progressTotal = tot;
+                                    progressBar.max = tot;
+                                    progressBar.value = proc;
+                                }
+                                var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                                var label = tot > 0
+                                    ? proc + ' / ' + tot + ' metrics processed (' + elapsed + 's)'
+                                    : 'Running… (' + elapsed + 's)';
+                                paSetStatus(label);
+                            })
+                            .catch(function () {});
+                    }, 1000);
+
+                    paFetchBody('/ftio/run_all?jobid=' + encodeURIComponent(jobid), 'POST')
+                        .then(function (res) {
+                            clearInterval(pollTimer);
+                            var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                            progressWrap.style.display = 'none';
+                            if (!res.ok || res.data.error) {
+                                paShowError(res.data.error || 'FTIO analysis failed.');
+                                paSetStatus('');
+                            } else {
+                                var nResults = res.data.models ? Object.keys(res.data.models).length : 0;
+                                var tot = progressTotal || nResults;
+                                paSetStatus(nResults + ' / ' + tot + ' metrics with results — done in ' + elapsed + 's.');
+                                paRender(res.data.models);
+                            }
+                        })
+                        .catch(function (e) {
+                            clearInterval(pollTimer);
+                            progressWrap.style.display = 'none';
+                            paShowError('Request failed: ' + e.message);
+                            paSetStatus('');
+                        })
+                        .finally(function () { btn.disabled = false; });
+                };
+
+                window.paFilterTable = function () {
+                    var val = document.getElementById('pa-metric-filter').value;
+                    var search = (document.getElementById('pa-table-search') || {}).value || '';
+                    var rows = val ? _paAllRows.filter(function (r) { return r.metric === val; }) : _paAllRows;
+                    if (search) rows = rows.filter(function (r) { return r.metric.toLowerCase().indexOf(search.toLowerCase()) !== -1; });
+                    paRenderTable(rows);
+                };
+
+                window.paSearchTable = function (query) {
+                    var val = document.getElementById('pa-metric-filter').value;
+                    var rows = val ? _paAllRows.filter(function (r) { return r.metric === val; }) : _paAllRows;
+                    if (query) rows = rows.filter(function (r) { return r.metric.toLowerCase().indexOf(query.toLowerCase()) !== -1; });
+                    paRenderTable(rows);
+                };
+
+                function paSetStatus(msg) { document.getElementById('pa-status').textContent = msg; }
+
+                function paShowError(msg) {
+                    var el = document.getElementById('pa-error');
+                    if (msg) { el.textContent = msg; el.style.display = ''; }
+                    else { el.style.display = 'none'; }
+                }
+
+                function paRender(models) {
+                    if (!models || Object.keys(models).length === 0) {
+                        paShowError('No FTIO models stored for this job.');
+                        document.getElementById('pa-results').style.display = 'none';
+                        return;
+                    }
+                    _paModels = models;
+                    _paSelectedMetrics = {}; // clear selection on new data
+
+                    // One row per metric: pick the dominant freq entry with highest amplitude
+                    _paAllRows = [];
+                    Object.entries(models).forEach(function (entry) {
+                        var metric = entry[0], m = entry[1];
+                        if (!m.dominant_freq || m.dominant_freq.length === 0) {
+                            _paAllRows.push({ metric: metric, freq: null, period: null, conf: null, amp: null, t_start: m.t_start, t_end: m.t_end });
+                            return;
+                        }
+                        var bestIdx = m.amp.indexOf(Math.max.apply(Math, m.amp));
+                        var f = m.dominant_freq[bestIdx];
+                        _paAllRows.push({
+                            metric: metric,
+                            freq: f,
+                            period: f > 0 ? 1 / f : null,
+                            conf: m.conf[bestIdx] * 100,
+                            amp: m.amp[bestIdx],
+                            phi: (m.phi && m.phi.length > bestIdx) ? m.phi[bestIdx] : null,
+                            t_start: m.t_start,
+                            t_end: m.t_end,
+                        });
+                    });
+                    // Sort by dominant frequency ascending (nulls last)
+                    _paAllRows.sort(function (a, b) {
+                        if (a.freq === null && b.freq === null) return 0;
+                        if (a.freq === null) return 1;
+                        if (b.freq === null) return -1;
+                        return a.freq - b.freq;
+                    });
+
+                    // Populate metric filter dropdown
+                    var filter = document.getElementById('pa-metric-filter');
+                    filter.innerHTML = '<option value="">All</option>';
+                    _paAllRows.forEach(function (r) {
+                        var opt = document.createElement('option');
+                        opt.value = r.metric;
+                        opt.textContent = r.metric;
+                        filter.appendChild(opt);
+                    });
+
+                    paRenderTable(_paAllRows);
+                    document.getElementById('pa-results').style.display = '';
+
+                    function paRenderAllCharts() {
+                        paRenderScatter(_paAllRows);
+                        paRenderHeatmap(_paModels);
+                        paRenderPhiScatter(_paAllRows);
+                        paRenderCorrelationMatrix(_paAllRows);
+                        paRenderCategoryWaves(_paModels);
+                    }
+
+                    if (window.Plotly) {
+                        paRenderAllCharts();
+                    } else {
+                        document.getElementById('pa-chart-note').textContent = 'Charts loading…';
+                        var wait = setInterval(function () {
+                            if (window.Plotly) {
+                                clearInterval(wait);
+                                paRenderAllCharts();
+                                document.getElementById('pa-chart-note').textContent = '';
+                            }
+                        }, 200);
+                    }
+                }
+
+                var _paSelectedMetrics = {};
+
+                function paRenderTable(rows) {
+                    var tbody = document.getElementById('pa-tbody');
+                    tbody.innerHTML = '';
+                    var fmt = function (v, dec) { return v !== null ? v.toFixed(dec) : '—'; };
+                    rows.forEach(function (r, i) {
+                        var tr = document.createElement('tr');
+                        var selected = !!_paSelectedMetrics[r.metric];
+                        tr.style.background = selected ? '#cce5ff' : (i % 2 === 0 ? '#fff' : '#f8f8f8');
+                        tr.style.cursor = 'pointer';
+                        tr.title = 'Click to toggle in comparison plot';
+                        tr.setAttribute('data-metric', r.metric);
+                        tr.innerHTML =
+                            '<td style="padding:5px 12px; font-weight:' + (selected ? 'bold' : 'normal') + ';">' + r.metric + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.freq, 5) + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.period, 3) + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.conf, 1) + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.amp, 3) + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.t_start, 2) + '</td>' +
+                            '<td style="padding:5px 12px; text-align:right;">' + fmt(r.t_end, 2) + '</td>';
+                        tr.addEventListener('click', function () {
+                            var m = this.getAttribute('data-metric');
+                            if (_paSelectedMetrics[m]) {
+                                delete _paSelectedMetrics[m];
+                            } else {
+                                _paSelectedMetrics[m] = true;
+                            }
+                            paRenderTable(_paAllRows);
+                            paRenderSelectionPlot();
+                        });
+                        tbody.appendChild(tr);
+                    });
+                }
+
+                window.paRenderSelectionPlot = function paRenderSelectionPlot() {
+                    var el = document.getElementById('pa-selection-plot');
+                    var keys = Object.keys(_paSelectedMetrics);
+                    if (keys.length === 0 || !window.Plotly) { el.style.display = 'none'; return; }
+                    var showRaw  = document.getElementById('pa-sel-show-raw') && document.getElementById('pa-sel-show-raw').checked;
+                    var showDom  = document.getElementById('pa-sel-show-dominant') && document.getElementById('pa-sel-show-dominant').checked;
+                    var showRecon = document.getElementById('pa-sel-show-recon') && document.getElementById('pa-sel-show-recon').checked;
+                    el.style.display = '';
+
+                    var traces = [];
+                    var pendingRaw = 0;
+                    var colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f'];
+
+                    // Compute x-axis bounds from the metrics that will actually be plotted
+                    var xMin = Infinity, xMax = -Infinity;
+                    keys.forEach(function (metric) {
+                        var m = _paModels[metric];
+                        if (!m || !m.dominant_freq || m.dominant_freq.length === 0) return;
+                        var ts = Math.max(0, m.t_start || 0);
+                        var te = m.t_end || 0;
+                        if (ts < xMin) xMin = ts;
+                        if (te > xMax) xMax = te;
+                    });
+                    if (!isFinite(xMin)) xMin = 0;
+                    if (!isFinite(xMax) || xMax <= xMin) xMax = xMin + 1;
+                    var xRange = [xMin, xMax];
+
+                    function normArr(ys) {
+                        var mx = Math.max.apply(null, ys.map(Math.abs)) || 1;
+                        return ys.map(function (v) { return v / mx; });
+                    }
+
+                    function buildWave(m, domOnly) {
+                        var tf = m.top_freqs;
+                        if (!tf || !tf.freq || tf.freq.length === 0) return null;
+                        var freqs = domOnly ? tf.freq.slice(0, 1) : tf.freq;
+                        var amps  = domOnly ? (tf.amp ? tf.amp.slice(0, 1) : [1]) : (tf.amp || []);
+                        var phis  = domOnly ? (tf.phi ? tf.phi.slice(0, 1) : [0]) : (tf.phi || []);
+                        var tStart = Math.max(0, m.t_start || 0), tEnd = m.t_end || 1, nPts = 500;
+                        var dt = (tEnd - tStart) / (nPts - 1);
+                        var ts = [], ys = [];
+                        for (var i = 0; i < nPts; i++) {
+                            var t = tStart + i * dt, y = 0;
+                            for (var fi = 0; fi < freqs.length; fi++) {
+                                var a = amps[fi] || 1, ph = phis[fi] || 0;
+                                y += a * Math.cos(2 * Math.PI * freqs[fi] * t + ph);
+                            }
+                            ts.push(t); ys.push(y);
+                        }
+                        return { ts: ts, ys: normArr(ys) };
+                    }
+
+                    keys.forEach(function (metric, ci) {
+                        var m = _paModels[metric];
+                        if (!m) return;
+                        // skip metrics with no dominant frequency
+                        if (!m.dominant_freq || m.dominant_freq.length === 0) return;
+                        var col = colors[ci % colors.length];
+
+                        if (showRecon) {
+                            var wr = buildWave(m, false);
+                            if (wr) traces.push({ x: wr.ts, y: wr.ys, type: 'scatter', mode: 'lines', name: metric + ' (recon)', line: { color: col } });
+                        }
+                        if (showDom) {
+                            var wd = buildWave(m, true);
+                            if (wd) traces.push({ x: wd.ts, y: wd.ys, type: 'scatter', mode: 'lines', name: metric + ' (dom)', line: { color: col, dash: 'dash' } });
+                        }
+                        if (showRaw && _paCurrentJobId) {
+                            pendingRaw++;
+                            (function (capMetric, capCol) {
+                                fetch('/trace/plot', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ jobid: _paCurrentJobId, filter: capMetric, derivate: false }),
+                                })
+                                    .then(function (r) {
+                                        if (!r.ok) { console.warn('trace/plot failed for', capMetric, r.status); return null; }
+                                        return r.json();
+                                    })
+                                    .then(function (d) {
+                                        // /trace/plot returns [[epoch_seconds, value], ...]
+                                        // export() subtracts t0, so FTIO t_start/t_end are elapsed seconds.
+                                        // Align by subtracting the first timestamp.
+                                        if (!Array.isArray(d) || d.length === 0) { console.warn('trace/plot empty for', capMetric, d); return; }
+                                        var t0 = d[0][0];
+                                        var ts = d.map(function (p) { return p[0] - t0; });
+                                        var ys = normArr(d.map(function (p) { return p[1] || 0; }));
+                                        traces.push({ x: ts, y: ys, type: 'scatter', mode: 'lines', name: capMetric + ' (raw)', line: { color: capCol, dash: 'dot' } });
+                                    })
+                                    .catch(function (e) { console.error('trace/plot error for', capMetric, e); })
+                                    .finally(function () {
+                                        pendingRaw--;
+                                        if (pendingRaw === 0) {
+                                            Plotly.newPlot('pa-selection-plot', traces, {
+                                                title: 'Selected Metrics (normalized)',
+                                                xaxis: { title: 'Time (s)', range: xRange },
+                                                yaxis: { title: 'Amplitude (normalized)' },
+                                                margin: { t: 50, b: 50, l: 70, r: 20 },
+                                                paper_bgcolor: 'white',
+                                            }, _plotCfg);
+                                        }
+                                    });
+                            })(metric, col);
+                        }
+                    });
+
+                    if (pendingRaw === 0) {
+                        if (traces.length === 0) { el.style.display = 'none'; return; }
+                        Plotly.newPlot('pa-selection-plot', traces, {
+                            title: 'Selected Metrics (normalized)',
+                            xaxis: { title: 'Time (s)', range: xRange },
+                            yaxis: { title: 'Amplitude (normalized)' },
+                            margin: { t: 50, b: 50, l: 70, r: 20 },
+                            paper_bgcolor: 'white',
+                        }, _plotCfg);
+                    }
+                }
+
+                // scrollZoom disabled globally — enabled per-plot only after user clicks into it,
+                // so normal page scrolling doesn't accidentally zoom a plot.
+                var _plotCfg = { responsive: true, scrollZoom: false, displayModeBar: true };
+
+                function paEnableScrollZoom(divId) {
+                    Plotly.relayout(divId, {}).then(function () {
+                        Plotly.update(divId, {}, {});
+                    });
+                    // re-create config with scrollZoom on
+                    var el = document.getElementById(divId);
+                    if (el && el._fullLayout) {
+                        Plotly.react(divId, el.data, el.layout, { responsive: true, scrollZoom: true, displayModeBar: true });
+                    }
+                }
+
+                // Wire click-to-activate scroll zoom on all pa-* plot divs
+                ['pa-scatter','pa-heatmap','pa-phi-scatter','pa-corr-heatmap'].forEach(function (id) {
+                    document.getElementById(id).addEventListener('click', function () {
+                        if (window.Plotly) paEnableScrollZoom(id);
+                    });
+                });
+
+                window.paResizePlot = function paResizePlot(slider, divId, axis) {
+                    var val = parseInt(slider.value, 10);
+                    var el = document.getElementById(divId);
+                    var lbl = document.querySelector('.pa-h-lbl[data-target="' + divId + '"]');
+                    if (lbl) lbl.textContent = val;
+                    el.style.height = val + 'px';
+                    if (!window.Plotly || !el._fullLayout) return;
+                    Plotly.relayout(divId, { height: val });
+                }
+
+                // Scatter: x = metric name, y = dominant freq, color = confidence
+                function paRenderScatter(rows) {
+                    var withFreq = rows.filter(function (r) { return r.freq !== null; });
+                    if (withFreq.length === 0) { document.getElementById('pa-scatter').style.display = 'none'; return; }
+                    document.getElementById('pa-scatter').style.display = '';
+                    document.getElementById('pa-scatter').style.height = '720px';
+                    Plotly.newPlot('pa-scatter', [{
+                        x: withFreq.map(function (r) { return r.metric; }),
+                        y: withFreq.map(function (r) { return r.freq; }),
+                        mode: 'markers',
+                        type: 'scatter',
+                        hovertemplate: '<b>%{x}</b><br>Freq: %{y:.5f} Hz<br>Period: %{customdata[0]:.3f} s<br>Conf: %{customdata[1]:.1f}%<extra></extra>',
+                        customdata: withFreq.map(function (r) { return [r.period || 0, r.conf]; }),
+                        marker: {
+                            size: withFreq.map(function (r) { return Math.max(6, r.conf / 8); }),
+                            color: withFreq.map(function (r) { return r.conf; }),
+                            colorscale: 'Viridis',
+                            showscale: true,
+                            colorbar: { title: 'Conf (%)' },
+                            line: { color: '#555', width: 0.5 },
+                        },
+                    }], {
+                        title: 'Dominant Frequency per Metric',
+                        xaxis: { title: 'Metric', tickangle: -40, automargin: true },
+                        yaxis: { title: 'Dominant Frequency (Hz)' },
+                        margin: { t: 50, b: 10, l: 70, r: 20 },
+                        paper_bgcolor: 'white',
+                    }, _plotCfg);
+                }
+
+                // Heatmap: x = metric (sorted by freq), y = frequency bins, z = confidence
+                function paRenderHeatmap(models) {
+                    var entries = Object.entries(models).filter(function (e) {
+                        return e[1].dominant_freq && e[1].dominant_freq.length > 0;
+                    });
+                    if (entries.length === 0) { document.getElementById('pa-heatmap').style.display = 'none'; return; }
+                    document.getElementById('pa-heatmap').style.display = '';
+
+                    entries.sort(function (a, b) {
+                        var fa = a[1].dominant_freq[a[1].amp.indexOf(Math.max.apply(Math, a[1].amp))];
+                        var fb = b[1].dominant_freq[b[1].amp.indexOf(Math.max.apply(Math, b[1].amp))];
+                        return fa - fb;
+                    });
+
+                    var allFreqs = [];
+                    entries.forEach(function (e) {
+                        var m = e[1];
+                        if (m.top_freqs && m.top_freqs.freq) {
+                            m.top_freqs.freq.forEach(function (f) { if (f > 0) allFreqs.push(f); });
+                        } else {
+                            m.dominant_freq.forEach(function (f) { if (f > 0) allFreqs.push(f); });
+                        }
+                    });
+
+                    if (allFreqs.length === 0) { document.getElementById('pa-heatmap').style.display = 'none'; return; }
+
+                    var fMin = Math.min.apply(Math, allFreqs);
+                    var fMax = Math.max.apply(Math, allFreqs);
+                    if (fMax === fMin) { fMin = fMin * 0.9; fMax = fMax * 1.1 + 1e-9; }
+
+                    var nBins = Math.min(20, Math.max(5, entries.length));
+                    var binSize = (fMax - fMin) / nBins;
+                    var binLabels = [];
+                    for (var i = 0; i < nBins; i++) {
+                        binLabels.push((fMin + i * binSize).toExponential(2) + '–' + (fMin + (i + 1) * binSize).toExponential(2));
+                    }
+
+                    var metricNames = entries.map(function (e) { return e[0]; });
+                    var h = Math.max(175, metricNames.length * 11 + 60);
+                    document.getElementById('pa-heatmap').style.height = h + 'px';
+
+                    // Fill entire z with 0 first so there are no holes
+                    var z = [];
+                    for (var b = 0; b < nBins; b++) { z.push(new Array(metricNames.length).fill(0)); }
+
+                    entries.forEach(function (entry, mi) {
+                        var m = entry[1];
+                        var freqs = (m.top_freqs && m.top_freqs.freq) ? m.top_freqs.freq : m.dominant_freq;
+                        var confs = (m.top_freqs && m.top_freqs.conf) ? m.top_freqs.conf : m.conf;
+                        freqs.forEach(function (f, fi) {
+                            if (f <= 0) return;
+                            var bin = Math.min(nBins - 1, Math.floor((f - fMin) / binSize));
+                            var c = confs[fi] * 100;
+                            if (c > z[bin][mi]) z[bin][mi] = c;
+                        });
+                    });
+
+                    Plotly.newPlot('pa-heatmap', [{
+                        z: z,
+                        x: metricNames,
+                        y: binLabels,
+                        type: 'heatmap',
+                        colorscale: 'Viridis',
+                        colorbar: { title: 'Conf (%)' },
+                        hovertemplate: 'Metric: %{x}<br>Freq bin: %{y}<br>Conf: %{z:.1f}%<extra></extra>',
+                    }], {
+                        title: 'Confidence per Frequency Bin and Metric',
+                        xaxis: { title: 'Metric (sorted by dominant freq)', tickangle: -45, automargin: true },
+                        yaxis: { title: 'Frequency Bin (Hz)' },
+                        margin: { t: 50, b: 10, l: 120, r: 20 },
+                        paper_bgcolor: 'white',
+                    }, _plotCfg);
+                }
+
+                // Phi scatter: x = phi, y = dominant freq, color = confidence
+                function paRenderPhiScatter(rows) {
+                    var withData = rows.filter(function (r) { return r.freq !== null && r.phi !== null; });
+                    var el = document.getElementById('pa-phi-scatter');
+                    if (withData.length === 0) { el.style.display = 'none'; return; }
+                    el.style.display = '';
+                    Plotly.newPlot('pa-phi-scatter', [{
+                        x: withData.map(function (r) { return r.phi; }),
+                        y: withData.map(function (r) { return r.freq; }),
+                        mode: 'markers',
+                        type: 'scatter',
+                        text: withData.map(function (r) { return r.metric; }),
+                        hovertemplate: '<b>%{text}</b><br>Phi: %{x:.4f}<br>Freq: %{y:.5f} Hz<br>Conf: %{customdata:.1f}%<extra></extra>',
+                        customdata: withData.map(function (r) { return r.conf; }),
+                        marker: {
+                            size: withData.map(function (r) { return Math.max(8, r.conf / 8); }),
+                            color: withData.map(function (r) { return r.conf; }),
+                            colorscale: 'Viridis',
+                            showscale: true,
+                            colorbar: { title: 'Conf (%)' },
+                            line: { color: '#555', width: 0.5 },
+                        },
+                    }], {
+                        title: 'Phase (Phi) vs Dominant Frequency',
+                        xaxis: { title: 'Phase φ (rad)', automargin: true },
+                        yaxis: { title: 'Dominant Frequency (Hz)' },
+                        margin: { t: 50, b: 60, l: 70, r: 20 },
+                        paper_bgcolor: 'white',
+                    }, _plotCfg);
+                }
+
+                function paRenderCorrelationMatrix(rows) {
+                    var withFreq = rows.filter(function (r) { return r.freq !== null; });
+                    var el = document.getElementById('pa-corr-heatmap');
+                    if (withFreq.length < 2) { el.style.display = 'none'; return; }
+                    el.style.display = '';
+
+                    var freqs = withFreq.map(function (r) { return r.freq; });
+                    var mu = freqs.reduce(function (a, b) { return a + b; }, 0) / freqs.length;
+                    var sigma = Math.sqrt(freqs.map(function (f) { return (f - mu) * (f - mu); }).reduce(function (a, b) { return a + b; }, 0) / freqs.length);
+
+                    var n = withFreq.length;
+                    var z = [];
+                    for (var i = 0; i < n; i++) {
+                        var row = [];
+                        for (var j = 0; j < n; j++) {
+                            if (sigma === 0) {
+                                row.push(0);
+                            } else {
+                                var Zi = (withFreq[i].freq - mu) / sigma;
+                                var Zj = (withFreq[j].freq - mu) / sigma;
+                                row.push(Math.abs(Zi - Zj) * 100);
+                            }
+                        }
+                        z.push(row);
+                    }
+
+                    var names = withFreq.map(function (r) { return r.metric; });
+                    var h = Math.min(2400, Math.max(100, Math.round(window.innerHeight * 0.8)));
+                    el.style.height = h + 'px';
+                    var corrSlider = document.querySelector('#pa-plot-ctrl-corr input[type=range]');
+                    var corrLbl = document.querySelector('.pa-h-lbl[data-target="pa-corr-heatmap"]');
+                    if (corrSlider) corrSlider.value = h;
+                    if (corrLbl) corrLbl.textContent = h;
+
+                    Plotly.newPlot('pa-corr-heatmap', [{
+                        x: names, y: names, z: z,
+                        type: 'heatmap',
+                        colorscale: [
+                            [0, '#000000'], [0.1, '#cc0000'], [0.2, '#ff8800'],
+                            [0.4, '#ffff00'], [0.6, '#ffffff'], [0.8, '#0055cc'], [1, '#6600aa']
+                        ],
+                        colorbar: { title: 'Rel. deviation (%)' },
+                        hovertemplate: '%{y}<br>vs %{x}<br>Deviation: %{z:.1f}%<extra></extra>',
+                    }], {
+                        title: 'Metric Frequency Correlation (z-score relative deviation)',
+                        xaxis: { tickangle: 90, automargin: true },
+                        yaxis: { automargin: true },
+                        margin: { t: 60, b: 120, l: 120, r: 10 },
+                        paper_bgcolor: 'white',
+                        height: h,
+                    }, _plotCfg);
+                }
+
+                // Category classification (matches proxy_analysis.py classify_waves)
+                var _PA_CATEGORIES = [
+                    { name: 'Network', kw: ['network', 'mpi_bcast', 'sock', 'send', 'listen', 'recieve', 'gather', 'reduce', 'cast'] },
+                    { name: 'Write',   kw: ['write'] },
+                    { name: 'Read',    kw: ['read'] },
+                    { name: 'I/O',     kw: ['io', 'disk', 'stat', 'cntl', 'read', 'write', 'openat', 'mmap', 'seek', 'close'] },
+                    { name: 'Temperature', kw: ['temp'] },
+                    { name: 'CPU',     kw: ['cpu'] },
+                    { name: 'Wait',    kw: ['poll', 'barrier'] },
+                ];
+                // seen keywords for "Other" classification
+                var _PA_SEEN_KW = _PA_CATEGORIES.reduce(function (acc, c) { return acc.concat(c.kw); }, []);
+
+                function _paClassify(metricName) {
+                    var low = metricName.toLowerCase();
+                    for (var ci = 0; ci < _PA_CATEGORIES.length; ci++) {
+                        var cat = _PA_CATEGORIES[ci];
+                        for (var ki = 0; ki < cat.kw.length; ki++) {
+                            if (low.indexOf(cat.kw[ki]) !== -1) return cat.name;
+                        }
+                    }
+                    return 'Other';
+                }
+
+                function _paReconstructWave(model, t) {
+                    var wave = new Array(t.length).fill(0);
+                    var freqs = (model.top_freqs && model.top_freqs.freq && model.top_freqs.freq.length) ? model.top_freqs.freq : (model.dominant_freq || []);
+                    var amps  = (model.top_freqs && model.top_freqs.amp  && model.top_freqs.amp.length)  ? model.top_freqs.amp  : (model.amp || []);
+                    var phis  = (model.top_freqs && model.top_freqs.phi  && model.top_freqs.phi.length)  ? model.top_freqs.phi  : (model.phi || []);
+                    var TWO_PI = 2 * Math.PI;
+                    for (var j = 0; j < freqs.length; j++) {
+                        var f = freqs[j], a = amps[j] || 0, p = phis[j] || 0;
+                        if (!f || !a) continue;
+                        for (var i = 0; i < t.length; i++) {
+                            wave[i] += a * Math.cos(TWO_PI * f * t[i] + p);
+                        }
+                    }
+                    return wave;
+                }
+
+                function _paNormWave(wave) {
+                    var maxAbs = Math.max.apply(Math, wave.map(function (v) { return Math.abs(v); }));
+                    return maxAbs > 0 ? wave.map(function (v) { return v / maxAbs; }) : wave.slice();
+                }
+
+                // Category wave plots (one subplot per non-empty category)
+                function paRenderCategoryWaves(models) {
+                    var container = document.getElementById('pa-category-plots');
+                    container.innerHTML = '';
+
+                    // Group metrics by category
+                    var groups = {};
+                    Object.keys(models).forEach(function (metric) {
+                        var m = models[metric];
+                        if (!m.dominant_freq || !m.dominant_freq.length) return;
+                        var cat = _paClassify(metric);
+                        if (!groups[cat]) groups[cat] = [];
+                        groups[cat].push(metric);
+                    });
+
+                    var catOrder = _PA_CATEGORIES.map(function (c) { return c.name; }).concat(['Other']);
+                    catOrder.forEach(function (catName) {
+                        var metrics = groups[catName];
+                        if (!metrics || metrics.length === 0) return;
+
+                        // Build common time axis
+                        var t_start = Infinity, t_end = -Infinity, sampFreq = NaN;
+                        metrics.forEach(function (metric) {
+                            var m = models[metric];
+                            if (m.t_start < t_start) t_start = m.t_start;
+                            if (m.t_end > t_end) t_end = m.t_end;
+                            if (isNaN(sampFreq) && m.freq > 0) sampFreq = m.freq;
+                        });
+                        if (!isFinite(t_start) || !isFinite(t_end) || isNaN(sampFreq)) return;
+                        t_start = Math.max(0, t_start); // never start before t=0
+
+                        // Use fixed number of points spanning the full range
+                        var nPts = 2000;
+                        var step = (t_end - t_start) / nPts;
+                        var t = [];
+                        for (var i = 0; i <= nPts; i++) t.push(t_start + i * step);
+
+                        // Aggregate normalized waves
+                        var aggWave = new Array(t.length).fill(0);
+                        var traces = [];
+                        metrics.forEach(function (metric) {
+                            var m = models[metric];
+                            var w = _paReconstructWave(m, t);
+                            var wn = _paNormWave(w);
+                            for (var k = 0; k < t.length; k++) aggWave[k] += wn[k];
+                            traces.push({ x: t.slice(), y: wn, mode: 'lines', name: metric + ' (recon)', visible: 'legendonly', line: { width: 1 } });
+                        });
+                        var aggNorm = _paNormWave(aggWave);
+                        traces.unshift({ x: t.slice(), y: aggNorm, mode: 'lines+markers', name: catName + ' (aggregate)', line: { width: 2 }, marker: { size: 3 } });
+
+                        var divId = 'pa-cat-' + catName.replace(/[^a-zA-Z0-9]/g, '_');
+                        var wrapper = document.createElement('div');
+                        wrapper.style.marginTop = '14px';
+                        var label = document.createElement('div');
+                        label.style.cssText = 'font-weight:bold; font-size:13px; margin-bottom:4px; color:#333;';
+                        label.textContent = catName + ' (' + metrics.length + ' metric' + (metrics.length > 1 ? 's' : '') + ')';
+                        wrapper.appendChild(label);
+                        var plotDiv = document.createElement('div');
+                        plotDiv.id = divId;
+                        plotDiv.style.height = '560px';
+                        wrapper.appendChild(plotDiv);
+                        container.appendChild(wrapper);
+
+                        Plotly.newPlot(divId, traces, {
+                            xaxis: { title: 'Time (s)', range: [t_start, t_end] },
+                            yaxis: { title: 'Normalised amplitude' },
+                            margin: { t: 20, b: 50, l: 60, r: 20 },
+                            paper_bgcolor: 'white',
+                            legend: { orientation: 'h', y: -0.2 },
+                            showlegend: true,
+                        }, _plotCfg);
+
+                        // Fetch and overlay raw data for each metric (async — added after initial render)
+                        if (_paCurrentJobId) {
+                            metrics.forEach(function (metric) {
+                                fetch('/trace/plot', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ jobid: _paCurrentJobId, filter: metric, derivate: false }),
+                                })
+                                    .then(function (r) { return r.ok ? r.json() : null; })
+                                    .then(function (d) {
+                                        if (!Array.isArray(d) || d.length === 0) return;
+                                        var rts = d.map(function (p) { return p[0]; });
+                                        var rys = d.map(function (p) { return p[1] || 0; });
+                                        var mx = Math.max.apply(null, rys.map(Math.abs)) || 1;
+                                        rys = rys.map(function (v) { return v / mx; });
+                                        Plotly.addTraces(divId, [{
+                                            x: rts, y: rys, mode: 'lines',
+                                            name: metric + ' (raw)', visible: 'legendonly',
+                                            line: { width: 1, dash: 'dot' },
+                                        }]);
+                                    })
+                                    .catch(function () {});
+                            });
+                        }
+                    });
+
+                    if (container.innerHTML === '') {
+                        container.textContent = 'No metrics with dominant frequencies to reconstruct.';
+                    }
+                }
+            })();
+        </script>
+    </details>
 </main>

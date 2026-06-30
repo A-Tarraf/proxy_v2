@@ -1,44 +1,8 @@
 # Metric Proxy
 
-Metric Proxy is a Prometheus Aggregating Push Gateway designed for use in the ADMIRE project. It acts as an instrumentation proxy, collecting and aggregating metrics from various sources to provide a centralized view for monitoring and analysis
+Metric Proxy is a Prometheus Aggregating Push Gateway designed for use in the ADMIRE project. It acts as an instrumentation proxy, collecting and aggregating metrics from various sources to provide a centralized view for monitoring and analysis.
 
-## Install Rust
-
-:::info
-Do this step only the first time you install
-:::
-
-Simply run:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-#Answer "1" proceed to install to the question (or customize accordingly)
-```
-
-## Compile Proxy V2
-
-### Dependencies
-
-You need:
-- a python in env (python / python3)
-- mpicc in env (any MPI but same as your app)
-- Rust installed
-
-### Get Sources
-
-```bash
-git clone https://github.com/besnardjb/proxy_v2.git
-```
-
-### Compile
-
-Simply enter inside the source directory `cd ./proxy_v2` and run `./install [PREFIX]`.
-
-:::info
-You may need to tweak the OpenSSL directory using `export OPENSSL_DIR="/usr/local/ssl` if there is an issue compiling the OpenSSL crate.
-:::
-
-### TL;DR
+## Quick Start
 
 ```sh
 git clone https://github.com/besnardjb/proxy_v2.git
@@ -47,371 +11,258 @@ cd proxy_v2
 ./install.sh $HOME/metric-proxy
 # Add the prefix to your path
 export PATH=$HOME/metric-proxy/bin:$PATH
-# Run the server (and keep it running)
+# Run the server (and keep it running in a terminal)
 proxy_v2
-# Run the client in another shell1
-proxy_run -j testls -- ls -R /
+# Run the client in another shell
+proxy_run -j testjob -- ls -R /
 ```
 
 Then open http://localhost:1337
 
-## Proxy Design
+---
 
-The new proxy (also called V2) shares several design approaches with the first iteration of its kind with the following changes:
+## Install
 
-- The proxy now includes an internal web-gui (by default at http://localhost:1337)
-- The proxy is capable of creating a reduction tree for metrics
-- Data are tracked per-job basis in real-time
-- The proxy now includes the capability of tracking node state (node-level metrics)
+### Prerequisites
 
+- Rust (install via `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- `mpicc` in PATH (any MPI matching your application)
+- Python 3 in PATH
+- `libssl-dev` / `openssl-devel` (if OpenSSL compile errors, set `export OPENSSL_DIR="/usr/local/ssl"`)
+
+### Compile and Install
+
+```bash
+git clone https://github.com/besnardjb/proxy_v2.git
+cd proxy_v2
+./install.sh $HOME/metric-proxy
+export PATH=$HOME/metric-proxy/bin:$PATH
+```
+
+---
 
 ## Running the Proxy
 
-### Running Manually
+### Flags Reference
 
-The `proxy_run` command is to be used to run instrumented programs. This program supposed that a metric proxy is running on each of the target nodes.
+| Flag | Long form | Default | Description |
+|------|-----------|---------|-------------|
+| `-p` | `--port` | `1337` | HTTP server port |
+| `-r` | `--root-proxy` | — | Relay all metrics to this upstream proxy (`ADDR` or `ADDR@PERIOD_MS`) |
+| `-s` | `--sub-proxies` | — | Additional proxies to scrape (comma-separated) |
+| `-S` | `--sampling-period` | `1000` | Sampling period in milliseconds |
+| `-m` | `--max-trace-size` | `32` | Max trace file size on disk in MB |
+| `-t` | `--target-prefix` | `~/.proxyprofiles/` | Root directory for proxy data |
+| `-i` | `--inhibit-profile-aggregation` | false | Disable local profile saving (use on leaf nodes when relaying to root) |
+| `-b` | `--branches` | `2` | Branches for hierarchical aggregation (0 = binomial, >0 = k-ary tree) |
+| `-u` | `--unix` | — | Path to UNIX socket for the gateway |
 
-Help is the following:
-```
-Usage: proxy_run [OPTIONS] [-- <COMMAND>...]
+### Single-Node Usage
 
-Arguments:
-  [COMMAND]...  A command to run (passed after --)
-
-Options:
-  -l, --listexporters            List detected exporters
-  -e, --exporter <EXPORTER>      List of exporters to activate
-  -j, --jobid <JOBID>            Optionnal JOBID (MPI/SLURM may generate one automatically)
-  -u, --unixsocket <UNIXSOCKET>  Optionnal path to proxy UNIX Socket
-  -h, --help                     Print help
-  -V, --version                  Print version
-``` 
-
-A basic usage is:
+Start the proxy server, then wrap your application with `proxy_run`:
 
 ```sh
-# MPIRUN
-mpirun -np 8 proxy_run -- ./myprogram -XXX
-# srun
-srun -n 8 proxy_run -- ./myprogram -XXX
+# Terminal 1 — server
+proxy_v2
+
+# Terminal 2 — run application
+mpirun -np 8 proxy_run -- ./myprogram
+# or with srun
+srun -n 8 proxy_run -- ./myprogram
 ```
 
+Force a job ID with `-j`:
 
-The metric proxy now supports jobs, you can force a job using the `-j` flag or resort to the slurm / mpirun default. Note, a job may have no jobid in some circumstances and thus not appear as a job if you open the job interface in http://localhost:1337/jobs.html.
-
-For example if you do:
-
-```
-proxy_run -j testjob -- yes
+```sh
+proxy_run -j myjob -- ./myprogram
 ```
 
-now have a `testjob` line:
+---
 
-![](https://france.paratools.com/hedgedoc/uploads/7c4884e1-b9af-4d21-ab11-01656c633c64.png)
+## HPC / SLURM Multi-Node Deployment
 
+In a multi-node SLURM job the recommended topology is:
 
-You can then click on `testjob` to see the metrics flowing:
-
-![](https://france.paratools.com/hedgedoc/uploads/5af635d1-1335-451c-9089-5b8373e8114f.png)
-
-
-
-:::info
-Both job metrics and node level metrics are collated in these metrics to ease the blaming of node performance on job performance. Note that node level metrics are transposed indiferently of a possible partial allocation.
-:::
-
-### Note on Job-Related Data Endpoints
-
-Unlike previous proxy which exposed only Prometheus endpoint, we have reworked our approach to expose more structured data including for each job:
-
-Job management offers the following endpoints:
-
-- A list of current jobs and their metadata at [http://127.0.0.1:1337/job/list](http://127.0.0.1:1337/joblist)
-
-```json
-[
-    {
-        "jobid": "main",
-        "command": "Sum of all Jobs",
-        "size": 0,
-        "nodelist": "",
-        "partition": "",
-        "cluster": "",
-        "run_dir": "",
-        "start_time": 0,
-        "end_time": 0
-    },
-    {
-        "jobid": "Node: deneb",
-        "command": "Sum of all Jobs running on deneb",
-        "size": 0,
-        "nodelist": "deneb",
-        "partition": "",
-        "cluster": "",
-        "run_dir": "",
-        "start_time": 0,
-        "end_time": 0
-    }
-]
+```
+Login node:  proxy_v2  (root proxy — persistent, stores profiles and traces)
+                ↑
+Compute nodes: proxy_v2 -i -r http://LOGIN_NODE:1337  (leaf proxies — relay to root)
+                ↑
+Application: srun proxy_run -- <app>
 ```
 
-- A global view of all jobs all at once [http://localhost:1337/job](http://localhost:1337/job) it includes **all** the data (metadata and counters)
+### Why this layout?
 
-```json
-[
-{
-    "desc": {
-        "jobid": "main",
-        "command": "Sum of all Jobs",
-        "size": 0,
-        "nodelist": "",
-        "partition": "",
-        "cluster": "",
-        "run_dir": "",
-        "start_time": 0,
-        "end_time": 0
-    },
-    "counters": [
-        {
-            "name": "proxy_cpu_total",
-            "doc": "Number of tracked CPUs by individual proxies",
-            "ctype": {
-                "Gauge": {
-                    "min": 8,
-                    "max": 8,
-                    "hits": 1,
-                    "total": 8
-                }
-            }
-        },
-        ...
-    ]
-},
-{
-    "desc": {
-        "jobid": "Node: deneb",
-        "command": "Sum of all Jobs running on deneb",
-        "size": 0,
-        "nodelist": "deneb",
-        "partition": "",
-        "cluster": "",
-        "run_dir": "",
-        "start_time": 0,
-        "end_time": 0
-    },
-    "counters": [
-        {
-            "name": "proxy_network_receive_packets_total{interface=\"docker0\"}",
-            "doc": "Total number of packets received on the given device",
-            "ctype": {
-                "Counter": {
-                    "value": 0
-                }
-            }
-        },
-        ...
-    ]
-}
-]
-```
+- The **root proxy** on the login node aggregates data from all nodes and exposes the web UI at `http://LOGIN_NODE:1337`.
+- Each **leaf proxy** runs on a compute node with `-i` (no local profile saving) and `-r` (relay to root). This keeps the compute nodes lightweight.
+- `-S 100` samples every 100 ms for finer-grained metrics during short jobs.
+- `-m 128` raises the per-node trace limit to 128 MB for large workloads.
 
-- A JSON export of jobs [http://localhost:1337/job/?job=main](http://localhost:1337/job/?job=main) it filters only the job of interest instead of returning the full array of jobs. It extracts the jobfrom the array given by [http://localhost:1337/job](http://localhost:1337/job) and has the same structure.
+### Example SLURM Job Script
 
-
-- A prometheus export for each job [http://localhost:1337/metrics/?job=testjob](http://localhost:1337/metrics/?job=testjob). Note [http://localhost:1337/metrics](http://localhost:1337/metrics) is the export of the main job and thus equivalent to [http://localhost:1337/metrics/?job=main](http://localhost:1337/metrics/?job=main)
-
-
-
-
-## Setting Alarms
-
-You may set alarms to track values see the example GUI at http://127.0.0.1:1337/alarms.html.
-
-We propose the following endpoints:
-
-- http://127.0.0.1:1337/alarms : list current raised alarms
-
-```json
-{
-  "main": [
-    {
-      "name": "My Alarm",
-      "metric": "proxy_cpu_load_average_percent",
-      "operator": {
-        "More": 33
-      },
-      "current": 51.56660318374634,
-      "active": true,
-      "pretty": "My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 51.56660318374634 (Min: 51.56660318374634, Max : 51.56660318374634, Hits: 1, Total : 51.56660318374634) GAUGE > 33"
-    }
-  ]
-}
-```
-
-- http://127.0.0.1:1337/alarms/list : list all registered alarms
-
-```json
-{
-  "main": [
-    {
-      "name": "My Other Alarm",
-      "metric": "proxy_cpu_load_average_percent",
-      "operator": {
-        "Less": 33
-      },
-      "current": 6.246700286865234,
-      "active": true,
-      "pretty": "My Other Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 6.246700286865234 (Min: 6.246700286865234, Max : 6.246700286865234, Hits: 1, Total : 6.246700286865234) GAUGE < 33"
-    },
-    {
-      "name": "My Alarm",
-      "metric": "proxy_cpu_load_average_percent",
-      "operator": {
-        "More": 33
-      },
-      "current": 6.246700286865234,
-      "active": false,
-      "pretty": "My Alarm : proxy_cpu_load_average_percent (Average load on all the CPUs) = 6.246700286865234 (Min: 6.246700286865234, Max : 6.246700286865234, Hits: 1, Total : 6.246700286865234) GAUGE > 33"
-    }
-  ]
-}
-```
-
-- http://127.0.0.1:1337/alarms/add : add a new alarm
-
-:::info
-Takes a JSON object
-```json
-{
-    "name": "My Alarm",
-    "target": "main",
-    "metric": "proxy_cpu_load_average_percent",
-    "operation": ">",
-    "value": 33
-}
-```
-
-You can make it with curl:
+The following script (see also [`docs/sbatch_example.sh`](docs/sbatch_example.sh)) launches DLIO with proxy instrumentation across multiple nodes:
 
 ```bash
-curl -s http://localhost:1337/alarms/add\
+#!/bin/bash
+#SBATCH -J my_benchmark
+#SBATCH -n 64               # total MPI ranks
+#SBATCH -c 3                # CPUs per task
+#SBATCH --mem-per-cpu=3760  # leaves one core free for the per-node proxy
+#SBATCH -t 00:40:00
+
+module purge
+source ~/loads
+source /path/to/FTIO/.venv/bin/activate
+
+export PATH=$TOOLS_BIN:$PATH
+export LD_LIBRARY_PATH=$TOOLS_LIB:$LD_LIBRARY_PATH
+export SRUN=/opt/slurm/current/bin/srun
+
+# ── Root proxy: already running on the login node (start it before submitting) ──
+export ROOT_PROXY=login_node_hostname   # e.g. logc0002
+
+# ── Per-node leaf proxies: launch one per node, overlap with the main job ──
+$SRUN --nodes=${SLURM_NNODES} \
+      --ntasks=${SLURM_NNODES} \
+      --ntasks-per-node=1 \
+      --cpus-per-task=1 \
+      --overlap \
+      proxy_v2 -i -r http://${ROOT_PROXY}:1337 -S 100 -m 128 &
+
+CPUS_APP=${SLURM_CPUS_PER_TASK}
+
+# ── Application (data generation, no proxy needed) ──
+$SRUN --cpus-per-task=${CPUS_APP} \
+      dlio_benchmark workload=my_workload \
+        ++workload.workflow.generate_data=True \
+        ++workload.workflow.train=False
+
+# ── Application (training, wrapped with proxy_run) ──
+$SRUN --cpus-per-task=${CPUS_APP} \
+      proxy_run -- dlio_benchmark workload=my_workload \
+        ++workload.workflow.generate_data=False \
+        ++workload.workflow.train=True
+
+EXITCODE=$?
+exit $EXITCODE
+```
+
+> **Step 1 — start the root proxy on the login node** (do this once, before submitting):
+> ```sh
+> ssh <login_node>
+> bash docs/start_root_proxy.sh   # starts proxy_v2 in background, prints PID and log path
+> # verify: curl http://localhost:1337/job/list
+> ```
+> See [`docs/start_root_proxy.sh`](docs/start_root_proxy.sh) for the full script with flags explained.
+>
+> **Step 2 — submit the job** (leaf proxies inside the job connect back to the root):
+> ```sh
+> sbatch docs/sbatch_example.sh
+> ```
+>
+> **Step 3 — view results** at `http://<login_node>:1337` → `ftio.html` → Parallel Analysis.
+
+### Alternative: proxy on a compute node (no login-node access)
+
+If you cannot run the root proxy on the login node, launch it on the first compute node instead:
+
+```bash
+export ROOT_PROXY=$(hostname)
+$SRUN --nodes=1 --ntasks=1 --ntasks-per-node=1 --overlap \
+      proxy_v2 -t . -S 100 -m 128 &
+sleep 20   # wait for proxy to start
+
+# then launch leaf proxies pointing to ROOT_PROXY, as above
+```
+
+---
+
+## Web UI and FTIO Analysis
+
+Open `http://localhost:1337` (or `http://ROOT_PROXY:1337`) for the dashboard.
+
+Key pages:
+
+| URL | Description |
+|-----|-------------|
+| `/` or `/jobs.html` | Live job metrics |
+| `/trace.html` | Per-metric time-series viewer and offline FTIO analysis |
+| `/ftio.html` | **Parallel FTIO analysis** — run FTIO on all metrics of a stored job at once, view frequency correlations, category waves, and dominant frequencies |
+| `/alarms.html` | Alarm configuration |
+| `/profiles.html` | Browse finished job profiles |
+
+### Running FTIO from the proxy
+
+`ftio.html` → **Parallel Analysis** tab: select a job, click *Run Analysis*. The proxy sends all metrics to FTIO in one batch (Python `ProcessPoolExecutor` parallelises internally) and displays:
+
+- Dominant frequency per metric (scatter + heatmap)
+- Frequency correlation matrix
+- Category waves (I/O, network, compute) with reconstructed and raw signals
+- Per-metric selection plot
+
+FTIO must be installed and `predictor` must be in PATH (or the proxy will auto-start it):
+
+```sh
+# Install FTIO (from FTIO repo)
+make install
+source .venv/bin/activate
+```
+
+---
+
+## Data Endpoints
+
+### Job Data
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /job/list` | List current jobs and metadata |
+| `GET /job/` | All jobs with full counter data |
+| `GET /job/?job=JOBID` | Single job data |
+| `GET /metrics/?job=JOBID` | Prometheus format export for a job |
+
+### Trace Data
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /trace/list` | List stored trace jobs |
+| `POST /trace/plot` | Raw time-series data: `{"jobid":"...", "filter":"metric_name", "derivate":false}` |
+| `GET /ftio/run?jobid=JOBID` | Trigger FTIO analysis for all metrics of a job |
+| `GET /ftio/progress?jobid=JOBID` | Analysis progress: `{"processed": N, "total": M}` |
+
+### Alarms
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/alarms` | GET | List raised alarms |
+| `/alarms/list` | GET | List all registered alarms |
+| `/alarms/add` | POST | Add alarm: `{"name":"...","target":"main","metric":"...","operation":">","value":33}` |
+| `/alarms/del` | GET/POST | Delete alarm by `?targetjob=X&name=Y` or POST JSON |
+
+Example:
+```bash
+curl -s http://localhost:1337/alarms/add \
   -H "Content-Type: application/json" \
-  -d '{ "name": "My Alarm", "target": "main", "metric": "proxy_cpu_load_average_percent", "operation": ">", "value": 33 }'
-``` 
-
-
-Operation can be "<" ">" and "=" to w.r.t. value.
-
-:::
-- http://127.0.0.1:1337/alarms/del : delete an existing alarm
-
-:::info
-
-- Using the GET protocol:
-    - **targetjob** : name of the job
-    - **name** : name of the alarm
-
-    Example with Curl
-    ```sh
-    # Be careful with the & in bash/sh
-    curl "http://localhost:1337/alarms/del?targetjob=main&name=My%20Alarm"
-    ```
-
-- Using the POST protocol:
-
-    Send the following JSON:
-    ```json
-    {
-        "target": "main",
-        "name": "My Alarm",
-    }
-    ```
-
-    Example with Curl:
-    ```bash
-    curl -s http://localhost:1337/alarms/del \
-      -H "Content-Type: application/json" \
-      -d '{"target": "main", "name": "My Alarm"}'
-    ``` 
-
-
-:::
-
-## Scanning Finished Jobs (Profiles)
-
-As exposed in the [example GUI](/profiles.html), for manipulating profiles (final snapshot of jobs) the folowing JSON endpoints are provided:
-
-- [http://127.0.0.1:1337/profiles](http://127.0.0.1:1337/profiles) a list of profiles on the system, data layout is a job description as shown in [http://127.0.0.1:1337/joblist](http://127.0.0.1:1337/joblist)
-- [http://127.0.0.1:1337/percmd](http://127.0.0.1:1337/percmd) a list of profiles gathered by launch command to ease procesing by command
-
-```json
-{
-    "./command_a ": [
-            {
-                "jobid": "test2",
-                "command": "./command_a ",
-                "size": 1,
-                "nodelist": "",
-                "partition": "",
-                "cluster": "",
-                "run_dir": "/XXX/proxy_v2/client",
-                "start_time": 1699020416,
-                "end_time": 1699020421
-            }
-        ],
-    "./command_b ": [
-            {
-                "jobid": "test1",
-                "command": "./command_b ",
-                "size": 1,
-                "nodelist": "",
-                "partition": "",
-                "cluster": "",
-                "run_dir": "/XXX/proxy_v2/client",
-                "start_time": 1699020317,
-                "end_time": 1699020398
-            }
-        ]
-}
+  -d '{"name":"High CPU","target":"main","metric":"proxy_cpu_load_average_percent","operation":">","value":80}'
 ```
 
+### Profiles and Scraping
 
-[http://127.0.0.1:1337/get?jobid=XXX](http://127.0.0.1:1337/get?jobid=XXX) allows to get a given profile, layout is identical to a job JSON snapshot as exposed in [http://localhost:1337/job/?job=main](http://localhost:1337/job/?job=main).
+| Endpoint | Description |
+|----------|-------------|
+| `GET /profiles` | List finished job profiles |
+| `GET /percmd` | Profiles grouped by launch command |
+| `GET /get?jobid=XXX` | Get a specific profile |
+| `GET /join?to=HOST:PORT` | Add a scrape target (proxy or Prometheus exporter) |
+| `GET /join/list` | List current scrape targets |
 
-## Adding New Scrapes using /join
-
-It is possible to request a proxy to scrape a given target. Currently the following targets are supported:
-
-- Another proxy meaning you may pass the url to another proxy to have it collected by the current proxt
-- A prometheus exporter, meaning the `/metric` endpoint will be harvested, currently only counters and gauges are handled. In the case of prometheus scrapes, they are aggregated only in "main" and inside the "node" specific job.
-
-Only the GET requests are supported using the `to` argument, for example:
-
-[http://localhost:1337/join?to=localhost:9100](http://localhost:1337/join?to=localhost:9100) will add the [node exporter](https://github.com/prometheus/node_exporter) running on localhost (classically on [http://localhost:9100](http://localhost:9100)) and the proxy is able to scrape such metrics.
-
-You can get the list of current scrapes at [http://localhost:1337/join/list](http://localhost:1337/join/list)
-
-It consists in such JSON:
-
-```json
-[
-  {
-    "target_url": "http://localhost:9100/metrics",
-    "ttype": "Prometheus",
-    "period": 5,
-    "last_scrape": 1699010032
-  },
-  {
-    "target_url": "/system",
-    "ttype": "System",
-    "period": 5,
-    "last_scrape": 1699010032
-  }
-]
+Example — add a node exporter:
+```bash
+curl http://localhost:1337/join?to=localhost:9100
 ```
 
-## Acknowledgments
+---
 
-This project has received funding from the European Union’s Horizon 2020 JTI-EuroHPC research and innovation programme with grant Agreement number: 956748
+## Acknowledgments
 
-
+This project has received funding from the European Union's Horizon 2020 JTI-EuroHPC research and innovation programme with grant Agreement number: 956748

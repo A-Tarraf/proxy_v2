@@ -278,8 +278,8 @@ impl FtioClient {
     // Send metrics and arguments to the FTIO server and receive the response
     pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(7000)?;
-        socket.set_sndtimeo(7000)?;
+        socket.set_rcvtimeo(300000)?;  // 5 min — large traces need time for parallel Python
+        socket.set_sndtimeo(300000)?;
         let address = self.address.read().unwrap();
         if let Some(addr) = address.as_ref() {
             socket.connect(addr)?;

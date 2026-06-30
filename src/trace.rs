@@ -34,7 +34,7 @@ use crate::proxy_common::offset_time_serie;
 /**********************
  * JSON TRACE SUPPORT *
  **********************/
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TraceExport {
     pub infos: TraceInfo,
     pub metrics: HashMap<String, Vec<(f64, f64)>>,
@@ -376,7 +376,7 @@ impl TraceState {
         let mut offset = 0;
         loop {
             let mut size: [u8; 8] = [0; 8];
-            fd.read_exact_at(&mut size, offset).unwrap();
+            fd.read_exact_at(&mut size, offset)?;
             let size = u64::from_le_bytes(size);
 
             offset += 8;
@@ -788,7 +788,7 @@ impl Trace {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub(crate) struct TraceInfo {
     pub desc: JobDesc,
     pub size: u64,
@@ -812,28 +812,45 @@ impl TraceInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 struct FtioModelTopFreq {
+    #[serde(default)]
     freq: Vec<f64>,
+    #[serde(default)]
     conf: Vec<f64>,
+    #[serde(default)]
     amp: Vec<f64>,
+    #[serde(default)]
     phi: Vec<f64>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct FtioModel {
+    #[serde(default)]
     metric: String,
+    #[serde(default)]
     dominant_freq: Vec<f64>,
+    #[serde(default)]
     conf: Vec<f64>,
+    #[serde(default)]
     amp: Vec<f64>,
+    #[serde(default)]
     phi: Vec<f64>,
+    #[serde(default)]
     t_start: f64,
+    #[serde(default)]
     t_end: f64,
+    #[serde(default)]
     total_bytes: usize,
+    #[serde(default)]
     ranks: usize,
+    #[serde(default)]
     freq: f64,
-    top_freq: FtioModelTopFreq,
+    #[serde(default, rename = "top_freqs", alias = "top_freq")]
+    top_freqs: FtioModelTopFreq,
+    #[serde(default)]
     n_samples: usize,
+    #[serde(default)]
     wave_names: Vec<String>,
 }
 
@@ -854,6 +871,8 @@ pub(crate) struct TraceView {
     prefix: PathBuf,
     traces: RwLock<HashMap<String, Arc<Trace>>>,
     freq_models: RwLock<HashMap<String, FtioModelStorage>>,
+    // jobid → (metrics processed so far, total metrics)
+    ftio_progress: RwLock<HashMap<String, (usize, usize)>>,
 }
 
 impl TraceView {
@@ -923,7 +942,7 @@ impl TraceView {
     pub(crate) fn clear(&self, desc: &JobDesc) -> Result<(), Box<dyn Error>> {
         let path = Trace::name(&self.prefix, desc);
         if path.is_file() {
-            log::error!("Removing {}", path.to_string_lossy());
+            log::info!("Removing stale trace file {}", path.to_string_lossy());
             remove_file(path)?;
         }
 
@@ -1072,6 +1091,60 @@ impl TraceView {
         ftio_client: Arc<FtioClient>,
     ) -> Result<(), Box<dyn Error>> {
         let export = self.export(jobid)?;
+        let total = export.metrics.len();
+
+        if let Ok(mut p) = self.ftio_progress.write() {
+            p.insert(jobid.clone(), (0, total));
+        }
+
+        let result = match ftio_client.send_receive(export) {
+            Ok(ftio_result) => match rmp_serde::from_slice::<Vec<FtioModel>>(&ftio_result) {
+                Ok(models) => {
+                    if let Ok(job_model_ht) = self.freq_models.write().as_mut() {
+                        let job_storage = job_model_ht
+                            .entry(jobid.to_string())
+                            .or_insert(FtioModelStorage::new());
+                        for m in models {
+                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
+                            job_storage.models.insert(m.metric.to_string(), m);
+                        }
+                    }
+                    true
+                }
+                Err(e) => {
+                    log::error!("Failed to parse FTIO output: {}", e);
+                    false
+                }
+            },
+            Err(e) => {
+                log::error!("ZMQ error: {}", e);
+                false
+            }
+        };
+
+        if let Ok(mut p) = self.ftio_progress.write() {
+            p.insert(jobid.clone(), (total, total));
+        }
+
+        if !result {
+            self.generate_fallback_ftio_model(jobid)?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn generate_ftio_model_for_metric(
+        &self,
+        jobid: &String,
+        metric: &String,
+        ftio_client: Arc<FtioClient>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut export = self.export(jobid)?;
+        export.metrics.retain(|k, _| k == metric);
+
+        if export.metrics.is_empty() {
+            return Err(format!("Metric '{}' not found in job '{}'", metric, jobid).into());
+        }
 
         if let Ok(ftio_result) = ftio_client.send_receive(export) {
             match rmp_serde::from_slice::<Vec<FtioModel>>(&ftio_result) {
@@ -1080,23 +1153,23 @@ impl TraceView {
                         let job_storage = job_model_ht
                             .entry(jobid.to_string())
                             .or_insert(FtioModelStorage::new());
-
                         for m in models {
-                            log::debug!("FTIO Model for {}: {:?}", m.metric, m);
                             job_storage.models.insert(m.metric.to_string(), m);
                         }
                     }
                 }
                 Err(e) => {
-                    log::error!("Failed to parse FTIO output: {}", e);
+                    log::error!(
+                        "Failed to parse FTIO output for metric {}: {}",
+                        metric,
+                        e
+                    );
                 }
             }
             return Ok(());
         }
 
-        self.generate_fallback_ftio_model(jobid)?;
-        
-        Ok(())
+        Err(format!("ZMQ FTIO unavailable for metric '{}'", metric).into())
     }
 
     fn generate_fallback_ftio_model(&self, jobid: &String) -> Result<(), Box<dyn Error>> {
@@ -1169,10 +1242,109 @@ impl TraceView {
         let prefix = check_prefix_dir(prefix, "traces")?;
         let traces = RwLock::new(Self::load_existing_traces(&prefix)?);
         let freq_models = RwLock::new(HashMap::new());
+        let ftio_progress = RwLock::new(HashMap::new());
         Ok(TraceView {
             prefix,
             traces,
             freq_models,
+            ftio_progress,
         })
+    }
+
+    pub fn get_ftio_progress(&self, jobid: &str) -> (usize, usize) {
+        self.ftio_progress
+            .read()
+            .ok()
+            .and_then(|m| m.get(jobid).copied())
+            .unwrap_or((0, 0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    fn tmp_path(name: &str) -> PathBuf {
+        env::temp_dir().join(format!("proxy_v2_test_{name}_{}.bin", std::process::id()))
+    }
+
+    // ── offset_of_last_frame_start ───────────────────────────────────────────
+
+    #[test]
+    fn empty_trace_file_returns_err_not_panic() {
+        let path = tmp_path("empty");
+        // Create an empty file
+        File::create(&path).expect("create");
+        let mut fd = File::open(&path).expect("open");
+        let result = TraceState::offset_of_last_frame_start(&mut fd);
+        let _ = remove_file(&path);
+        assert!(result.is_err(), "empty file must return Err, not panic");
+    }
+
+    #[test]
+    fn truncated_trace_file_returns_err_not_panic() {
+        let path = tmp_path("truncated");
+        // Write only 3 bytes — not enough for the 8-byte length prefix
+        std::fs::write(&path, b"abc").expect("write");
+        let mut fd = File::open(&path).expect("open");
+        let result = TraceState::offset_of_last_frame_start(&mut fd);
+        let _ = remove_file(&path);
+        assert!(result.is_err(), "truncated file must return Err, not panic");
+    }
+
+    // ── TraceState write + read round-trip ───────────────────────────────────
+
+    fn make_job_desc() -> JobDesc {
+        JobDesc {
+            jobid: "test-job".to_string(),
+            command: "test".to_string(),
+            size: 1,
+            nodelist: String::new(),
+            partition: String::new(),
+            cluster: String::new(),
+            run_dir: String::new(),
+            start_time: 0,
+            end_time: 0,
+        }
+    }
+
+    #[test]
+    fn single_frame_trace_has_offset_zero() {
+        // Use TraceState::new to ensure the file is written with the correct
+        // append-mode layout that offset_of_last_frame_start expects.
+        let path = tmp_path("single_frame");
+        let job = make_job_desc();
+        {
+            let _state = TraceState::new(&path, &job, 32 * 1024 * 1024).expect("new");
+        }
+        let mut fd = File::open(&path).expect("open");
+        let off = TraceState::offset_of_last_frame_start(&mut fd).expect("offset");
+        let _ = remove_file(&path);
+        assert_eq!(off, 0, "single-frame file must report offset 0");
+    }
+
+    #[test]
+    fn new_trace_state_creates_valid_file() {
+        let path = tmp_path("state_new");
+        let job = make_job_desc();
+        {
+            let _state = TraceState::new(&path, &job, 32 * 1024 * 1024)
+                .expect("TraceState::new");
+            // file must exist and be non-empty
+            assert!(path.exists(), "trace file must exist after new()");
+            assert!(
+                std::fs::metadata(&path).expect("meta").len() > 0,
+                "trace file must be non-empty"
+            );
+        }
+        // offset_of_last_frame_start must not panic or error on a valid file
+        let mut fd = File::open(&path).expect("open");
+        let result = TraceState::offset_of_last_frame_start(&mut fd);
+        let _ = remove_file(&path);
+        assert!(
+            result.is_ok(),
+            "valid trace file must yield Ok offset: {result:?}"
+        );
     }
 }

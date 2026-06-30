@@ -41,6 +41,8 @@
                     <option value="1">1</option>
                 </select>
 
+                <div id="ftio-freq-warning" style="display:none; margin-top:8px; padding:6px 10px; border-radius:4px; font-size:0.9em;"></div>
+
                 <br>
 
                 <label for="ftioReconstruct">Reconstruct signal:</label>
@@ -77,7 +79,24 @@
         <span id="sizeText">0 MB / 32.00 MB (0%)</span>
         <br><br>
 
-        <canvas id="myChart"></canvas>
+        <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:8px;">
+                Width:
+                <input type="range" id="chartWidthSlider" min="400" max="3000" value="900" step="50"
+                    oninput="applyChartSize()" style="width:160px;">
+                <span id="chartWidthVal" style="min-width:3.5em; text-align:right;">900</span> px
+            </label>
+            <label style="display:flex; align-items:center; gap:8px;">
+                Height:
+                <input type="range" id="chartHeightSlider" min="200" max="1600" value="600" step="50"
+                    oninput="applyChartSize()" style="width:160px;">
+                <span id="chartHeightVal" style="min-width:3.5em; text-align:right;">600</span> px
+            </label>
+        </div>
+
+        <div id="chartContainer" style="position:relative; width:900px; height:600px;">
+            <canvas id="myChart"></canvas>
+        </div>
     </section>
 
     <script src="/chart.js"></script>
@@ -309,12 +328,32 @@
                 .then(data => {
                     if (data.amp === undefined) {
                         console.warn(data.operation);
+                        setFtioWarning('No dominant frequency — FTIO returned no result for this metric.', 'error');
+                        chart._ftioParams = null;
                         return;
                     }
                     console.log(data);
 
+                    const topFreqs = data.top_freqs;
+                    if (!topFreqs || !topFreqs.freq || !topFreqs.conf ||
+                        topFreqs.freq.length === 0 || topFreqs.conf.length === 0) {
+                        setFtioWarning('No dominant frequency — no periodic pattern detected in this metric.', 'error');
+                        chart._ftioParams = null;
+                        return;
+                    }
+
+                    const nDomFreq = data.dominant_freq ? data.dominant_freq.length : 0;
+                    if (nDomFreq === 0) {
+                        setFtioWarning(
+                            'No dominant frequency — showing candidate frequencies as dashed lines (low confidence).',
+                            'warn'
+                        );
+                    } else {
+                        setFtioWarning(null);
+                    }
+
                     // Expand/Retract select menu
-                    const targetLength = Math.min(data.top_freq.freq.length, 10);
+                    const targetLength = Math.min(topFreqs.freq.length, topFreqs.conf.length, 10);
                     while (ftioDropdown.options.length !== targetLength) {
                         if (ftioDropdown.options.length < targetLength) {
                             const newIndex = ftioDropdown.options.length + 1;
@@ -328,13 +367,16 @@
                     }
 
                     // Get and Sort data by confidence
-                    const indices = data.top_freq.conf.map((_, i) => i);
-                    indices.sort((a, b) => data.top_freq.conf[b] - data.top_freq.conf[a]);
-                    const sortedFreqs = indices.map(i => data.top_freq.freq[i]);
-                    const sortedAmps = indices.map(i => data.top_freq.amp[i]);
-                    const sortedConfs = indices.map(i => data.top_freq.conf[i]);
-                    const sortedPhis = indices.map(i => data.top_freq.phi[i]);
-                    const sortedNames = indices.map(i => data.wave_names[i]);
+                    const indices = topFreqs.conf.map((_, i) => i);
+                    indices.sort((a, b) => topFreqs.conf[b] - topFreqs.conf[a]);
+                    const sortedFreqs = indices.map(i => topFreqs.freq[i]);
+                    const sortedAmps = indices.map(i => topFreqs.amp[i]);
+                    const sortedConfs = indices.map(i => topFreqs.conf[i]);
+                    const sortedPhis = indices.map(i => topFreqs.phi[i]);
+                    const sortedNames = indices.map(i => {
+                        const f = topFreqs.freq[i], a = topFreqs.amp[i], p = topFreqs.phi[i];
+                        return `${a.toExponential(2)}*cos(2π*${f.toExponential(2)}*t${p >= 0 ? '+' : '-'}${Math.abs(p).toExponential(2)})`;
+                    });
 
                     // Update dataset labels
                     chart.data.datasets.forEach((ds, i) => {
@@ -348,8 +390,6 @@
                     const yValues = chart.data.datasets[0].data.map(point => point.y);
                     const meanValue = yValues.reduce((sum, value) => sum + value, 0) / yValues.length;
 
-                    chart.update();
-
                     chart._ftioParams = {
                         sortedFreqs: sortedFreqs,
                         sortedAmps: sortedAmps,
@@ -358,9 +398,11 @@
                         sortedNames: sortedNames,
                         n_samples: data.n_samples,
                         freq: data.freq,
-                        n_dom_freq: data.dominant_freq.length,
+                        n_dom_freq: nDomFreq,
                         meanValue: meanValue
                     };
+
+                    chart.update();
 
                 })
                 .catch(error => {
@@ -422,7 +464,7 @@
 
                     // Precompute invariables for performance
                     const invariables = 2 * Math.PI * frequency * totalDuration;
-                    const phiOffset = phi + ((Math.PI * 3) / 4) + 2 * Math.PI * frequency * panInSeconds;
+                    const phiOffset = phi + 2 * Math.PI * frequency * (chart._startTimeStamp / 1000 + panInSeconds);
 
                     for (let x = left; x <= right; x += 1) {
                         // Get progress as percentage
@@ -499,6 +541,7 @@
                 ftioOptions.style.display = 'none';
                 ftioSettings.style.display = 'none';
                 ftiocustombox.checked = false;
+                setFtioWarning(null);
                 applyBtn.checked = false;
                 applyCustomFTIO = false;
                 chart._ftioHidden = {};
@@ -506,9 +549,45 @@
             chart.update();
         }
 
+        function setFtioWarning(msg, type) {
+            const el = document.getElementById('ftio-freq-warning');
+            if (!msg) { el.style.display = 'none'; return; }
+            el.textContent = msg;
+            el.style.display = '';
+            if (type === 'error') {
+                el.style.cssText += '; background:#fff0f0; color:#cc0000; border:1px solid #ffcccc;';
+            } else {
+                el.style.cssText += '; background:#fff8e1; color:#7a5c00; border:1px solid #ffe082;';
+            }
+        }
+
+        function applyChartSize() {
+            var w = parseInt(document.getElementById('chartWidthSlider').value, 10);
+            var h = parseInt(document.getElementById('chartHeightSlider').value, 10);
+            document.getElementById('chartWidthVal').textContent = w;
+            document.getElementById('chartHeightVal').textContent = h;
+            var container = document.getElementById('chartContainer');
+            container.style.width = w + 'px';
+            container.style.height = h + 'px';
+            if (typeof chart !== 'undefined') chart.resize();
+        }
+
+        function initChartSize() {
+            var defaultW = Math.round(window.innerWidth * 0.8);
+            defaultW = Math.max(400, Math.min(defaultW, 3000));
+            var slider = document.getElementById('chartWidthSlider');
+            slider.value = defaultW;
+            document.getElementById('chartWidthVal').textContent = defaultW;
+            var container = document.getElementById('chartContainer');
+            container.style.width = defaultW + 'px';
+        }
+
         // ==================
         // Initialization
         // ==================
+
+        // Set chart width to 80% of the page by default
+        initChartSize();
 
         // Initialize the Metric select options based on the default Target
         populateJobSelect();
@@ -558,6 +637,8 @@
                 }],
             },
             options: {
+                responsive: true,
+                maintainAspectRatio: false,
                 layout: {
                     padding: {
                         left: 35,
@@ -667,10 +748,18 @@
 
         ftioDropdown.addEventListener('change', updateFtioVisibility);
         ftiobox.addEventListener('change', updateFtioVisibility);
+        document.getElementById('ftioReconstruct').addEventListener('change', function () {
+            chart.update();
+        });
         ftiocustombox.addEventListener('change', function () {
             const ftioSettings = document.getElementById('ftio-container');
-            applyBtn.checked = ftiocustombox.checked ? applyBtn.checked : false;
-            applyCustomFTIO = applyBtn.checked;
+            if (ftiocustombox.checked) {
+                applyBtn.checked = true;
+                applyCustomFTIO = true;
+            } else {
+                applyBtn.checked = false;
+                applyCustomFTIO = false;
+            }
             ftioSettings.style.display = ftiocustombox.checked ? "block" : "none";
         });
         applyBtn.addEventListener('change', function () {
@@ -772,6 +861,60 @@
         ctx.addEventListener('mouseleave', () => {
             chart.options.animation.duration = 500;
             isPanning = false;
+            isYZooming = false;
+        });
+
+        // Right-click + vertical drag = y-axis zoom
+        // Drag up → zoom in (shrink y range), drag down → zoom out (expand y range)
+        let isYZooming = false;
+        let yZoomStartY = null;
+        let yZoomStartMin = null;
+        let yZoomStartMax = null;
+
+        ctx.addEventListener('contextmenu', (event) => {
+            event.preventDefault(); // suppress browser context menu during y-zoom
+        });
+
+        ctx.addEventListener('mousedown', (event) => {
+            if (event.button !== 2) return; // right button only
+            event.preventDefault();
+            isYZooming = true;
+            yZoomStartY = event.offsetY;
+            const yScale = chart.scales.y;
+            yZoomStartMin = yScale.min;
+            yZoomStartMax = yScale.max;
+        });
+
+        ctx.addEventListener('mousemove', (event) => {
+            if (!isYZooming) return;
+            if (Date.now() - lastUpdate < updateInterval) return;
+            lastUpdate = Date.now();
+
+            const deltaY = yZoomStartY - event.offsetY; // positive = drag up = zoom in
+            const yScale = chart.scales.y;
+            const range = yZoomStartMax - yZoomStartMin;
+            const factor = Math.pow(0.997, deltaY); // smooth zoom factor
+            const center = (yZoomStartMin + yZoomStartMax) / 2;
+            const halfRange = (range * factor) / 2;
+
+            chart.options.scales.y.min = center - halfRange;
+            chart.options.scales.y.max = center + halfRange;
+            chart.update('none');
+        });
+
+        ctx.addEventListener('mouseup', (event) => {
+            if (event.button !== 2) return;
+            chart.options.animation.duration = 500;
+            isYZooming = false;
+        });
+
+        // Double-click resets both x and y zoom
+        ctx.addEventListener('dblclick', () => {
+            chart.options.scales.x.min = undefined;
+            chart.options.scales.x.max = undefined;
+            chart.options.scales.y.min = undefined;
+            chart.options.scales.y.max = undefined;
+            chart.update();
         });
 
     </script>

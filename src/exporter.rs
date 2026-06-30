@@ -703,9 +703,15 @@ impl ExporterFactory {
 
         let trace_store = Arc::new(TraceView::new(&profile_prefix)?);
         let ftio_client = Arc::new(FtioClient::new());
+        // Default FTIO sampling frequency matches the proxy's own collection rate
+        {
+            let mut default_args = crate::ftio::FtioArguments::default();
+            default_args.freq = 1000.0 / period as f64;
+            ftio_client.set_arguments(default_args);
+        }
 
         if which::which("admire_proxy_zmq").is_ok() {
-            log::warn!("FTIO server not responding, attempting to start it...");
+            log::info!("FTIO server not responding, attempting to start it...");
             let mut child = Command::new("admire_proxy_zmq")
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())

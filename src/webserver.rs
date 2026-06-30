@@ -1130,6 +1130,78 @@ impl Web {
         }
     }
 
+    fn handle_ftio_all_models(&self, req: &Request) -> WebResponse {
+        if let Some(jobid) = req.get_param("jobid") {
+            if let Some(models) = self.factory.trace_store.get_job_freq_model(jobid) {
+                return WebResponse::Native(Response::json(&models));
+            }
+            return WebResponse::BadReq(
+                "No FTIO models stored for this job — press Run Analysis".to_string(),
+            );
+        }
+        WebResponse::BadReq("jobid parameter required".to_string())
+    }
+
+    fn handle_ftio_run_all(&self, req: &Request) -> WebResponse {
+        if req.method() != "POST" {
+            return WebResponse::BadReq("POST required".to_string());
+        }
+        if let Some(jobid) = req.get_param("jobid") {
+            match self
+                .factory
+                .trace_store
+                .generate_ftio_model(&jobid, self.factory.ftio_client.clone())
+            {
+                Ok(_) => {
+                    if let Some(models) = self.factory.trace_store.get_job_freq_model(jobid) {
+                        return WebResponse::Native(Response::json(&models));
+                    }
+                    WebResponse::BadReq("FTIO ran but no models were stored".to_string())
+                }
+                Err(e) => WebResponse::BadReq(format!("FTIO analysis failed: {}", e)),
+            }
+        } else {
+            WebResponse::BadReq("jobid parameter required".to_string())
+        }
+    }
+
+    fn handle_ftio_run_metric(&self, req: &Request) -> WebResponse {
+        if req.method() != "POST" {
+            return WebResponse::BadReq("POST required".to_string());
+        }
+        let jobid = match req.get_param("jobid") {
+            Some(j) => j,
+            None => return WebResponse::BadReq("jobid parameter required".to_string()),
+        };
+        let metric = match req.get_param("metric") {
+            Some(m) => m,
+            None => return WebResponse::BadReq("metric parameter required".to_string()),
+        };
+        match self
+            .factory
+            .trace_store
+            .generate_ftio_model_for_metric(&jobid, &metric, self.factory.ftio_client.clone())
+        {
+            Ok(_) => WebResponse::Native(Response::json(
+                &serde_json::json!({"ok": true, "metric": metric}),
+            )),
+            Err(e) => {
+                WebResponse::BadReq(format!("FTIO analysis failed for {}: {}", metric, e))
+            }
+        }
+    }
+
+    fn handle_ftio_progress(&self, req: &Request) -> WebResponse {
+        let jobid = match req.get_param("jobid") {
+            Some(j) => j,
+            None => return WebResponse::BadReq("jobid parameter required".to_string()),
+        };
+        let (processed, total) = self.factory.trace_store.get_ftio_progress(&jobid);
+        WebResponse::Native(Response::json(
+            &serde_json::json!({"processed": processed, "total": total}),
+        ))
+    }
+
     fn handle_extrap_get_model(&self, req: &Request) -> WebResponse {
         if let Some(jobid) = req.get_param("jobid") {
             let prof = if let Some(prof) = self.job_id_to_profile(&jobid) {
@@ -1428,6 +1500,10 @@ impl Web {
                     "modified_args" => self.handle_ftio_modified_args(request),
                     "logs" => self.handle_ftio_logs(request),
                     "port" => self.handle_ftio_port(request),
+                    "all_models" => self.handle_ftio_all_models(request),
+                    "run_all" => self.handle_ftio_run_all(request),
+                    "run_metric" => self.handle_ftio_run_metric(request),
+                    "progress" => self.handle_ftio_progress(request),
                     _ => WebResponse::BadReq(url),
                 },
                 "pivot" => self.handle_pivot(request),
