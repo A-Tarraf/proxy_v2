@@ -2,6 +2,7 @@ use std::error::Error;
 use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -115,15 +116,19 @@ impl UnixProxy {
                     log::debug!("New connection");
 
                     let factory = self.factory.clone();
+                    factory.connected_procs.fetch_add(1, Ordering::Relaxed);
 
                     // Handle the connection in a new thread.
-                    thread::spawn(move || match UnixProxy::handle_client(factory, stream) {
-                        Ok(_) => {
-                            log::debug!("Client left");
+                    thread::spawn(move || {
+                        match UnixProxy::handle_client(factory.clone(), stream) {
+                            Ok(_) => {
+                                log::debug!("Client left");
+                            }
+                            Err(e) => {
+                                log::error!("Proxy server closing on client : {}", e.to_string());
+                            }
                         }
-                        Err(e) => {
-                            log::error!("Proxy server closing on client : {}", e.to_string());
-                        }
+                        factory.connected_procs.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
                 Err(err) => {

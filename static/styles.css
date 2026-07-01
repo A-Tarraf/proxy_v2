@@ -252,6 +252,7 @@ input[type="number"] {
 }
 
 .info-symbol {
+    position: relative;
     color: #555;
     transition: color 0.2s ease;
     cursor: help;
@@ -259,6 +260,30 @@ input[type="number"] {
 
 .info-symbol:hover {
     color: #51dcff;
+}
+
+.info-symbol::after {
+    content: attr(title);
+    display: none;
+    position: absolute;
+    left: 1.4em;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #222;
+    color: #fff;
+    padding: 5px 9px;
+    border-radius: 5px;
+    font-size: 0.82em;
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+    max-width: 320px;
+    white-space: normal;
+    width: max-content;
+}
+
+.info-symbol:hover::after {
+    display: block;
 }
 
 .ftio-logs {

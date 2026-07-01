@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -402,6 +403,8 @@ pub(crate) struct ExporterFactory {
     pub period: Arc<RwLock<u64>>,
     pub branches: u64,
     pub instrumentation: Arc<dyn Instrumentation>,
+    /// Number of MPI processes currently connected via Unix socket
+    pub connected_procs: Arc<AtomicUsize>,
 }
 
 impl ExporterFactory {
@@ -774,6 +777,7 @@ impl ExporterFactory {
             period: Arc::new(RwLock::new(period)),
             branches,
             instrumentation,
+            connected_procs: Arc::new(AtomicUsize::new(0)),
         });
 
         let scrape_ref = ret.clone();

@@ -38,18 +38,25 @@ check_dir()
 	fi
 }
 
-if test $# = 1; then
-	echo "Installing in  ${1}"
-	PREFIX="${1}"
-else
-	error_out "Please provide an install prefix: $0 [PREFIX]"
+STRACE_ONLY=0
+PREFIX=""
+for arg in "$@"; do
+	case "$arg" in
+		--strace-only) STRACE_ONLY=1 ;;
+		*) PREFIX="$arg" ;;
+	esac
+done
+
+if test -z "${PREFIX}"; then
+	error_out "Please provide an install prefix: $0 [PREFIX] [--strace-only]"
 fi
+echo "Installing in ${PREFIX}"
 
 if test ! -d "${PREFIX}"; then
 	mkdir "${PREFIX}" || error_out "Failed to create ${PREFIX} directory"
 fi
 
-
+if test "${STRACE_ONLY}" = "0"; then
 
 header "Locate Rust Dependency"
 
@@ -79,12 +86,12 @@ cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to
 # The Build Directory
 BUILD_SOURCE_ROOT=""
 
-if test -d "$SOURCE_ROOT/target/debug"; then
-	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/debug"
-elif test -d "$SOURCE_ROOT/target/release"; then
+if test -f "$SOURCE_ROOT/target/release/libproxyclient.so"; then
 	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/release"
+elif test -f "$SOURCE_ROOT/target/debug/libproxyclient.so"; then
+	BUILD_SOURCE_ROOT="$SOURCE_ROOT/target/debug"
 else
-	error_out "Cannot locate build, did 'cargo build' succeed ?"
+	error_out "Cannot locate libproxyclient.so, did 'cargo build --release' succeed ?"
 fi
 
 echo "Using Build directory ${BUILD_SOURCE_ROOT}"
@@ -134,8 +141,6 @@ header "Detecting build dependencies"
 
 # Detect Python
 
-PYTHON=""
-
 if test -z "$PYTHON"; then
 	if locate_bin "python3"; then
 		PYTHON="python3"
@@ -149,8 +154,6 @@ fi
 echo "Using Python : ${PYTHON}"
 
 # Detect MPICC
-
-MPICC=""
 
 if test -z "$MPICC"; then
 	if locate_bin "mpicc"; then
@@ -176,7 +179,7 @@ assert_is_file "$MPI_WRAPPER_SOURCES"
 
 MPI_WRAPPERS_C="${BUILDTEMP}/mpi_wrappers.c"
 
-"${PYTHON}" "${MPIWRAP}"  -f "${MPI_WRAPPER_SOURCES}" > "${MPI_WRAPPERS_C}" || error_out "Failed to generate MPI wrappers"
+"${PYTHON}" "${MPIWRAP}" -c "${MPICC}" -f "${MPI_WRAPPER_SOURCES}" > "${MPI_WRAPPERS_C}" || error_out "Failed to generate MPI wrappers"
 
 if test -f "${MPI_WRAPPERS_C}"; then
 	echo "Successfully generated MPI wrapper sources"
@@ -195,13 +198,15 @@ else
 	error_out "Failed to generate MPI wrappers library"
 fi
 
+fi  # end if STRACE_ONLY = 0
+
 #
 # Deploy the Modified Strace
 #
 	header "Deploying Modified Strace"
 
 
-	if test ! -f "${PREFIX}/bin/proxy_exporter_strace"; then
+	if test ! -f "${PREFIX}/bin/proxy_exporter_strace" || test "${STRACE_ONLY}" = "1"; then
 
 	export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig/:$PKG_CONFIG_PATH"
 

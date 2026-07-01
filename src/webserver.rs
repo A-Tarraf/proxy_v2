@@ -17,6 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::squeue;
+use reqwest::blocking::Client as HttpClient;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
@@ -328,8 +329,52 @@ impl Web {
                 WebResponse::BadReq(format!("No such jobid {}", jobid))
             }
         } else {
-            Web::serialize_exporter(&self.factory.get_main())
+            let mut output = match self.factory.get_main().serialize() {
+                Ok(v) => v,
+                Err(e) => return WebResponse::BadReq(e.to_string()),
+            };
+            let count = self.factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed);
+            let procs_line = format!(
+                "# HELP proxy_connected_procs Number of MPI processes currently connected to this proxy node\n\
+                 # TYPE proxy_connected_procs gauge\n\
+                 proxy_connected_procs {}\n",
+                count
+            );
+            output = output.replace("# EOF\n", &format!("{}\n# EOF\n", procs_line));
+            WebResponse::Text(output)
         }
+    }
+
+    fn handle_procs(&self, _req: &Request) -> WebResponse {
+        // Sum connected_procs from root + all registered compute proxies
+        let mut total = self.factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed);
+        let client = HttpClient::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap_or_default();
+        for scrape in self.factory.list_scrapes() {
+            if scrape.ttype() != "Proxy" {
+                continue;
+            }
+            // Proxy scrapes store target_url as "<base>/job"; strip that suffix to get base URL
+            let base = scrape.target_url().trim_end_matches("/job");
+            let url = format!("{}/metrics", base);
+            if let Ok(resp) = client.get(&url).send() {
+                if let Ok(body) = resp.text() {
+                    for line in body.lines() {
+                        if line.starts_with('#') {
+                            continue;
+                        }
+                        if let Some(val_str) = line.strip_prefix("proxy_connected_procs ") {
+                            if let Ok(n) = val_str.trim().parse::<usize>() {
+                                total += n;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        WebResponse::Native(Response::json(&total))
     }
 
     fn handle_queue(&self, _req: &Request) -> WebResponse {
@@ -1461,6 +1506,7 @@ impl Web {
                 "accumulate" => self.handle_accumulate(request),
                 "push" => self.handle_push(request),
                 "metrics" => self.handle_metrics(request),
+                "procs" => self.handle_procs(request),
                 "job" => match resource.as_str() {
                     "list" => self.handle_joblist(request),
                     "" => self.handle_job(request),

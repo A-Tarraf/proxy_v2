@@ -67,6 +67,11 @@ pub struct ProxyScraperSnapshot {
     last_scrape: u64,
 }
 
+impl ProxyScraperSnapshot {
+    pub fn target_url(&self) -> &str { &self.target_url }
+    pub fn ttype(&self) -> &str { &self.ttype }
+}
+
 impl ProxyScraper {
     fn detect_type(target_url: &String) -> Result<(String, ScraperType), ProxyErr> {
         if target_url == "/system" {
@@ -331,7 +336,8 @@ impl ProxyScraper {
             unreachable!("Proxy scrapes should have a factory");
         };
 
-        let metrics = sys.scrape()?;
+        let mut metrics = sys.scrape()?;
+
 
         // We push in MAIN, NODE and All exporters which may generate profiles
         // THese exporters are the one attached locally and thus bound to

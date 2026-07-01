@@ -334,6 +334,11 @@ struct TraceState {
 
     /// Read state
     trace_data: TraceData,
+
+    /// Previous cumulative values for bandwidth computation: name → (prev_size, prev_time)
+    bw_prev: HashMap<String, (f64, f64)>,
+    /// Whether bandwidth synthesis is disabled (set via --no-bandwidth flag)
+    no_bandwidth: bool,
 }
 
 impl TraceState {
@@ -587,6 +592,40 @@ impl TraceState {
     }
 
     fn push(&mut self, counters: Vec<CounterSnapshot>) -> Result<bool, Box<dyn Error>> {
+        // Synthesize bandwidth gauges: for each ___size___<fn> counter that has a matching
+        // ___time___<fn>, compute bytes/sec = Δsize/Δtime and emit as ___bandwidth___<fn>.
+        let mut bw_snapshots: Vec<CounterSnapshot> = Vec::new();
+        if !self.no_bandwidth { for c in &counters {
+            if let Some(fn_part) = c.name.split("___size___").nth(1) {
+                let prefix = c.name.split("___size___").next().unwrap_or("");
+                let time_name = format!("{}___time___{}", prefix, fn_part);
+                if let Some(time_c) = counters.iter().find(|x| x.name == time_name) {
+                    let cur_size = c.ctype.value();
+                    let cur_time = time_c.ctype.value();
+                    let key = c.name.clone();
+                    let (prev_size, prev_time) = self.bw_prev.get(&key).copied().unwrap_or((cur_size, cur_time));
+                    let delta_size = cur_size - prev_size;
+                    let delta_time = cur_time - prev_time;
+                    self.bw_prev.insert(key, (cur_size, cur_time));
+                    let bw = if delta_time > 1e-9 { delta_size / delta_time } else { 0.0 };
+                    let bw_name = c.name.replace("___size___", "___bandwidth___");
+                    bw_snapshots.push(CounterSnapshot {
+                        name: bw_name,
+                        doc: format!("Bandwidth (bytes/s) for {}", fn_part),
+                        ctype: CounterType::Gauge {
+                            min: bw,
+                            max: bw,
+                            hits: 1.0,
+                            total: bw,
+                        },
+                    });
+                }
+            }
+        }}
+        let mut all_counters = counters;
+        all_counters.extend(bw_snapshots);
+        let counters = all_counters;
+
         let mut new_counters: Vec<TraceFrame> = self.check_counter(&counters);
 
         self.write_frames(&new_counters)?;
@@ -646,6 +685,7 @@ impl TraceState {
             desc: job.clone(),
         };
 
+        let no_bandwidth = std::env::var("PROXY_NO_BANDWIDTH").is_ok();
         let ret = TraceState {
             loaded: true, // Trace is new thus already loaded
             size: 0,
@@ -654,6 +694,8 @@ impl TraceState {
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
+            bw_prev: HashMap::new(),
+            no_bandwidth,
         };
 
         let mut fd = ret.open(true)?;
@@ -671,6 +713,7 @@ impl TraceState {
             desc: desc.clone(),
         };
 
+        let no_bandwidth = std::env::var("PROXY_NO_BANDWIDTH").is_ok();
         let mut ret = TraceState {
             loaded: false, // Trace is not loaded already
             size: 0,
@@ -679,6 +722,8 @@ impl TraceState {
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
+            bw_prev: HashMap::new(),
+            no_bandwidth,
         };
 
         let lastframe = ret.read_last()?;
