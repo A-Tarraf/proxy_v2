@@ -56,6 +56,7 @@ export PATH=$HOME/metric-proxy/bin:$PATH
 | `-i` | `--inhibit-profile-aggregation` | false | Disable local profile saving (use on leaf nodes when relaying to root) |
 | `-b` | `--branches` | `2` | Branches for hierarchical aggregation (0 = binomial, >0 = k-ary tree) |
 | `-u` | `--unix` | — | Path to UNIX socket for the gateway |
+| — | `--no-bandwidth` | false | Disable live `___bandwidth___` metric synthesis |
 
 ### Single-Node Usage
 
@@ -200,13 +201,14 @@ Key pages:
 - Category waves (I/O, network, compute) with reconstructed and raw signals
 - Per-metric selection plot
 
-FTIO must be installed and `predictor` must be in PATH (or the proxy will auto-start it):
+FTIO must be installed and `admire_proxy_zmq` must be in PATH. When the proxy starts it searches PATH for `admire_proxy_zmq`, spawns it automatically, and connects — no manual steps needed.
 
 ```sh
-# Install FTIO (from FTIO repo)
-make install
-source .venv/bin/activate
+pip install ftio   # installs admire_proxy_zmq into the active environment
+export PATH=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))"):$PATH
 ```
+
+**Bandwidth metric:** For every `___size___<fn>` / `___time___<fn>` counter pair the proxy synthesises a live `___bandwidth___<fn>` gauge (bytes/s = Δsize / Δtime_in_call) and forwards it to FTIO. Disable with `--no-bandwidth`.
 
 ---
 

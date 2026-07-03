@@ -201,6 +201,10 @@ pub struct FtioClient {
     address: RwLock<Option<String>>,
     arguments: RwLock<FtioArguments>,
     pub server_logs: Arc<RwLock<Vec<String>>>,
+    /// Guard shared by all FTIO scrapers of this proxy: at most one FTIO
+    /// analysis in flight per proxy process, so a busy FTIO server never
+    /// gets flooded with concurrent whole-trace exports.
+    pub in_flight: std::sync::atomic::AtomicBool,
 }
 
 impl FtioClient {
@@ -210,6 +214,7 @@ impl FtioClient {
             address: RwLock::new(None),
             arguments: RwLock::new(FtioArguments::default()),
             server_logs: Arc::new(RwLock::new(Vec::new())),
+            in_flight: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -278,8 +283,8 @@ impl FtioClient {
     // Send metrics and arguments to the FTIO server and receive the response
     pub fn send_receive(&self, export: TraceExport) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let socket = self.context.socket(zmq::REQ)?;
-        socket.set_rcvtimeo(300000)?;  // 5 min — large traces need time for parallel Python
-        socket.set_sndtimeo(300000)?;
+        socket.set_rcvtimeo(30000)?;  // 30 s — if FTIO is dead/busy, don't freeze the proxy
+        socket.set_sndtimeo(10000)?;
         let address = self.address.read().unwrap();
         if let Some(addr) = address.as_ref() {
             socket.connect(addr)?;

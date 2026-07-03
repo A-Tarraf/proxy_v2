@@ -1,8 +1,33 @@
 /* Global Styles */
+:root {
+	--bg: #f0f0f0;
+	--text: #333;
+	--table-bg: #f0f0f0;
+	--table-row-even: #1f889613;
+	--input-bg: #fff;
+	--input-border: #ddd;
+	--input-text: #333;
+	--sidebar-bg: lightgray;
+	--link: #143e44;
+}
+
+body.dark {
+	--bg: #1a1a2e;
+	--text: #e0e0e0;
+	--table-bg: #16213e;
+	--table-row-even: #0f3460;
+	--input-bg: #16213e;
+	--input-border: #aaa;
+	--input-text: #e0e0e0;
+	--sidebar-bg: #16213e;
+	--link: #4db8c8;
+}
+
 body {
 	font-family: Arial, sans-serif;
-	background-color: #f0f0f0;
-	color: #333;
+	background-color: var(--bg);
+	color: var(--text);
+	transition: background-color 0.3s, color 0.3s;
 }
 
 header {
@@ -79,11 +104,11 @@ nav a:visited {
 }
 
 a {
-	color: #143e44;
+	color: var(--link);
 }
 
 a:visited {
-	color: #143e44;
+	color: var(--link);
 }
 
 
@@ -109,15 +134,15 @@ footer {
 table {
 	border-collapse: collapse;
 	width: 100%;
-	background-color: #f0f0f0;
+	background-color: var(--table-bg);
 	font-size: 16px;
 }
 
 th, td {
-	border: 1px solid #ddd;
+	border: 1px solid var(--input-border);
 	text-align: left;
 	padding: 8px;
-	color: #333;
+	color: var(--text);
 }
 
 th {
@@ -127,7 +152,7 @@ th {
 
 /* Alternating Row Background Colors */
 tr:nth-child(even) {
-	background-color: #1f889613;
+	background-color: var(--table-row-even);
 }
 
 /* Hover effect for table rows */
@@ -137,8 +162,15 @@ tr:hover {
 }
 
 /* Heading Styles */
-h1, h2, h3 {
+body:not(.dark) h1,
+body:not(.dark) h2,
+body:not(.dark) h3 {
 	color: #1f8996;
+}
+body.dark h1,
+body.dark h2,
+body.dark h3 {
+	color: #4db8c8;
 }
 
 h2 {
@@ -160,10 +192,12 @@ h1 {
 input[type="text"],
 input[type="password"],
 input[type="email"],
-textarea {
-	background-color: #fff;
-	border: 1px solid #ddd;
-	color: #333;
+input[type="number"],
+textarea,
+select {
+	background-color: var(--input-bg);
+	border: 1px solid var(--input-border);
+	color: var(--input-text);
 	padding: 10px;
 	border-radius: 5px;
 }
@@ -181,24 +215,6 @@ input[type="submit"] {
 	border: none;
 	border-radius: 5px;
 	cursor: pointer;
-}
-
-/* Style for Select Dropdowns */
-select {
-	background-color: #fff;
-	border: 1px solid #ddd;
-	color: #333;
-	padding: 10px;
-	border-radius: 5px;
-}
-
-/* Input Field with type "number" */
-input[type="number"] {
-	background-color: #fff;
-	border: 1px solid #ddd;
-	color: #333;
-	padding: 10px;
-	border-radius: 5px;
 }
 
 #container {
@@ -229,11 +245,35 @@ input[type="number"] {
 #sidebar {
 	width: 20%; /* Width of the sidebar */
 	padding: 20px;
-	background-color: lightgray; /* Example background color */
+	background-color: var(--sidebar-bg);
 	position: absolute; /* Position the sidebar absolutely within the chartAndSidebar */
 	top: 0; /* Align the sidebar to the top of the chartAndSidebar */
 	right: 0; /* Align the sidebar to the right of the chartAndSidebar */
 	overflow-y: auto; /* Enable vertical scrolling if content exceeds sidebar height */
+}
+
+/* Chart canvas background in dark mode */
+body.dark canvas {
+	background: var(--table-bg);
+}
+
+/* Dark mode toggle button */
+#dark-toggle {
+	position: absolute;
+	top: 12px;
+	right: 16px;
+	background: rgba(255,255,255,0.15);
+	border: 2px solid rgba(255,255,255,0.6);
+	border-radius: 20px;
+	color: #fff;
+	cursor: pointer;
+	font-size: 18px;
+	padding: 4px 12px;
+	transition: background 0.2s;
+	z-index: 10;
+}
+#dark-toggle:hover {
+	background: rgba(255,255,255,0.3);
 }
 
 #endSliderContainer {

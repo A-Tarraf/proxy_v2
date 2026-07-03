@@ -334,20 +334,26 @@ impl Web {
                 Err(e) => return WebResponse::BadReq(e.to_string()),
             };
             let count = self.factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed);
+            let ranks = self.factory.mpi_ranks.load(std::sync::atomic::Ordering::Relaxed);
             let procs_line = format!(
-                "# HELP proxy_connected_procs Number of MPI processes currently connected to this proxy node\n\
+                "# HELP proxy_connected_procs Number of exporter processes currently connected to this proxy node\n\
                  # TYPE proxy_connected_procs gauge\n\
-                 proxy_connected_procs {}\n",
-                count
+                 proxy_connected_procs {}\n\
+                 # HELP proxy_mpi_ranks Number of MPI ranks currently running on this proxy node\n\
+                 # TYPE proxy_mpi_ranks gauge\n\
+                 proxy_mpi_ranks {}\n",
+                count, ranks
             );
             output = output.replace("# EOF\n", &format!("{}\n# EOF\n", procs_line));
             WebResponse::Text(output)
         }
     }
 
-    fn handle_procs(&self, _req: &Request) -> WebResponse {
-        // Sum connected_procs from root + all registered compute proxies
-        let mut total = self.factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed);
+    /// Sum a scalar prometheus metric (`<metric_name> <value>`) over this
+    /// proxy and all registered compute proxies.
+    fn sum_cluster_metric(&self, local: usize, metric_name: &str) -> usize {
+        let mut total = local;
+        let prefix = format!("{} ", metric_name);
         let client = HttpClient::builder()
             .timeout(std::time::Duration::from_millis(500))
             .build()
@@ -365,7 +371,7 @@ impl Web {
                         if line.starts_with('#') {
                             continue;
                         }
-                        if let Some(val_str) = line.strip_prefix("proxy_connected_procs ") {
+                        if let Some(val_str) = line.strip_prefix(&prefix) {
                             if let Ok(n) = val_str.trim().parse::<usize>() {
                                 total += n;
                             }
@@ -374,6 +380,18 @@ impl Web {
                 }
             }
         }
+        total
+    }
+
+    fn handle_procs(&self, _req: &Request) -> WebResponse {
+        let local = self.factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed);
+        let total = self.sum_cluster_metric(local, "proxy_connected_procs");
+        WebResponse::Native(Response::json(&total))
+    }
+
+    fn handle_ranks(&self, _req: &Request) -> WebResponse {
+        let local = self.factory.mpi_ranks.load(std::sync::atomic::Ordering::Relaxed);
+        let total = self.sum_cluster_metric(local, "proxy_mpi_ranks");
         WebResponse::Native(Response::json(&total))
     }
 
@@ -1507,6 +1525,7 @@ impl Web {
                 "push" => self.handle_push(request),
                 "metrics" => self.handle_metrics(request),
                 "procs" => self.handle_procs(request),
+                "ranks" => self.handle_ranks(request),
                 "job" => match resource.as_str() {
                     "list" => self.handle_joblist(request),
                     "" => self.handle_job(request),

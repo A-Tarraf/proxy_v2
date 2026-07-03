@@ -5,25 +5,23 @@
 ```bash
 # 1. Start cluster
 cd /d/benchmark/docker-cluster-dmrv2
-docker ps -a --filter "name=dmr" -q | xargs -r docker rm -f
-bash start.sh -n 9
+docker ps -a --filter "name=dmr" -q | xargs -r docker rm -f  # remove any leftover dmr containers
+bash start.sh -n 9  # start 9 nodes: dmr01 (head) + dmr02-09 (compute)
 
-# 2. Start FTIO (on host — see FTIO section below)
-/d/github/FTIO/.venv/bin/admire_proxy_zmq > /tmp/ftio_zmq_host.log 2>&1 &
-FTIO_PORT=$(until grep -m1 'tcp://' /tmp/ftio_zmq_host.log; do sleep 0.5; done | grep -oP ':\K\d+')
-# Write a persistent wrapper into the shared volume so dmr01 can find it
-cat > /e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin/admire_proxy_zmq << EOF
-#!/bin/bash
-echo 'tcp://172.17.0.1:${FTIO_PORT}'
-exec tail -f /tmp/ftio_zmq_host.log 2>/dev/null || sleep infinity
-EOF
-chmod +x /e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin/admire_proxy_zmq
+# 2. (Optional) Start FTIO — see FTIO section below
+#    Skip this step if FTIO analysis is not needed.
 
 # 3. Start proxies
 PROXY=/opt/hpc/build/metric-proxy/bin/proxy_v2
-MPATH=/opt/hpc/build/metric-proxy/bin
+MPATH=/opt/hpc/build/metric-proxy/bin  # prepended to PATH so proxy can find admire_proxy_zmq
+
+# kill any stale proxy instances across all nodes
 docker ps --filter "name=dmr" --format "{{.Names}}" | xargs -I{} docker exec {} pkill proxy_v2 2>/dev/null; true
+
+# root proxy on dmr01 — aggregates all metrics and serves the web UI on port 1337
 docker exec -d -u mpiuser dmr01 env PATH=$MPATH:/usr/local/bin:/usr/bin $PROXY --port 1337 -S 100
+
+# leaf proxy on every compute node — forwards metrics upstream to dmr01
 docker ps --filter "name=dmr" --format "{{.Names}}" | grep -v -E "dmr01$|dmr01-ftio" | xargs -I{} \
     docker exec -d -u mpiuser {} env PATH=$MPATH:/usr/local/bin:/usr/bin \
     $PROXY --port 1338 --root-proxy dmr01:1337 -S 100
@@ -32,14 +30,18 @@ docker ps --filter "name=dmr" --format "{{.Names}}" | grep -v -E "dmr01$|dmr01-f
 
 # 5. Submit job
 bash /d/benchmark/docker-cluster-dmrv2/mpiuser-drop-in.sh
-# inside:
+# inside the container:
 cd /opt/hpc/build/dmr/examples/hacc-io
 sbatch test.sh && squeue
 
 # 6. Cleanup
 docker ps --filter "name=dmr" --format "{{.Names}}" | xargs -I{} docker exec {} pkill proxy_v2 2>/dev/null; true
 docker ps -a --filter "name=dmr" -q | xargs -r docker rm -f
+# If FTIO was active: remove the wrapper so a stale port doesn't block the next proxy startup
+rm -f /e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin/admire_proxy_zmq
 ```
+
+> **Do not restart the proxy while a job is running.** The proxy holds trace data in memory and writes it to disk incrementally. Restarting mid-job discards whatever has not yet been flushed.
 
 ---
 
@@ -51,14 +53,10 @@ The proxy installs to `/opt/hpc/build/metric-proxy/` on the shared Docker volume
 
 ```bash
 docker exec -u root dmr01 bash -c "
-  # Install Rust + cbindgen to the shared volume (survives container restarts)
   export RUSTUP_HOME=/opt/hpc/build/rustup CARGO_HOME=/opt/hpc/build/cargo
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
   source /opt/hpc/build/cargo/env
   cargo install cbindgen
-  pip3 install numpy
 
-  # Build and install everything (proxy + MPI exporter + strace)
   export MPICC=/opt/hpc/install/ompi/bin/mpicc
   cd /opt/hpc/build/proxy_v2
   ./install.sh /opt/hpc/build/metric-proxy
@@ -103,34 +101,60 @@ CMD="docker run --rm \
 
 **All proxies run as mpiuser**, including dmr01. This ensures the Unix socket UID matches the job user so MPI processes can connect.
 
-**Sampling rate:** `-S 100` = 100 ms period (10 Hz). Use `-S 10` for 100 Hz but expect some artifacts.
-
-**Slurm:** `slurmctld` may take a moment after `start.sh`. If nodes show `unk*` after a container restart (without re-running `start.sh`), run:
+**After restarting proxies**, verify all leaf nodes registered with the root (some nodes may not auto-register):
 ```bash
-docker exec -u root dmr01 /opt/hpc/build/bin/rebootstrap-slurm.sh
+curl localhost:1337/join/list | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+print([s['target_url'] for s in d if s['ttype']=='Proxy'])
+"
+# Should show all 4 (or 8) compute nodes. Manually register any missing ones:
+# curl localhost:1337/join?to=dmr03:1338
+# curl localhost:1337/join?to=dmr05:1338
 ```
 
-**Verify Slurm is healthy:**
+**Sampling rate:** `-S 100` = 100 ms period (10 Hz). Use `-S 10` for 100 Hz but expect some artifacts.
+
+**Slurm:** `slurmctld` and `slurmd` need ~15 s to start after `start.sh`. If you submit too early, `squeue` shows the job stuck in `CF` (configuring) or nodes show `unk*`. Wait, then verify:
 ```bash
+sleep 15
 docker exec dmr01 /opt/hpc/install/slurm-dmr/bin/sinfo
 # Expected: local* up infinite  8  idle dmr[02-09]
 ```
 
+If nodes still show `unk*` after a container restart (without re-running `start.sh`), re-bootstrap Slurm manually:
+```bash
+docker exec -u root dmr01 /opt/hpc/build/bin/rebootstrap-slurm.sh
+sleep 15
+docker exec dmr01 /opt/hpc/install/slurm-dmr/bin/sinfo
+```
+
 ---
 
-## MPI and syscall metrics
+## Instrumenting jobs with proxy_run
 
-`test.sh` submits a HACC-IO job wrapped with `proxy_run`. The launcher auto-detects all available exporters from the install prefix and applies them automatically:
+Adding `proxy_run --` before the application binary is the only change needed. It auto-detects all installed exporters and injects them:
 
 | Exporter | What it captures | Metric prefix |
 |---|---|---|
 | `mpi` | MPI call counts, times, and data sizes | `mpi___` |
-| `strace` | Syscall counts and times on the submit node | `strace___` |
+| `strace` | Syscall counts and times | `strace___` |
 | `finstrument` | Function entry/exit via `LD_PRELOAD` | `finstrument___` |
 
-No flags are needed — `proxy_run --` activates all detected exporters.
+### `proxy_run` must wrap the application, not the MPI launcher
 
-**Bandwidth metric:** For every `___size___<fn>` / `___time___<fn>` counter pair the proxy automatically synthesizes a `___bandwidth___<fn>` gauge (bytes/s = Δsize / Δtime_in_call). This is computed live at each scrape and forwarded to FTIO. Disable with `--no-bandwidth` on the proxy start command.
+`proxy_run` attaches strace and sets `LD_PRELOAD` on the process it directly runs. To get per-node strace and MPI instrumentation, it must be spawned on each compute node by mpirun — not placed outside it.
+
+| ❌ Wrong — only instruments the launcher on dmr01 | ✅ Correct — instruments each rank on each node |
+|---|---|
+| `proxy_run -- mpirun -N 4 ./app` | `mpirun -N 4 proxy_run -- ./app` |
+| `proxy_run -- dmr_wrapper mpirun --host ... ./app` | `dmr_wrapper mpirun --host ... proxy_run -- ./app` |
+| `proxy_run -- srun ./app` | `srun proxy_run -- ./app` |
+
+**Job ID in the DMR Docker cluster:** Pass `-j $SLURM_JOB_ID` explicitly to `proxy_run`. In this setup, `dmr_wrapper` forces SSH-based process launch (overriding Slurm PLM), and `fwd-environment` does **not** forward `SLURM_JOBID` to ranks on remote nodes. Without `-j`, each remote rank falls back to `METRIC_PROXY_LAUNCHER_PPID` (its own parent PID) and registers as a separate one-process job. Since bash expands `$SLURM_JOB_ID` to a literal number before mpirun runs, passing it explicitly ensures all ranks on all nodes get the same job ID as a CLI argument.
+
+**Bandwidth metric:** For every `___size___<fn>` / `___time___<fn>` counter pair the proxy automatically synthesizes a `___bandwidth___<fn>` gauge (bytes/s). Disable with `--no-bandwidth` on the proxy start command.
+
+**Connected processes:** `proxy_connected_procs` is tracked as a live time-series Counter on each proxy node and summed across nodes at the root.
 
 ---
 
@@ -138,71 +162,137 @@ No flags are needed — `proxy_run --` activates all detected exporters.
 
 FTIO analyses the metric time series for periodicity and dominant frequencies. The proxy sends all collected metrics to FTIO after each scrape and displays the results in the FTIO tab of the trace view.
 
-### Why FTIO runs on the host
+### How it works
 
-The FTIO server (`admire_proxy_zmq`) requires Python 3.10+. The DMR containers run Rocky Linux 9.7 with Python 3.9, so FTIO cannot run inside any container. Instead, run it on the host (which has Python 3.13) and point the proxy at it via the Docker host gateway (`172.17.0.1`).
+When the proxy starts it searches for `admire_proxy_zmq` in PATH, spawns it, reads the ZMQ address from its first line of stdout, and connects automatically. `MPATH` is prepended to PATH in the start commands so any `admire_proxy_zmq` placed there is picked up without further configuration.
 
-### Setup
+### Case 1 — FTIO installed inside the container
+
+If the container image already has FTIO installed (e.g. rebuilt with it bundled), `admire_proxy_zmq` is already in PATH inside the container. No wrapper needed — just start the proxies normally and FTIO is used automatically.
+
+To check:
+```bash
+docker exec dmr01 which admire_proxy_zmq   # should print a path
+```
+
+**Installing FTIO into the container (one-time, persists on the shared volume):**
+Rocky 9 ships only Python 3.9, but FTIO needs ≥ 3.10. Python 3.12 is available
+via dnf and the containers have PyPI access, so FTIO can live in a venv on the
+shared build volume — it survives container restarts and removes the
+host-wrapper / ephemeral-port dance of Case 2 entirely:
 
 ```bash
-# 1. Start FTIO on the host
+docker exec -u root dmr01 dnf install -y python3.12
+docker exec -u root dmr01 python3.12 -m venv /opt/hpc/build/ftio-venv
+docker exec -u root dmr01 /opt/hpc/build/ftio-venv/bin/pip install ftio-hpc
+# put it in MPATH so the proxy finds it (remove any old wrapper first):
+docker exec -u root dmr01 ln -sf /opt/hpc/build/ftio-venv/bin/admire_proxy_zmq \
+    /opt/hpc/build/metric-proxy/bin/admire_proxy_zmq
+```
+
+`python3.12` must be installed in **every** container that runs a proxy (the
+venv itself is shared). Needs ~1 GB free on the shared volume.
+
+### Case 2 — FTIO on the host (current DMR setup)
+
+The DMR containers have no internet access, so FTIO runs on the host. A wrapper script in `MPATH` redirects the proxy to the host FTIO server via the Docker gateway (`172.17.0.1`).
+
+**Each session** (or after any proxy restart), recreate the wrapper:
+
+```bash
+MPATH=/e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin
+
+# 1. Start FTIO on the host (skip if already running)
 /d/github/FTIO/.venv/bin/admire_proxy_zmq > /tmp/ftio_zmq_host.log 2>&1 &
+FTIO_PORT=$(until grep -oP ':\K\d+' /tmp/ftio_zmq_host.log 2>/dev/null; do sleep 0.3; done | head -1)
+echo "FTIO listening on port $FTIO_PORT"
 
-# 2. Get the ZMQ port it bound to
-FTIO_PORT=$(until grep -m1 'tcp://' /tmp/ftio_zmq_host.log; do sleep 0.5; done | grep -oP ':\K\d+')
-
-# 3. Write a wrapper into the shared volume bin dir
-#    The proxy calls `which admire_proxy_zmq`, so placing it in the metric-proxy bin
-#    dir (which is in PATH when the proxy starts) is enough — no container changes needed.
-cat > /e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin/admire_proxy_zmq << EOF
+# 2. Write the wrapper (always recreate — port changes each run)
+cat > $MPATH/admire_proxy_zmq << EOF
 #!/bin/bash
 echo 'tcp://172.17.0.1:${FTIO_PORT}'
 exec tail -f /tmp/ftio_zmq_host.log 2>/dev/null || sleep infinity
 EOF
-chmod +x /e/dmr/docker-cluster-dmrv2/build/metric-proxy/bin/admire_proxy_zmq
+chmod +x $MPATH/admire_proxy_zmq
+
+# 3. Restart the proxies so they pick up the new wrapper
 ```
 
-The wrapper:
-- Prints the ZMQ address on stdout (the proxy reads this as the connection endpoint)
-- Then keeps running so the proxy doesn't consider it dead
+> **Cleanup:** remove the wrapper when done (`rm $MPATH/admire_proxy_zmq`). A stale wrapper pointing to a dead port is no longer fatal: FTIO analysis now runs in its own thread with bounded ZMQ timeouts, so a dead FTIO server costs a warning in the log instead of freezing metric collection. (Previously it stalled the whole scraping loop — jobs appeared late and traces got a single data point.)
 
-**After this, start (or restart) the proxies.** The root proxy on dmr01 will find `admire_proxy_zmq`, spawn it, read the ZMQ address, and connect. All subsequent job metrics are forwarded to FTIO automatically.
-
-### Persistence
-
-The wrapper lives on the shared volume and survives container restarts. The FTIO server is a host process; if you restart the host or kill the server, re-run steps 1–3 (the port changes each time) and restart the proxies.
+> **FTIO can spawn many CPU-heavy parallel worker processes** when analyzing a large job. Do not restart the proxy while FTIO is processing — killing FTIO mid-analysis and restarting the proxy will discard in-flight trace data.
 
 ### Verifying FTIO works
 
 ```bash
-# Check the proxy connected successfully
 curl -s http://localhost:1337/ftio/port
 # Expected: {"operation":"<port>","success":true}
 
-# Watch incoming data in the FTIO log
 tail -f /tmp/ftio_zmq_host.log
-# During a running job you will see lines like:
-# Received request (677951 bytes)
-# Processing 360 metrics
-# Calculation time: 0.43 s
+# During a job: "Received request (N bytes)" / "Processing N metrics" / "Calculation time: N s"
 ```
-
-Results appear in Chrome under the **FTIO** tab of the trace view — select a job to see dominant frequencies and phase predictions for each metric.
 
 ---
 
 ## HACC-IO
 
-The submit script `test.sh` runs HACC-IO with full proxy interception:
+The submit script is at `/d/github/HACC-IO/test.sh` (mounted into containers at `/opt/hpc/build/dmr/examples/hacc-io/test.sh`).
 
 ```bash
+#!/bin/bash
+#SBATCH --time=00:30:00
+#SBATCH --exclusive
+#SBATCH -o slurm_proxy.out
+#SBATCH -N4
+
+echo $DMR_PATH
+echo $SLURM_ROOT
+
+export PATH=$SLURM_ROOT/bin:$PATH
+export LD_LIBRARY_PATH=$DMR_PATH/build/lib:$LD_LIBRARY_PATH
+
+export DMR_PROCS_PER_NODE=1
+
+NODELIST_WITH_COUNTS=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | \
+    awk -v n="$DMR_PROCS_PER_NODE" '{print $1 ":" n}' | paste -sd,)
+
 PROXY_RUN=/opt/hpc/build/metric-proxy/bin/proxy_run
-$PROXY_RUN -- $DMR_PATH/scripts/dmr_wrapper mpirun --host $NODELIST_WITH_COUNTS \
-    ./HACC_ASYNC_IO 1000000 test_run/mpi
+
+set -x
+
+$DMR_PATH/scripts/dmr_wrapper mpirun --host $NODELIST_WITH_COUNTS \
+    $PROXY_RUN -j $SLURM_JOB_ID -- ./HACC_ASYNC_IO 1000000 test_run/mpi
+
+rm -f test_run/mpi* && echo "Deleted MPI files of HACC-IO"
+cat *_MPI.jsonl > all.jsonl || echo true
 ```
 
-**Expected metrics in the trace view (job is running):**
+The only additions relative to a plain DMR job (`submit_custom_slurm.sh`) are `$PROXY_RUN -j $SLURM_JOB_ID --` before the binary. `sbatch` propagates the submitter's environment, so `mpirun` and OpenMPI libs are found automatically from the shell PATH where `sbatch` was called.
+
+> **Note:** `-j $SLURM_JOB_ID` is required in this Docker setup. See the "Job ID" note in the `proxy_run` section above for the reason.
+
+**Expected metrics while the job runs:**
 - `mpi___hits___mpi_file_write_at`, `mpi___time___mpi_file_write_at`, `mpi___size___mpi_file_write_at`
-- `mpi___bandwidth___mpi_file_write_at` — live bytes/s per rank (aggregate × 8 ≈ HACC reported BW)
-- `strace___hits___write`, `strace___time___write`
-- FTIO tab shows periodicity analysis for all 360+ metrics
+- `mpi___bandwidth___mpi_file_write_at` — live bytes/s, summed across all 4 ranks
+- `strace___hits___write`, `strace___time___write` — per-rank I/O syscalls from each compute node
+- `proxy_mpi_ranks` — MPI ranks currently running on the node (time series; aggregated across nodes on the root)
+- `proxy_connected_procs` — connected exporter *processes* on the node
+- FTIO tab shows periodicity analysis for all metrics
+
+### Ranks vs procs
+
+Two related but different numbers:
+
+- **`proxy_mpi_ranks`** counts Unix-socket connections that identified as the
+  MPI exporter (first metric descriptor starts with `mpi___`) — exactly **one
+  per MPI rank**. This is the number to watch for malleability
+  (expand/shrink): the trace metric gives ranks-per-node over time, and
+  `GET /ranks` on the root gives the live cluster-wide total.
+- **`proxy_connected_procs`** counts **all** connected exporter processes.
+  Each rank typically contributes ~2 (MPI wrapper + strace exporter), and the
+  node running `mpirun`/`dmr_wrapper` contributes a few more for its
+  instrumented helper processes. Useful as a liveness signal, not a rank count.
+
+The badge in the trace UI shows both: `ranks: N | procs: M` (polled from
+`/ranks` and `/procs` on the proxy serving the page — on the root these
+aggregate over all registered compute proxies).

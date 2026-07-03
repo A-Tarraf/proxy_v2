@@ -3,10 +3,10 @@
         <h2>Select Plot Source</h2>
         <form id="traceSelect">
             <label for="target">Target:</label>
-            <span id="procsBadge" title="Total MPI processes currently connected across all proxy nodes"
+            <span id="procsBadge" title="ranks: MPI ranks currently running (cluster-wide) | procs: connected exporter processes (each rank has an MPI wrapper + a strace exporter, so procs is usually a multiple of ranks)"
                 style="display:inline-block; background:#1f8996; color:#fff; border-radius:4px;
                        padding:2px 8px; font-size:0.82em; margin-right:6px; vertical-align:middle;">
-                procs: –
+                ranks: – | procs: –
             </span>
             <select id="target" name="target" required>
                 <!-- Options for selecting the target will be added dynamically using JavaScript -->
@@ -79,7 +79,7 @@
             <br><br>
 
             <div id="ftio-container"
-                style="display: none; background-color: #dfdfdf; border-radius: 12px; padding: 20px">
+                style="display: none; background-color: var(--sidebar-bg); border-radius: 12px; padding: 20px">
 
                 <div id="applyButtonGroup" class="ftio-params">
                     <label for="applyBtn">Apply Parameters: </label>
@@ -164,18 +164,29 @@
             const selectedTarget = targetSelect.value;
             const prevMetric = metricSelect.value;
 
-            metricSelect.innerHTML = '';
+            // Do NOT clear the select here — wait until new data arrives so
+            // the dropdown never flashes empty while the fetch is in-flight.
 
             try {
                 const response = await fetch("/trace/metrics?job=" + selectedTarget);
                 if (response.ok) {
                     const data = await response.json();
                     data.sort((a, b) => a.localeCompare(b));
+                    // Only rebuild the dropdown if the metric list actually changed,
+                    // so an open dropdown is never closed under the user's mouse.
+                    const changed = data.length !== allMetrics.length ||
+                        data.some((v, i) => v !== allMetrics[i]);
                     allMetrics = data;
-                    applyMetricFilter();
-                    // Restore previously selected metric if available in new job
-                    if (prevMetric && data.includes(prevMetric)) {
-                        metricSelect.value = prevMetric;
+                    if (changed) {
+                        applyMetricFilter();
+                        // Restore previously selected metric if available in new job
+                        if (prevMetric && data.includes(prevMetric)) {
+                            metricSelect.value = prevMetric;
+                        }
+                    }
+                    // Immediately update chart — don't wait for the polling timer
+                    if (typeof chart !== 'undefined' && metricSelect.value) {
+                        update_data(chart);
                     }
                 } else {
                     console.error(`Failed to fetch metrics for job ${selectedTarget}`);
@@ -186,57 +197,50 @@
         }
 
 
-        async function populateJobSelect() {
-            // Skip refresh if user is actively using a dropdown to avoid closing it
-            const active = document.activeElement;
-            if (active && (active.id === 'target' || active.id === 'metric')) {
-                return;
-            }
+        // Signature of the last job list we rendered, to skip needless DOM rebuilds
+        let lastJobListKey = null;
 
-            const prevJob = document.getElementById('target').value;
-            const prevMetric = document.getElementById('metric').value;
+        async function populateJobSelect() {
+            const comboBox = document.getElementById('target');
+            const prevJob = comboBox.value;
 
             fetch('/trace/list')
                 .then(response => response.json())
                 .then(data => {
-                    const comboBox = document.getElementById('target');
+                    if (!data.length) return;
                     const autoLatest = document.getElementById('autolatestbox').checked;
 
-                    data.sort((a, b) => a.desc.jobid.localeCompare(b.desc.jobid));
-                    comboBox.innerHTML = "";
+                    data.sort((a, b) => b.desc.start_time - a.desc.start_time);
 
-                    data.forEach(item => {
-                        const option = document.createElement('option');
-                        option.value = item.desc.jobid;
-                        option.textContent = item.desc.jobid + " : " + item.desc.command;
-                        comboBox.appendChild(option);
-                    });
+                    // Rebuild the <option> list only when it actually changed, so an
+                    // open dropdown is not closed under the user's mouse.
+                    const key = data.map(i => i.desc.jobid).join('|');
+                    if (key !== lastJobListKey) {
+                        lastJobListKey = key;
+                        comboBox.innerHTML = "";
+                        data.forEach(item => {
+                            const option = document.createElement('option');
+                            option.value = item.desc.jobid;
+                            option.textContent = item.desc.jobid + " : " + item.desc.command;
+                            comboBox.appendChild(option);
+                        });
+                    }
 
                     if (autoLatest) {
-                        const latest = data.reduce((best, cur) =>
-                            cur.desc.start_time > best.desc.start_time ? cur : best, data[0]);
-                        comboBox.value = latest.desc.jobid;
+                        // data is sorted newest-first
+                        comboBox.value = data[0].desc.jobid;
                     } else {
                         // Restore previously selected job if still available, else first
                         comboBox.value = prevJob && [...comboBox.options].some(o => o.value === prevJob)
                             ? prevJob : comboBox.options[0].value;
                     }
 
-                    const jobChanged = comboBox.value !== prevJob;
-
-                    if (jobChanged) {
-                        // Job changed — repopulate metrics and redraw
-                        comboBox.dispatchEvent(new Event('change'));
-                    } else {
-                        // Same job — restore metric selection and redraw without resetting metric
-                        populateMetricSelect().then(() => {
-                            const metricEl = document.getElementById('metric');
-                            if (prevMetric && [...metricEl.options].some(o => o.value === prevMetric)) {
-                                metricEl.value = prevMetric;
-                            }
-                            update_data(chart);
-                        });
-                    }
+                    // Always refresh the metric list: for a freshly started job the
+                    // first /trace/metrics fetch often returns an empty list (the
+                    // trace has no counters yet), so we must keep re-fetching.
+                    // populateMetricSelect only touches the DOM when the list
+                    // changed and triggers a chart update itself.
+                    populateMetricSelect();
                 })
                 .catch(error => console.error('Error fetching data:', error));
         }
@@ -267,6 +271,7 @@
 
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
+            if (!metric) return;
             const derivate = document.getElementById('derivatebox').checked;
             const holdMode = document.getElementById('holdbox').checked;
             const relativeTime = document.getElementById('timebox').checked;
@@ -658,22 +663,25 @@
         // Initialize the Metric select options based on the default Target
         populateJobSelect();
 
-        // Live connected-procs badge — polls /procs every 3 s
+        // Live badge — polls /ranks (MPI ranks) and /procs (exporter connections) every 3 s
         function refreshProcsBadge() {
-            fetch('/procs')
-                .then(r => r.json())
-                .then(n => {
-                    const badge = document.getElementById('procsBadge');
-                    badge.textContent = 'procs: ' + n;
-                    badge.style.background = n > 0 ? '#1f8996' : '#888';
-                })
-                .catch(() => {});
+            Promise.all([
+                fetch('/ranks').then(r => r.json()).catch(() => '–'),
+                fetch('/procs').then(r => r.json()).catch(() => '–')
+            ]).then(([ranks, procs]) => {
+                const badge = document.getElementById('procsBadge');
+                badge.textContent = 'ranks: ' + ranks + ' | procs: ' + procs;
+                badge.style.background = (ranks > 0 || procs > 0) ? '#1f8996' : '#888';
+            }).catch(() => {});
         }
         refreshProcsBadge();
         setInterval(refreshProcsBadge, 3000);
 
-        // Auto-latest: refresh job list and re-select latest every 5 s when enabled
+        // Auto-latest: refresh job list and re-select latest every 5 s — ON by default
         let autoLatestTimer = null;
+        document.getElementById('autolatestbox').checked = true;
+        autoLatestTimer = setInterval(populateJobSelect, 5000);
+
         document.getElementById('autolatestbox').addEventListener('change', function () {
             if (this.checked) {
                 populateJobSelect();
@@ -712,6 +720,11 @@
 
         const ctx = document.getElementById('myChart');
 
+        const _darkMode = document.body.classList.contains('dark');
+        if (_darkMode) {
+            Chart.defaults.color = '#e0e0e0';
+            Chart.defaults.borderColor = 'rgba(255,255,255,0.15)';
+        }
 
         let labels = [];
         let datapoint = [];
@@ -814,8 +827,9 @@
         updateFtioVisibility();
 
         setInterval(function () {
-            update_data(chart);
-        }, 1000);
+            const metric = document.getElementById('metric').value;
+            if (metric) update_data(chart);
+        }, 3000);
 
         setInterval(function () {
             if (showFTIO) {

@@ -4,11 +4,31 @@
     <meta charset="UTF-8">
     <title>Metric Proxy</title>
     <link rel="stylesheet" type="text/css" href="styles.css">
+    <script>
+        (function() {
+            if (localStorage.getItem('dark') === '1') {
+                document.documentElement.classList.add('dark-pending');
+            }
+        })();
+    </script>
 </head>
 <body>
+    <script>
+        if (localStorage.getItem('dark') === '1') document.body.classList.add('dark');
+        function toggleDark() {
+            var on = document.body.classList.toggle('dark');
+            localStorage.setItem('dark', on ? '1' : '0');
+            document.getElementById('dark-toggle').textContent = on ? '☀' : '🌙';
+        }
+    </script>
 	<header>
         <img src="logo.png" alt="Logo" class="header-logo">
 		<h1>Metric Proxy</h1>
+        <button id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
+        <script>
+            if (localStorage.getItem('dark') === '1')
+                document.getElementById('dark-toggle').textContent = '☀';
+        </script>
   </header>
     <nav>
         <ul>

@@ -1714,7 +1714,7 @@ for opt, arg in opts:
         if stripped: includes.append(stripped)
     if opt == "-i":
         if not arg in pmpi_init_bindings:
-            sys.stderr.write("ERROR: PMPI_Init binding must be one of:\n    %s\n" % " ".join(possible_bindings))
+            sys.stderr.write("ERROR: PMPI_Init binding must be one of:\n    %s\n" % " ".join(pmpi_init_bindings))
             usage()
         else:
             pmpi_init_binding = arg

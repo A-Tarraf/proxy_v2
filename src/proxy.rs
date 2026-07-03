@@ -27,6 +27,19 @@ struct PerClientState {
     factory: Arc<ExporterFactory>,
     job_exporter: Option<Arc<Exporter>>,
     job_desc: Option<JobDesc>,
+    /// True once this connection pushed an "mpi___" Desc — it is the MPI
+    /// exporter of one rank (strace and other exporters use other prefixes).
+    is_mpi_rank: bool,
+}
+
+impl Drop for PerClientState {
+    fn drop(&mut self) {
+        /* Drop-based so the rank count stays correct even when the client
+         * disconnects abruptly and handle_client exits early with an error */
+        if self.is_mpi_rank {
+            self.factory.mpi_ranks.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
 }
 
 impl UnixProxy {
@@ -37,6 +50,13 @@ impl UnixProxy {
         log::debug!("{:?}", command);
         match command {
             ProxyCommand::Desc(desc) => {
+                if !per_client_state.is_mpi_rank && desc.name.starts_with("mpi___") {
+                    per_client_state.is_mpi_rank = true;
+                    per_client_state
+                        .factory
+                        .mpi_ranks
+                        .fetch_add(1, Ordering::Relaxed);
+                }
                 per_client_state.factory.push(
                     desc.name.as_str(),
                     desc.doc.as_str(),
@@ -76,6 +96,7 @@ impl UnixProxy {
             factory: factory.clone(),
             job_exporter: None,
             job_desc: None,
+            is_mpi_rank: false,
         };
 
         loop {
@@ -98,7 +119,8 @@ impl UnixProxy {
             }
         }
 
-        if let Some(mut desc) = per_client_state.job_desc {
+        /* take(): PerClientState has a Drop impl, so the field cannot be moved out */
+        if let Some(mut desc) = per_client_state.job_desc.take() {
             if !desc.jobid.is_empty() {
                 /* We set the end Unix TS each time we relax */
                 desc.end_time = unix_ts();

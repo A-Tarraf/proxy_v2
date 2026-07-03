@@ -405,6 +405,10 @@ pub(crate) struct ExporterFactory {
     pub instrumentation: Arc<dyn Instrumentation>,
     /// Number of MPI processes currently connected via Unix socket
     pub connected_procs: Arc<AtomicUsize>,
+    /// Number of connected clients that identified as the MPI exporter
+    /// (first Desc pushed starts with "mpi___") — exactly one per MPI rank,
+    /// unlike connected_procs which also counts strace/other exporters.
+    pub mpi_ranks: Arc<AtomicUsize>,
 }
 
 impl ExporterFactory {
@@ -458,9 +462,11 @@ impl ExporterFactory {
                     }
                 }
 
-                /* Remove failed scrapes */
+                /* Remove failed scrapes and relax any jobs they were tracking */
                 for k in to_delete {
-                    scrapes.remove(&k);
+                    if let Some(failed_scraper) = scrapes.remove(&k) {
+                        failed_scraper.relax_tracked_jobs();
+                    }
                 }
             }
 
@@ -778,6 +784,7 @@ impl ExporterFactory {
             branches,
             instrumentation,
             connected_procs: Arc::new(AtomicUsize::new(0)),
+            mpi_ranks: Arc::new(AtomicUsize::new(0)),
         });
 
         let scrape_ref = ret.clone();
@@ -786,8 +793,10 @@ impl ExporterFactory {
             scrape_ref.run_scrapping();
         });
 
-        ret.insert_ftio_exporter(trace_store.clone(), &main_jobdesc.jobid)?;
-        ret.insert_ftio_exporter(trace_store.clone(), &nodejob_desc.jobid)?;
+        /* No FTIO for the "main" / per-node housekeeping traces: FTIO analysis
+         * is expensive (full trace export + external solver) and these traces
+         * exist on every proxy — analyzing them all saturated the machine.
+         * FTIO is attached to real user jobs only (see resolve_job). */
 
         /* This creates a job entry for the cumulative job */
         let main_job = PerJobRefcount {
@@ -914,8 +923,13 @@ impl ExporterFactory {
                 /* Add the trace scrapping */
                 self.insert_tracing(new.exporter.clone(), trace).unwrap();
 
-                self.insert_ftio_exporter(self.trace_store.clone(), &desc.jobid)
-                    .unwrap_or(());
+                /* FTIO only for real user jobs — housekeeping traces ("main",
+                 * "Node: <host>") exist on every proxy and analyzing them all
+                 * multiplies FTIO load by the cluster size for no user value. */
+                if desc.jobid != "main" && !desc.jobid.starts_with("Node:") {
+                    self.insert_ftio_exporter(self.trace_store.clone(), &desc.jobid)
+                        .unwrap_or(());
+                }
 
                 let ret = new.exporter.clone();
                 ht.insert(desc.jobid.to_string(), new);

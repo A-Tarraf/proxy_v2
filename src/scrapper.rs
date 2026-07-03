@@ -42,11 +42,7 @@ impl fmt::Display for ScraperType {
             ScraperType::Trace { exporter: _, trace } => {
                 write!(f, "Trace job {} in {}", trace.desc().jobid, trace.path())
             }
-            ScraperType::Ftio {
-                traces: _,
-                jobid: _,
-                ftio_client: _,
-            } => write!(f, "FTIO"),
+            ScraperType::Ftio { .. } => write!(f, "FTIO"),
         }
     }
 }
@@ -180,10 +176,23 @@ impl ProxyScraper {
         }
     }
 
+    pub(crate) fn relax_tracked_jobs(&self) {
+        if let Some(factory) = &self.factory {
+            for desc in self.state.values().map(|p| p.desc.clone()).collect::<Vec<_>>() {
+                if let Err(e) = factory.relax_job(&desc) {
+                    log::debug!("relax_job {} on scraper teardown: {}", desc.jobid, e);
+                }
+            }
+        }
+    }
+
     fn scrape_proxy(&mut self) -> Result<(), Box<dyn Error>> {
         let mut deleted: Vec<JobDesc> = Vec::new();
 
-        let client = Client::new();
+        /* Bounded timeout: a hung peer must not stall the whole scraping loop */
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
         let response = client.get(&self.target_url).send()?;
 
         // Check if the response was successful (status code 200 OK)
@@ -260,7 +269,9 @@ impl ProxyScraper {
     }
 
     fn scrape_prometheus(&mut self) -> Result<(), Box<dyn Error>> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
         let response = client.get(&self.target_url).send()?;
         let data = response.text()?;
 
@@ -338,6 +349,23 @@ impl ProxyScraper {
 
         let mut metrics = sys.scrape()?;
 
+        // Push the number of locally connected exporter processes so it appears in time-series traces
+        let conn_count = factory.connected_procs.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        metrics.push(CounterSnapshot::new(
+            "proxy_connected_procs".to_string(),
+            &[],
+            "Number of exporter processes (MPI wrapper, strace, ...) currently connected to this proxy node".to_string(),
+            CounterType::Gauge { min: conn_count, max: conn_count, hits: 1.0, total: conn_count },
+        ));
+
+        // Actual MPI ranks on this node: one MPI-exporter connection per rank
+        let rank_count = factory.mpi_ranks.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        metrics.push(CounterSnapshot::new(
+            "proxy_mpi_ranks".to_string(),
+            &[],
+            "Number of MPI ranks currently running on this proxy node".to_string(),
+            CounterType::Gauge { min: rank_count, max: rank_count, hits: 1.0, total: rank_count },
+        ));
 
         // We push in MAIN, NODE and All exporters which may generate profiles
         // THese exporters are the one attached locally and thus bound to
@@ -376,9 +404,25 @@ impl ProxyScraper {
         Ok(())
     }
 
-    fn scrape_ftio(&mut self, traces: Arc<TraceView>, jobid: String, ftio_client: Arc<FtioClient>) -> Result<(), Box<dyn Error>> {
-        traces.generate_ftio_model(&jobid, ftio_client)?;
-        Ok(())
+    /// FTIO analysis (trace export + ZMQ round-trip + model fit) can take
+    /// seconds per job and its ZMQ timeouts are tens of seconds. Running it
+    /// inline would block the scraping loop and starve every trace scraper
+    /// (jobs would get one data point instead of one per second). So it is
+    /// dispatched to a background thread. The `in_flight` guard lives on the
+    /// shared FtioClient: at most ONE analysis at a time per proxy process,
+    /// across all jobs, so the FTIO server is never flooded.
+    fn scrape_ftio(&self, traces: Arc<TraceView>, jobid: String, ftio_client: Arc<FtioClient>) {
+        use std::sync::atomic::Ordering;
+        if ftio_client.in_flight.swap(true, Ordering::SeqCst) {
+            /* Another FTIO analysis of this proxy is still running — skip */
+            return;
+        }
+        std::thread::spawn(move || {
+            if let Err(e) = traces.generate_ftio_model(&jobid, ftio_client.clone()) {
+                log::warn!("FTIO scrape failed (FTIO unavailable?): {}", e);
+            }
+            ftio_client.in_flight.store(false, Ordering::SeqCst);
+        });
     }
 
     pub(crate) fn scrape(&mut self) -> Result<(), Box<dyn Error>> {
@@ -402,8 +446,8 @@ impl ProxyScraper {
             ScraperType::Trace { exporter, trace } => {
                 self.scrape_trace(exporter.clone(), trace.clone())?;
             }
-            ScraperType::Ftio { traces, jobid, ftio_client} => {
-                self.scrape_ftio(traces.clone(), jobid.clone(), ftio_client.clone())?;
+            ScraperType::Ftio { traces, jobid, ftio_client } => {
+                self.scrape_ftio(traces.clone(), jobid.clone(), ftio_client.clone());
             }
         }
 
