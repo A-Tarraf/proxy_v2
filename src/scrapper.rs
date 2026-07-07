@@ -241,7 +241,16 @@ impl ProxyScraper {
 
                 if let Some(exporter) = factory.resolve_by_id(&p.desc.jobid) {
                     for cnt in p.counters.iter() {
-                        exporter.push(cnt)?;
+                        /* Declare with a ZERO value: push() initializes a new
+                         * entry with the snapshot as-is, and the accumulate
+                         * below adds the value — pushing the raw snapshot
+                         * counted the first import twice (each aggregation
+                         * hop then showed child_now + child_first_seen) */
+                        let decl = CounterSnapshot {
+                            ctype: cnt.ctype.zeroed(),
+                            ..cnt.clone()
+                        };
+                        exporter.push(&decl)?;
                         exporter.accumulate(cnt, true)?;
                     }
                 } else {

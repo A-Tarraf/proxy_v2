@@ -202,11 +202,23 @@ pub fn parse_bool(sbool: &str) -> bool {
 
 #[allow(unused)]
 pub fn derivate_time_serie(data: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    let mut ret: Vec<(f64, f64)> = vec![(data[0].0, 0.0)];
+    /* Rate anchored at the interval START (sample-and-hold convention, same
+     * as the dewrap virtual metrics): the value at t[i-1] is the rate over
+     * (t[i-1], t[i]]; a trailing 0 closes the series. */
+    let mut ret: Vec<(f64, f64)> = Vec::with_capacity(data.len());
 
-    for i in (1..data.len()) {
-        let deltax = (data[i].0 as f64) - (data[i - 1].0 as f64);
-        ret.push((data[i].0, (data[i].1 - data[i - 1].1) / deltax));
+    for i in 1..data.len() {
+        let deltax = data[i].0 - data[i - 1].0;
+        let rate = if deltax > 0.0 {
+            (data[i].1 - data[i - 1].1) / deltax
+        } else {
+            0.0
+        };
+        ret.push((data[i - 1].0, rate));
+    }
+
+    if let Some(last) = data.last() {
+        ret.push((last.0, 0.0));
     }
 
     ret

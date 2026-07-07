@@ -3,10 +3,10 @@
         <h2>Select Plot Source</h2>
         <form id="traceSelect">
             <label for="target">Target:</label>
-            <span id="procsBadge" title="Live totals of THIS PROXY (whole cluster seen from here), independent of the Target selected on the left. ranks: MPI ranks currently running | procs: connected exporter processes (each rank has an MPI wrapper + a strace exporter, so procs is usually a multiple of ranks)"
+            <span id="procsBadge" title="Live MPI rank count of the job selected as Target (from its job_mpi_ranks metric; follows malleable jobs, may include DMR launcher helper processes). For non-job targets (Node:/main) it falls back to the proxy-wide totals."
                 style="display:inline-block; background:#1f8996; color:#fff; border-radius:4px;
                        padding:2px 8px; font-size:0.82em; margin-right:6px; vertical-align:middle;">
-                proxy-wide ranks: – | procs: –
+                MPI ranks: –
             </span>
             <select id="target" name="target" required>
                 <!-- Options for selecting the target will be added dynamically using JavaScript -->
@@ -338,7 +338,11 @@
                     xScale.title.text = relativeTime ? 'Time' : 'System Time';
                     
                     const points = data.map(v => ({ x: v[0] * 1000, y: v[1] }));
-                    chart.data.datasets[0].stepped = holdMode ? 'after' : false;
+                    /* 'before' in Chart.js holds the LEFT point's value forward until the
+                       next sample (sample-and-hold) — matches the interval-start anchoring
+                       of dewrap and derivated series ('after' would hold the new value
+                       backward, showing each interval one bin early) */
+                    chart.data.datasets[0].stepped = holdMode ? 'before' : false;
                     chart.data.datasets[0].data = points;
                     chart.update();
 
@@ -663,19 +667,44 @@
         // Initialize the Metric select options based on the default Target
         populateJobSelect();
 
-        // Live badge — polls /ranks (MPI ranks) and /procs (exporter connections) every 3 s
+        // Live badge — MPI rank count of the SELECTED job (its job_mpi_ranks
+        // counter from /job, cheap), refreshed every 3 s. Non-job targets
+        // (Node:/main) fall back to the proxy-wide /ranks | /procs totals.
         function refreshProcsBadge() {
-            Promise.all([
-                fetch('/ranks').then(r => r.json()).catch(() => '–'),
-                fetch('/procs').then(r => r.json()).catch(() => '–')
-            ]).then(([ranks, procs]) => {
-                const badge = document.getElementById('procsBadge');
-                badge.textContent = 'proxy-wide ranks: ' + ranks + ' | procs: ' + procs;
-                badge.style.background = (ranks > 0 || procs > 0) ? '#1f8996' : '#888';
-            }).catch(() => {});
+            const badge = document.getElementById('procsBadge');
+            const target = document.getElementById('target').value;
+            const isJob = target && !target.startsWith('Node:') && target !== 'main';
+            if (isJob) {
+                fetch('/job').then(r => r.json()).then(profiles => {
+                    const p = profiles.find(p => p.desc && p.desc.jobid === target);
+                    const c = p && p.counters.find(c => c.name === 'job_mpi_ranks');
+                    const v = c && c.ctype && c.ctype.Counter ? c.ctype.Counter.value : null;
+                    if (v !== null) {
+                        badge.textContent = 'MPI ranks: ' + v;
+                        badge.style.background = v > 0 ? '#1f8996' : '#888';
+                    } else {
+                        /* job no longer live: show the last traced value */
+                        fetch('/trace/plot?jobid=' + encodeURIComponent(target) + '&filter=job_mpi_ranks')
+                            .then(r => r.json()).then(pts => {
+                                const last = Array.isArray(pts) && pts.length ? pts[pts.length - 1][1] : '–';
+                                badge.textContent = 'MPI ranks: ' + last + ' (ended)';
+                                badge.style.background = '#888';
+                            }).catch(() => { badge.textContent = 'MPI ranks: –'; });
+                    }
+                }).catch(() => { badge.textContent = 'MPI ranks: –'; });
+            } else {
+                Promise.all([
+                    fetch('/ranks').then(r => r.json()).catch(() => '–'),
+                    fetch('/procs').then(r => r.json()).catch(() => '–')
+                ]).then(([ranks, procs]) => {
+                    badge.textContent = 'proxy-wide ranks: ' + ranks + ' | procs: ' + procs;
+                    badge.style.background = (ranks > 0 || procs > 0) ? '#1f8996' : '#888';
+                }).catch(() => {});
+            }
         }
         refreshProcsBadge();
         setInterval(refreshProcsBadge, 3000);
+        document.getElementById('target').addEventListener('change', refreshProcsBadge);
 
         // Auto-latest: refresh job list and re-select latest every 5 s — ON by default
         let autoLatestTimer = null;

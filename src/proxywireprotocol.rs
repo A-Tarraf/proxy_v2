@@ -170,7 +170,8 @@ impl CounterType {
                         ts: sts,
                         value: svalue,
                     } => {
-                        *sts = (*ts + *sts) / 2;
+                        /* keep the freshest timestamp (averaging garbles it) */
+                        *sts = if *ts > *sts { *ts } else { *sts };
                         *svalue += *value;
                         Ok(())
                     }
@@ -257,9 +258,8 @@ impl CounterType {
                         ts: sts,
                         value: svalue,
                     } => {
-                        if *sts > *ts {
-                            *sts -= ts;
-                        }
+                        /* value becomes the delta; the timestamp stays the
+                         * NEW sample's time (subtracting times is meaningless) */
                         *svalue -= *value;
                         Ok(())
                     }
@@ -289,6 +289,24 @@ impl CounterType {
                     _ => unreachable!(),
                 }
             }
+        }
+    }
+
+    /// Same variant and metadata but with a zero value — used to *declare*
+    /// a counter without contributing to it (the value is then brought in
+    /// by accumulate/merge exactly once)
+    pub(crate) fn zeroed(&self) -> CounterType {
+        match self {
+            CounterType::Counter { ts, .. } => CounterType::Counter {
+                ts: *ts,
+                value: 0.0,
+            },
+            CounterType::Gauge { .. } => CounterType::Gauge {
+                min: 0.0,
+                max: 0.0,
+                hits: 0.0,
+                total: 0.0,
+            },
         }
     }
 
