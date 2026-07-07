@@ -30,6 +30,8 @@ struct PerClientState {
     /// True once this connection pushed an "mpi___" Desc — it is the MPI
     /// exporter of one rank (strace and other exporters use other prefixes).
     is_mpi_rank: bool,
+    /// Job the rank was counted for (per-job counts follow malleable jobs)
+    rank_jobid: Option<String>,
 }
 
 impl Drop for PerClientState {
@@ -38,6 +40,15 @@ impl Drop for PerClientState {
          * disconnects abruptly and handle_client exits early with an error */
         if self.is_mpi_rank {
             self.factory.mpi_ranks.fetch_sub(1, Ordering::Relaxed);
+        }
+        if let Some(jobid) = &self.rank_jobid {
+            let mut ht = self.factory.job_mpi_ranks.lock().unwrap();
+            if let Some(c) = ht.get_mut(jobid) {
+                *c -= 1;
+                if *c <= 0 {
+                    ht.remove(jobid);
+                }
+            }
         }
     }
 }
@@ -56,6 +67,18 @@ impl UnixProxy {
                         .factory
                         .mpi_ranks
                         .fetch_add(1, Ordering::Relaxed);
+                    if let Some(d) = &per_client_state.job_desc {
+                        if !d.jobid.is_empty() {
+                            per_client_state.rank_jobid = Some(d.jobid.clone());
+                            *per_client_state
+                                .factory
+                                .job_mpi_ranks
+                                .lock()
+                                .unwrap()
+                                .entry(d.jobid.clone())
+                                .or_insert(0) += 1;
+                        }
+                    }
                 }
                 per_client_state.factory.push(
                     desc.name.as_str(),
@@ -81,6 +104,24 @@ impl UnixProxy {
                             Some(per_client_state.factory.resolve_job(desc, true));
                     }
                 }
+
+                /* The MPI exporter may declare counters before the job: if
+                 * this connection is already a counted rank, attribute it to
+                 * the job now (per-job counts feed job_mpi_ranks) */
+                if per_client_state.is_mpi_rank && per_client_state.rank_jobid.is_none() {
+                    if let Some(desc) = &per_client_state.job_desc {
+                        if !desc.jobid.is_empty() {
+                            per_client_state.rank_jobid = Some(desc.jobid.clone());
+                            *per_client_state
+                                .factory
+                                .job_mpi_ranks
+                                .lock()
+                                .unwrap()
+                                .entry(desc.jobid.clone())
+                                .or_insert(0) += 1;
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -97,6 +138,7 @@ impl UnixProxy {
             job_exporter: None,
             job_desc: None,
             is_mpi_rank: false,
+            rank_jobid: None,
         };
 
         loop {

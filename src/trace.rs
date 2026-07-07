@@ -31,6 +31,88 @@ use crate::{
 use crate::proxy_common::derivate_time_serie;
 use crate::proxy_common::offset_time_serie;
 
+/// Marker segment of the virtual dewrapped-bandwidth metrics derived from
+/// `___size___`/`___time___` counter pairs.
+pub(crate) const DEWRAP_SEGMENT: &str = "___bandwidth_dewrap___";
+
+/// Reconstruct wall-clock bandwidth from cumulative `___size___`/`___time___`
+/// counters. The MPI wrapper accounts a call's bytes and duration only when
+/// the call returns, so a burst normally shows up as a spike at the completion
+/// sample. Here each burst is spread back over its estimated wall-clock span
+/// (Δtime divided by the concurrent ranks) so the start point is right and the
+/// value is the aggregate bytes/s during the burst. Derived on demand — the
+/// stored trace is never rewritten.
+pub(crate) fn dewrap_bandwidth(
+    size: &[(f64, f64)],
+    time: &[(f64, f64)],
+    ranks: Option<&[(f64, f64)]>,
+) -> Vec<(f64, f64)> {
+    if size.len() < 2 {
+        return size.iter().map(|(t, _)| (*t, 0.0)).collect();
+    }
+
+    /* Last value at or before ts */
+    let value_at = |serie: &[(f64, f64)], ts: f64| -> Option<f64> {
+        let idx = serie.partition_point(|p| p.0 <= ts);
+        if idx == 0 {
+            None
+        } else {
+            Some(serie[idx - 1].1)
+        }
+    };
+
+    let ts0 = size[0].0;
+    /* Bytes landing in bin k, which spans (size[k-1].0 .. size[k].0] */
+    let mut bytes = vec![0.0f64; size.len()];
+
+    for k in 1..size.len() {
+        let (ts, sz) = size[k];
+        let prev_ts = size[k - 1].0;
+        let ds = sz - size[k - 1].1;
+        if ds <= 0.0 {
+            continue;
+        }
+        let dt = match (value_at(time, ts), value_at(time, prev_ts)) {
+            (Some(cur), Some(prev)) => cur - prev,
+            _ => 0.0,
+        };
+        let n = ranks
+            .and_then(|r| value_at(r, ts))
+            .unwrap_or(1.0)
+            .round()
+            .max(1.0);
+        let start = (ts - dt / n).max(ts0);
+        let span = ts - start;
+        if dt <= 1e-9 || span <= 1e-9 {
+            /* No duration info: keep completion attribution */
+            bytes[k] += ds;
+            continue;
+        }
+        /* Spread ds over the bins overlapping [start, ts] */
+        let mut j = size.partition_point(|p| p.0 <= start).max(1);
+        while j <= k {
+            let lo = size[j - 1].0.max(start);
+            let hi = size[j].0.min(ts);
+            if hi > lo {
+                bytes[j] += ds * (hi - lo) / span;
+            }
+            j += 1;
+        }
+    }
+
+    /* Each point carries the rate of the interval STARTING at its timestamp
+     * (sample-and-hold until the next point); a final zero closes the hold.
+     * This anchors bursts at their reconstructed start instead of one bin
+     * late. */
+    let mut out = Vec::with_capacity(size.len());
+    for k in 1..size.len() {
+        let w = size[k].0 - size[k - 1].0;
+        out.push((size[k - 1].0, if w > 1e-9 { bytes[k] / w } else { 0.0 }));
+    }
+    out.push((size[size.len() - 1].0, 0.0));
+    out
+}
+
 /**********************
  * JSON TRACE SUPPORT *
  **********************/
@@ -92,7 +174,8 @@ impl TraceExport {
                 let id = if let Some(m) = full_data.counters.get(m) {
                     m.id
                 } else {
-                    unreachable!();
+                    /* Virtual metrics (dewrapped bandwidth) have no stored series */
+                    return None;
                 };
 
                 let mut data = if let Some(d) = full_data.series.get(&id) {
@@ -115,6 +198,11 @@ impl TraceExport {
             self.set(m.clone(), data)?;
             self.set(format!("deriv__{}", m), deriv)?;
         }
+
+        /* Virtual dewrapped-bandwidth metrics are deliberately NOT exported:
+         * FTIO derivates every non-deriv series, which would mangle an
+         * already-derived rate. FTIO reconstructs them itself when passed
+         * --dewrap (via the FTIO custom arguments). */
 
         Ok(())
     }
@@ -335,10 +423,6 @@ struct TraceState {
     /// Read state
     trace_data: TraceData,
 
-    /// Previous cumulative values for bandwidth computation: name → (prev_size, prev_time)
-    bw_prev: HashMap<String, (f64, f64)>,
-    /// Whether bandwidth synthesis is disabled (set via --no-bandwidth flag)
-    no_bandwidth: bool,
 }
 
 impl TraceState {
@@ -592,40 +676,11 @@ impl TraceState {
     }
 
     fn push(&mut self, counters: Vec<CounterSnapshot>) -> Result<bool, Box<dyn Error>> {
-        // Synthesize bandwidth gauges: for each ___size___<fn> counter that has a matching
-        // ___time___<fn>, compute bytes/sec = Δsize/Δtime and emit as ___bandwidth___<fn>.
-        let mut bw_snapshots: Vec<CounterSnapshot> = Vec::new();
-        if !self.no_bandwidth { for c in &counters {
-            if let Some(fn_part) = c.name.split("___size___").nth(1) {
-                let prefix = c.name.split("___size___").next().unwrap_or("");
-                let time_name = format!("{}___time___{}", prefix, fn_part);
-                if let Some(time_c) = counters.iter().find(|x| x.name == time_name) {
-                    let cur_size = c.ctype.value();
-                    let cur_time = time_c.ctype.value();
-                    let key = c.name.clone();
-                    let (prev_size, prev_time) = self.bw_prev.get(&key).copied().unwrap_or((cur_size, cur_time));
-                    let delta_size = cur_size - prev_size;
-                    let delta_time = cur_time - prev_time;
-                    self.bw_prev.insert(key, (cur_size, cur_time));
-                    let bw = if delta_time > 1e-9 { delta_size / delta_time } else { 0.0 };
-                    let bw_name = c.name.replace("___size___", "___bandwidth___");
-                    bw_snapshots.push(CounterSnapshot {
-                        name: bw_name,
-                        doc: format!("Bandwidth (bytes/s) for {}", fn_part),
-                        ctype: CounterType::Gauge {
-                            min: bw,
-                            max: bw,
-                            hits: 1.0,
-                            total: bw,
-                        },
-                    });
-                }
-            }
-        }}
-        let mut all_counters = counters;
-        all_counters.extend(bw_snapshots);
-        let counters = all_counters;
-
+        /* No bandwidth gauge is stored: the virtual ___bandwidth_dewrap___
+         * metrics (see dewrap_bandwidth) are derived from the size/time
+         * counters on demand and supersede the old ___bandwidth___ gauge,
+         * whose Δsize/Δtime was the per-rank in-call speed with bursts
+         * attributed to their completion sample. */
         let mut new_counters: Vec<TraceFrame> = self.check_counter(&counters);
 
         self.write_frames(&new_counters)?;
@@ -685,7 +740,6 @@ impl TraceState {
             desc: job.clone(),
         };
 
-        let no_bandwidth = std::env::var("PROXY_NO_BANDWIDTH").is_ok();
         let ret = TraceState {
             loaded: true, // Trace is new thus already loaded
             size: 0,
@@ -694,8 +748,6 @@ impl TraceState {
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
-            bw_prev: HashMap::new(),
-            no_bandwidth,
         };
 
         let mut fd = ret.open(true)?;
@@ -713,7 +765,6 @@ impl TraceState {
             desc: desc.clone(),
         };
 
-        let no_bandwidth = std::env::var("PROXY_NO_BANDWIDTH").is_ok();
         let mut ret = TraceState {
             loaded: false, // Trace is not loaded already
             size: 0,
@@ -722,8 +773,6 @@ impl TraceState {
             path: path.to_path_buf(),
             current_counter_id: 0,
             trace_data: TraceData::empty(&desc),
-            bw_prev: HashMap::new(),
-            no_bandwidth,
         };
 
         let lastframe = ret.read_last()?;
@@ -1007,11 +1056,23 @@ impl TraceView {
     }
 
     pub(crate) fn metrics(&self, jobid: &String) -> Result<Vec<String>, ProxyErr> {
-        let metrics = if let Some(tr) = self.traces.read().unwrap().get(jobid) {
+        let mut metrics = if let Some(tr) = self.traces.read().unwrap().get(jobid) {
             tr.state.lock().unwrap().metrics()?
         } else {
             return Err(ProxyErr::new("No such jobid"));
         };
+
+        /* Advertise a virtual dewrapped-bandwidth metric per size/time pair */
+        let virtuals: Vec<String> = metrics
+            .iter()
+            .filter(|m| m.contains("___size___"))
+            .filter(|m| {
+                let tname = m.replace("___size___", "___time___");
+                metrics.iter().any(|x| *x == tname)
+            })
+            .map(|m| m.replace("___size___", DEWRAP_SEGMENT))
+            .collect();
+        metrics.extend(virtuals);
 
         Ok(metrics)
     }
@@ -1101,6 +1162,26 @@ impl TraceView {
 
     #[allow(unused)]
     pub(crate) fn plot(&self, jobid: &String, filter: String) -> Result<Vec<(f64, f64)>, ProxyErr> {
+        if filter.contains(DEWRAP_SEGMENT) {
+            let size = TraceView::to_time_serie(
+                &self
+                    .read(jobid, Some(filter.replace(DEWRAP_SEGMENT, "___size___")))?
+                    .time_serie,
+            );
+            let time = TraceView::to_time_serie(
+                &self
+                    .read(jobid, Some(filter.replace(DEWRAP_SEGMENT, "___time___")))?
+                    .time_serie,
+            );
+            /* Prefer the job's own rank count (exact, follows malleability);
+             * fall back to the node-wide gauge */
+            let ranks = self
+                .read(jobid, Some("job_mpi_ranks".to_string()))
+                .or_else(|_| self.read(jobid, Some("proxy_mpi_ranks".to_string())))
+                .ok()
+                .map(|r| TraceView::to_time_serie(&r.time_serie));
+            return Ok(dewrap_bandwidth(&size, &time, ranks.as_deref()));
+        }
         let trace = self.read(jobid, Some(filter))?;
         let ret = TraceView::to_time_serie(&trace.time_serie);
         Ok(ret)
@@ -1185,7 +1266,17 @@ impl TraceView {
         ftio_client: Arc<FtioClient>,
     ) -> Result<(), Box<dyn Error>> {
         let mut export = self.export(jobid)?;
-        export.metrics.retain(|k, _| k == metric);
+        if metric.contains(DEWRAP_SEGMENT) {
+            /* Virtual metric: FTIO reconstructs it (--dewrap) from the
+             * size/time pair and the rank count */
+            let sname = metric.replace(DEWRAP_SEGMENT, "___size___");
+            let tname = metric.replace(DEWRAP_SEGMENT, "___time___");
+            export
+                .metrics
+                .retain(|k, _| *k == sname || *k == tname || k == "proxy_mpi_ranks");
+        } else {
+            export.metrics.retain(|k, _| k == metric);
+        }
 
         if export.metrics.is_empty() {
             return Err(format!("Metric '{}' not found in job '{}'", metric, jobid).into());

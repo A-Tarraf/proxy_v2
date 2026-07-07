@@ -3,10 +3,10 @@
         <h2>Select Plot Source</h2>
         <form id="traceSelect">
             <label for="target">Target:</label>
-            <span id="procsBadge" title="ranks: MPI ranks currently running (cluster-wide) | procs: connected exporter processes (each rank has an MPI wrapper + a strace exporter, so procs is usually a multiple of ranks)"
+            <span id="procsBadge" title="Live totals of THIS PROXY (whole cluster seen from here), independent of the Target selected on the left. ranks: MPI ranks currently running | procs: connected exporter processes (each rank has an MPI wrapper + a strace exporter, so procs is usually a multiple of ranks)"
                 style="display:inline-block; background:#1f8996; color:#fff; border-radius:4px;
                        padding:2px 8px; font-size:0.82em; margin-right:6px; vertical-align:middle;">
-                ranks: – | procs: –
+                proxy-wide ranks: – | procs: –
             </span>
             <select id="target" name="target" required>
                 <!-- Options for selecting the target will be added dynamically using JavaScript -->
@@ -670,7 +670,7 @@
                 fetch('/procs').then(r => r.json()).catch(() => '–')
             ]).then(([ranks, procs]) => {
                 const badge = document.getElementById('procsBadge');
-                badge.textContent = 'ranks: ' + ranks + ' | procs: ' + procs;
+                badge.textContent = 'proxy-wide ranks: ' + ranks + ' | procs: ' + procs;
                 badge.style.background = (ranks > 0 || procs > 0) ? '#1f8996' : '#888';
             }).catch(() => {});
         }

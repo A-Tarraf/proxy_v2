@@ -114,6 +114,26 @@ print([s['target_url'] for s in d if s['ttype']=='Proxy'])
 
 **Sampling rate:** `-S 100` = 100 ms period (10 Hz). Use `-S 10` for 100 Hz but expect some artifacts.
 
+**`-S` overhead — read this before lowering it.** The scraping loop's wakeup
+granularity is derived from `-S` (period/10, clamped to 10–1000 ms), so a small
+`-S` means frequent wakeups on *every* proxy in the tree. On a shared machine
+(like this Docker cluster, where all 9 proxies compete with the job for the
+same cores) those wakeups contend the scheduler, and jobs traced with the
+**strace exporter** are hit hardest — every traced syscall needs the tracer
+rescheduled promptly. Measured with HACC-IO (4 nodes, ~270 k syscalls/rank,
+details in `speed_report.md`):
+
+| Setup | Job time |
+|---|---|
+| no instrumentation | ~22 s |
+| `proxy_run -e mpi` (any `-S`) | ~19 s |
+| `proxy_run` with strace, 10 ms wakeups (old fixed loop / `-S 100`) | 112–195 s |
+| `proxy_run` with strace, `-S 1000` (100 ms wakeups) | ~60 s |
+
+Rules of thumb: keep `-S 1000` unless you need finer time resolution; if job
+runtime matters, prefer `proxy_run -e mpi` (free) over the strace exporter; on
+dedicated cluster nodes the effect is much smaller than on this laptop setup.
+
 **Slurm:** `slurmctld` and `slurmd` need ~15 s to start after `start.sh`. If you submit too early, `squeue` shows the job stuck in `CF` (configuring) or nodes show `unk*`. Wait, then verify:
 ```bash
 sleep 15
@@ -152,7 +172,15 @@ Adding `proxy_run --` before the application binary is the only change needed. I
 
 **Job ID in the DMR Docker cluster:** Pass `-j $SLURM_JOB_ID` explicitly to `proxy_run`. In this setup, `dmr_wrapper` forces SSH-based process launch (overriding Slurm PLM), and `fwd-environment` does **not** forward `SLURM_JOBID` to ranks on remote nodes. Without `-j`, each remote rank falls back to `METRIC_PROXY_LAUNCHER_PPID` (its own parent PID) and registers as a separate one-process job. Since bash expands `$SLURM_JOB_ID` to a literal number before mpirun runs, passing it explicitly ensures all ranks on all nodes get the same job ID as a CLI argument.
 
-**Bandwidth metric:** For every `___size___<fn>` / `___time___<fn>` counter pair the proxy automatically synthesizes a `___bandwidth___<fn>` gauge (bytes/s). Disable with `--no-bandwidth` on the proxy start command.
+> Full details on measurement semantics (interception at call **return**, times **summed over ranks** → per-rank averages, counter-vs-gauge aggregation, FTIO wire protocol) are in [`metrics_semantics.md`](metrics_semantics.md).
+
+**Bandwidth = dewrapped bandwidth (virtual metric):** For each `___size___<fn>` / `___time___<fn>` counter pair the trace UI offers a virtual `___bandwidth_dewrap___<fn>` metric — the **aggregate wall-clock bytes/s**. (The former stored `___bandwidth___` gauge and its `--no-bandwidth` flag were removed: its Δsize/Δtime was the *per-rank speed inside the I/O calls* with each burst attributed to the sample where the call completed — superseded by the dewrap.)
+
+How dewrapping works: the exporters account a call's bytes and duration only when the call **returns**, so a burst normally lands entirely on its completion sample. Dewrap **creates the points in the past**: each burst is spread backwards from its completion time over its estimated wall-clock span (Δtime ÷ `proxy_mpi_ranks`, i.e. assuming the ranks did the I/O concurrently), so the burst *starts* where it actually started. Each plotted point carries the rate of the interval **starting** at its timestamp, held until the next sample (the series ends with a closing 0). The integral over time equals the transferred bytes exactly. Everything is derived on the fly at plot time from the stored cumulative counters — nothing extra is stored in the trace, and old points are never rewritten (the "past" points exist only in the derived view).
+
+For FTIO the same reconstruction runs on the FTIO side: add `--dewrap` to the *custom arguments* in the FTIO tab. FTIO then analyzes the reconstructed signal **in addition to** the regular metrics, storing the model under the `___bandwidth_dewrap___<fn>` name — i.e. exactly the metric you plot in the UI, so the FTIO overlay matches. (The proxy deliberately does not pre-compute these series for FTIO: FTIO derivates every non-`deriv` metric, which would mangle an already-derived rate.)
+
+**Ranks of a (malleable) job over time — `job_mpi_ranks`:** every job trace contains `job_mpi_ranks`, the number of MPI ranks *of that job* currently connected: exact integer per node, **summed across nodes on aggregating proxies** (it is a set-type counter, so the root shows the job's total). A malleable job that grows or shrinks at runtime shows the change directly in this series, and the dewrap uses it as its concurrency estimate. By contrast `proxy_mpi_ranks`/`proxy_connected_procs` are *node-wide* gauges (all jobs together), and gauges are averaged (`total/hits`) when merged — that is why they can show decimals on the root; the UI badge uses `GET /ranks`, which sums live per-node values and is always an integer.
 
 **Connected processes:** `proxy_connected_procs` is tracked as a live time-series Counter on each proxy node and summed across nodes at the root.
 

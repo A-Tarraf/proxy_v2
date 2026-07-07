@@ -409,6 +409,9 @@ pub(crate) struct ExporterFactory {
     /// (first Desc pushed starts with "mpi___") — exactly one per MPI rank,
     /// unlike connected_procs which also counts strace/other exporters.
     pub mpi_ranks: Arc<AtomicUsize>,
+    /// Per-job MPI rank count on this node (jobid → ranks). Follows malleable
+    /// jobs adding/removing ranks at runtime; feeds the job_mpi_ranks metric.
+    pub job_mpi_ranks: Arc<Mutex<HashMap<String, i64>>>,
 }
 
 impl ExporterFactory {
@@ -470,7 +473,15 @@ impl ExporterFactory {
                 }
             }
 
-            sleep(Duration::from_millis(10));
+            /* Loop granularity follows the sampling period (-S): period/10,
+             * clamped to [10, 1000] ms. -S 100 keeps the historical 10 ms
+             * wakeups; -S 1000 polls every 100 ms. This matters beyond
+             * sampling resolution: constant 10 ms wakeups across a proxy
+             * tree contend the scheduler and slow ptrace-based exporters
+             * several-fold (HACC-IO + strace exporter: 112 s at 10 ms vs
+             * 60 s at 100 ms — see docs/speed_report.md). */
+            let granularity = (*self.period.read().unwrap() / 10).clamp(10, 1000);
+            sleep(Duration::from_millis(granularity));
         }
     }
 
@@ -785,6 +796,7 @@ impl ExporterFactory {
             instrumentation,
             connected_procs: Arc::new(AtomicUsize::new(0)),
             mpi_ranks: Arc::new(AtomicUsize::new(0)),
+            job_mpi_ranks: Arc::new(Mutex::new(HashMap::new())),
         });
 
         let scrape_ref = ret.clone();
@@ -1116,6 +1128,17 @@ impl ExporterFactory {
         Ok(e.iter()
             .filter(|(_, v)| v.islocal)
             .map(|(_, v)| v.exporter.clone())
+            .collect())
+    }
+
+    pub(crate) fn get_local_job_exporters_with_ids(
+        &self,
+    ) -> Result<Vec<(String, Arc<Exporter>)>, Box<dyn Error + '_>> {
+        let e = self.perjob.try_lock()?;
+
+        Ok(e.iter()
+            .filter(|(_, v)| v.islocal)
+            .map(|(k, v)| (k.clone(), v.exporter.clone()))
             .collect())
     }
 

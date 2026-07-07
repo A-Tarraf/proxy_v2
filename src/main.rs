@@ -83,10 +83,6 @@ struct Args {
     /// Duration to run instrumentation in seconds (default 0 = disabled)
     #[arg(long, default_value_t = 0)]
     instrumentation: u64,
-
-    /// Disable runtime bandwidth metric synthesis (___bandwidth___ counters)
-    #[arg(long, default_value_t = false)]
-    no_bandwidth: bool,
 }
 
 fn parse_period(arg: &String, default_period: u64) -> (String, u64) {
@@ -115,9 +111,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     /* Make sure it is globally visible */
     env::set_var("PROXY_PERIOD", format!("{}", args.sampling_period));
-    if args.no_bandwidth {
-        env::set_var("PROXY_NO_BANDWIDTH", "1");
-    }
 
     let profile_prefix = if let Some(prefix) = args.target_prefix {
         prefix

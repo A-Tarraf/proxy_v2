@@ -59,7 +59,9 @@ impl Default for FtioArguments {
             filter_cutoff: None,
             filter_cutoff2: None,
             filter_order: None,
-            custom_args: None,
+            /* Dewrapped bandwidth analysis is on by default; clearing the
+             * custom-args field in the FTIO tab turns it off */
+            custom_args: Some("--dewrap".to_string()),
         }
     }
 }

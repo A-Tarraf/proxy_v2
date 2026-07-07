@@ -372,8 +372,26 @@ impl ProxyScraper {
         // node local performance
         let mut target_exporters: Vec<Arc<Exporter>> = vec![factory.get_main(), factory.get_node()];
 
-        if let Ok(mut locals) = factory.get_local_job_exporters() {
-            target_exporters.append(&mut locals);
+        if let Ok(locals) = factory.get_local_job_exporters_with_ids() {
+            let job_ranks = factory.job_mpi_ranks.lock().unwrap().clone();
+
+            for (jobid, e) in locals.iter() {
+                /* Per-job rank count as a Counter: SET locally every scrape,
+                 * SUMMED across nodes when an aggregating proxy merges the
+                 * job profiles — so a malleable job growing or shrinking its
+                 * ranks at runtime shows the change in its own trace */
+                let n = *job_ranks.get(jobid).unwrap_or(&0) as f64;
+                let m = CounterSnapshot::new(
+                    "job_mpi_ranks".to_string(),
+                    &[],
+                    "Current number of MPI ranks of this job (per node; summed across nodes on aggregating proxies)".to_string(),
+                    CounterType::Counter { ts: unix_ts_us(), value: n },
+                );
+                e.push(&m)?;
+                /* set (not accumulate): the value is the current count */
+                e.set(m)?;
+                target_exporters.push(e.clone());
+            }
 
             for e in target_exporters {
                 for m in metrics.iter() {
