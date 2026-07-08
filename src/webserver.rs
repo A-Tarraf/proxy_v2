@@ -534,6 +534,44 @@ impl Web {
         WebResponse::Native(Response::json(&scrapes))
     }
 
+    /// True if the given host:port is already attached to the proxy tree as
+    /// seen from this node: scraped directly, or recorded by /pivot as the
+    /// child of a DIFFERENT parent. A proxy with two parents gets its
+    /// metrics summed twice at the root, so joins must be idempotent — but
+    /// the follow-up join a freshly pivoted proxy sends to its assigned
+    /// parent (possibly this very node) must still go through.
+    fn already_in_tree(&self, hostport: &String) -> bool {
+        if self.factory.has_scrape(hostport) {
+            return true;
+        }
+        let me = self.url();
+        let clients = self.known_client.lock().unwrap();
+        clients
+            .iter()
+            .any(|c| c.url != me && c.child.iter().any(|ch| ch == hostport))
+    }
+
+    fn join_one(&self, to: &String, period: u64) -> Result<String, String> {
+        if self.already_in_tree(to) {
+            return Ok(format!(
+                "{} is already part of the proxy tree, not adding it again",
+                to
+            ));
+        }
+
+        ExporterFactory::add_scrape(self.factory.clone(), to, period)
+            .map_err(|e| format!("Failed to add {} for scraping : {}", to, e))?;
+
+        /* Record the manual join in the pivot bookkeeping so later
+         * /pivot placements and duplicate /join calls see it */
+        let mut clients = self.known_client.lock().unwrap();
+        let mut nc = ClientPivot::new(to.clone());
+        nc.set_depth(1);
+        clients.push(nc);
+
+        Ok(format!("Added {} for scraping", to))
+    }
+
     fn handle_join(&self, req: &Request) -> WebResponse {
         let to = req.get_param("to");
 
@@ -554,11 +592,10 @@ impl Web {
             None => 1000,
         };
 
-        if let Err(e) = ExporterFactory::add_scrape(self.factory.clone(), &to, period) {
-            return WebResponse::BadReq(format!("Failed to add {} for scraping : {}", to, e));
+        match self.join_one(&to, period) {
+            Ok(msg) => WebResponse::Success(msg),
+            Err(e) => WebResponse::BadReq(e),
         }
-
-        WebResponse::Success(format!("Added {} for scraping", to))
     }
 
     fn handle_join_multiple(&self, req: &Request) -> WebResponse {
@@ -591,13 +628,8 @@ impl Web {
         for (i, target) in targets.iter().enumerate() {
             let period = if i < periods.len() { periods[i] } else { 1000 };
 
-            if let Err(e) =
-                ExporterFactory::add_scrape(self.factory.clone(), &target.to_string(), period)
-            {
-                return WebResponse::BadReq(format!(
-                    "Failed to add {} for scraping : {}",
-                    target, e
-                ));
+            if let Err(e) = self.join_one(&target.to_string(), period) {
+                return WebResponse::BadReq(e);
             }
         }
 
@@ -710,6 +742,17 @@ impl Web {
         let max_branches = self.factory.branches;
 
         let mut clients = self.known_client.lock().unwrap();
+
+        /* Idempotence: if this proxy already registered (e.g. it was joined
+         * manually or it re-pivots after a reconnect), return its existing
+         * parent instead of mapping it a second time — a node with two
+         * parents is double counted at the root */
+        if self.factory.has_scrape(&from) {
+            return WebResponse::Success(self.url());
+        }
+        if let Some(parent) = clients.iter().find(|c| c.child.iter().any(|ch| ch == &from)) {
+            return WebResponse::Success(parent.url.clone());
+        }
 
         // Find the target parent node
 

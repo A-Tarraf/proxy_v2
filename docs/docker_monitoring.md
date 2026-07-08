@@ -129,16 +129,25 @@ exactly the cores the ranks use. Measured with HACC-IO (4 nodes, strace on):
 unpinned ≈ 1:49–2:18; pinned (any variant) 6–19+ min, degrading with each
 run. Leave the proxies unpinned and let the scheduler spread them.
 
-**After restarting proxies**, verify all leaf nodes registered with the root (some nodes may not auto-register):
+**After restarting proxies**, verify the tree with `/topo` — NOT with the
+root's `/join/list`:
 ```bash
-curl localhost:1337/join/list | python3 -c "
-import json,sys; d=json.load(sys.stdin)
-print([s['target_url'] for s in d if s['ttype']=='Proxy'])
-"
-# Should show all 4 (or 8) compute nodes. Manually register any missing ones:
-# curl localhost:1337/join?to=dmr03:1338
-# curl localhost:1337/join?to=dmr05:1338
+curl -s localhost:1337/topo | python3 -c "
+import json,sys
+from collections import Counter
+edges=[e for e in json.load(sys.stdin) if e[0]!=e[1]]
+dup=[c for c,n in Counter(c for _,c in edges).items() if n>1]
+print(len(edges),'nodes attached | double parents:', dup or 'NONE')"
+# expect: 8 nodes attached | double parents: NONE
 ```
+Registration is a *tree*: the root delegates joins to child proxies once its
+branch limit is reached, so most leaves legitimately do NOT appear in the
+root's direct `/join/list`. Blindly re-joining every node at the root used to
+give nodes **two parents**, and every counter that flowed through both paths
+was summed twice at the root (a 4-rank job showed 8-16 ranks and ~2x bytes).
+`/join` and `/pivot` are idempotent against the tree now, so a stray manual
+join is harmless — but the right check is `/topo`, and only genuinely missing
+nodes should be joined manually.
 
 **Sampling rate:** `-S 100` = 100 ms period (10 Hz). Use `-S 10` for 100 Hz but expect some artifacts.
 

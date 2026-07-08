@@ -485,6 +485,12 @@ impl ExporterFactory {
         }
     }
 
+    /// True if this proxy already scrapes the given host:port
+    pub(crate) fn has_scrape(&self, url_hostport: &str) -> bool {
+        let normalized = format!("http://{}/job", url_hostport);
+        self.scrapes.lock().unwrap().contains_key(&normalized)
+    }
+
     #[allow(unused)]
     /// Add a new scrape to the scrape list
     pub(crate) fn add_scrape(

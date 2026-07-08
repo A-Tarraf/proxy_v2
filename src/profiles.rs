@@ -96,7 +96,15 @@ impl ProfileView {
 
         for p in ret.iter() {
             if !ht.contains_key(p) {
-                let content = Self::_get_profile(p)?;
+                let content = match Self::_get_profile(p) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        /* A profile killed mid-write leaves truncated JSON;
+                        skip it instead of aborting the whole load (startup crash). */
+                        log::warn!("Skipping corrupt profile {}: {}", p, e);
+                        continue;
+                    }
+                };
                 let extrap_model = self.extrap_filename(&content.desc.command);
 
                 ht.insert(content.desc.jobid.clone(), content);
