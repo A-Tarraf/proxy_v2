@@ -1,0 +1,13 @@
+# Rust build output
+/target/
+
+# Runtime traces written by the proxy
+/traces/
+
+# Python bytecode (MPI wrapper tooling)
+__pycache__/
+*.py[cod]
+
+# Autoconf/automake local regeneration byproducts
+*~
+.version
