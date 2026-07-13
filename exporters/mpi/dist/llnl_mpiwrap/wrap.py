@@ -33,7 +33,6 @@
 from __future__ import print_function
 import json
 
-from numpy import size
 usage_string = \
 '''Usage: wrap.py [-fgd] [-i pmpi_init] [-c mpicc_name] [-o file] wrapper.w [...]
  Python script for creating PMPI wrappers. Roughly follows the syntax of
