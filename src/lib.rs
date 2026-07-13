@@ -10,7 +10,10 @@ use std::path::Path;
 use std::ptr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use std::{error::Error, io::Write};
+use std::{
+    error::Error,
+    io::{BufWriter, Write},
+};
 mod proxy_common;
 mod squeue;
 use elf::ElfBytes;
@@ -96,10 +99,14 @@ impl MetricProxyValue {
 
 static mut PROXY_INSTANCE: Option<Arc<MetricProxyClient>> = None;
 
+/* Large enough that a full counter dump usually leaves the client in a single
+ * write. serde_json emits one sendto(2) per token on an unbuffered socket. */
+const SEND_BUF_SIZE: usize = 256 * 1024;
+
 pub struct MetricProxyClient {
     period: Duration,
     running: Arc<Mutex<bool>>,
-    stream: Mutex<Option<UnixStream>>,
+    stream: Mutex<Option<BufWriter<UnixStream>>>,
     counters: RwLock<HashMap<String, Arc<MetricProxyValue>>>,
     functions: RwLock<HashMap<String, Arc<MetricProxyValue>>>,
     maps: Vec<MapRange>,
@@ -142,7 +149,7 @@ impl MetricProxyClient {
             None
         } else {
             match UnixStream::connect(path) {
-                Ok(v) => Some(v),
+                Ok(v) => Some(BufWriter::with_capacity(SEND_BUF_SIZE, v)),
                 Err(e) => {
                     log::error!("Failed to connect : {}", e);
                     None
@@ -279,18 +286,26 @@ impl MetricProxyClient {
         for command in values_to_send {
             self.send(&command)?;
         }
-        Ok(())
+
+        /* Unconditional: also pushes out any Desc buffered by push_entry when no
+         * counter happened to be updated this window. */
+        self.flush()
     }
 
     fn running(&self) -> bool {
         return *self.running.lock().unwrap();
     }
 
+    /* Buffers the command; does NOT flush. serde_json emits one sendto(2) per
+     * token on an unbuffered socket, so a whole dump is written into the
+     * BufWriter and flushed once by the caller. The tracer issuing these sends
+     * sits on the critical path of every traced syscall, so the syscall count
+     * here is paid in application stall. */
     fn send(&self, cmd: &ProxyCommand) -> Result<(), Box<dyn Error>> {
         let mut stream_lock = self.stream.lock().unwrap();
 
-        if let Some(mut stream) = stream_lock.as_mut() {
-            serde_json::to_writer(&mut stream, cmd)?;
+        if let Some(stream) = stream_lock.as_mut() {
+            serde_json::to_writer(&mut *stream, cmd)?;
             let null_byte: [u8; 1] = [0_u8; 1];
             stream.write_all(&null_byte)?;
 
@@ -303,9 +318,20 @@ impl MetricProxyClient {
         Ok(())
     }
 
+    fn flush(&self) -> Result<(), Box<dyn Error>> {
+        let mut stream_lock = self.stream.lock().unwrap();
+
+        if let Some(stream) = stream_lock.as_mut() {
+            stream.flush()?;
+        }
+
+        Ok(())
+    }
+
     fn send_jobdesc(&self) -> Result<(), Box<dyn Error>> {
         let desc = ProxyCommand::JobDesc(JOBDESC.clone());
-        self.send(&desc)
+        self.send(&desc)?;
+        self.flush()
     }
 
     fn push_entry(

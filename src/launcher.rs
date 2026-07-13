@@ -109,7 +109,26 @@ impl ExporterList {
         strace
     }
 
-    fn new() -> Result<ExporterList, Box<dyn Error>> {
+    fn strace_cmd(strace: &Path, trace: &str) -> Vec<String> {
+        let mut cmd = vec![strace.to_string_lossy().to_string(), "-c".to_string()];
+
+        /* "all" is the historical invocation: trace every syscall, no filter.
+         * Anything else is filtered in the kernel -- seccomp-bpf lets
+         * non-matching syscalls run without ever stopping the tracee, which is
+         * where the speedup comes from. It requires -f, and silently disables
+         * itself (with a warning on stderr) without it. */
+        if trace != "all" {
+            cmd.push("-f".to_string());
+            cmd.push("--seccomp-bpf".to_string());
+            cmd.push("-e".to_string());
+            cmd.push(format!("trace={}", trace));
+        }
+
+        cmd.push("--".to_string());
+        cmd
+    }
+
+    fn new(strace_trace: &str) -> Result<ExporterList, Box<dyn Error>> {
         let (bindir, libdir) = ExporterList::getpaths()?;
         log::debug!("Libdir is {}", libdir.to_string_lossy());
 
@@ -122,11 +141,7 @@ impl ExporterList {
         if let Some(strace) = ExporterList::locate_strace(&bindir) {
             exporters.push(Exporter::Prefix {
                 name: "strace".to_string(),
-                cmd: vec![
-                    strace.to_string_lossy().to_string(),
-                    "-c".to_string(),
-                    "--".to_string(),
-                ],
+                cmd: ExporterList::strace_cmd(&strace, strace_trace),
             })
         }
 
@@ -147,6 +162,14 @@ impl ExporterList {
     }
 }
 
+/// Hot syscalls that carry no useful metric (MPI progress engines spin on
+/// these). Tracing them dominates the cost of the strace exporter: measured on
+/// 100k write + 2M getpid, 108.8 s tracing everything vs 6.4 s with this
+/// denylist, while still keeping 20 of the 21 syscall counters.
+const DEFAULT_STRACE_TRACE: &str =
+    "!getpid,gettid,futex,sched_yield,clock_gettime,clock_nanosleep,nanosleep,\
+     rt_sigprocmask,rt_sigaction";
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -165,6 +188,19 @@ struct Args {
     /// Sampling period in MS
     #[arg(short = 'S', long, default_value_t = 1000)]
     period: u64,
+    /// Syscalls the strace exporter traces (strace `-e trace=` syntax).
+    /// Every traced syscall stops the application twice (~50 us), so this, not
+    /// the sampling period, sets the cost of the strace exporter. The default
+    /// skips hot syscalls that carry no useful metric. Use `all` to trace every
+    /// syscall (previous behaviour: complete, but far slower).
+    /// Examples: `all`, `%desc,%network`, `!futex,getpid`
+    #[arg(
+        short = 'T',
+        long,
+        env = "METRIC_PROXY_STRACE_TRACE",
+        default_value_t = DEFAULT_STRACE_TRACE.to_string()
+    )]
+    strace_trace: String,
     /// A command to run (passed after --)
     #[arg(last = true)]
     command: Vec<String>,
@@ -173,8 +209,8 @@ struct Args {
 fn main() -> Result<(), Box<dyn Error>> {
     init_log();
 
-    let exs = ExporterList::new()?;
     let args = Args::parse();
+    let exs = ExporterList::new(&args.strace_trace)?;
 
     if args.listexporters {
         for v in exs.exporters.iter() {

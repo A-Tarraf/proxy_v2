@@ -78,6 +78,88 @@ Force a job ID with `-j`:
 proxy_run -j myjob -- ./myprogram
 ```
 
+### `proxy_run` Flags Reference
+
+| Flag | Long form | Default | Description |
+|------|-----------|---------|-------------|
+| `-e` | `--exporter` | all detected | Exporters to activate (comma-separated), e.g. `-e mpi`, `-e mpi,strace` |
+| `-j` | `--jobid` | auto | Job ID (MPI/SLURM usually provide one) |
+| `-S` | `--period` | `1000` | Push period in milliseconds (how often the client sends counters to the proxy) |
+| `-u` | `--unixsocket` | auto | Path to the proxy's UNIX socket |
+| `-T` | `--strace-trace` | denylist (see below) | Which syscalls the **strace exporter** traces |
+| `-l` | `--listexporters` | — | List detected exporters and exit |
+
+### Exporters, and the cost of syscall tracing
+
+With no `-e` flag, **all detected exporters run**, including `strace`. That
+matters, because the strace exporter uses `ptrace`: **every traced syscall stops
+the application twice**, at roughly 50 µs a stop. The cost is set by *how many
+syscalls are traced* — **not** by the sampling period. Lowering `-S` does not make
+tracing cheaper.
+
+| Exporter | Mechanism | Cost |
+|---|---|---|
+| `mpi` | In-process PMPI wrappers | **Free** — no `ptrace`, no context switch |
+| `strace` | `ptrace` syscall interception | ~50 µs × number of traced syscalls |
+| `finstrument` | Compile-time function instrumentation | Only if built with `-finstrument-functions` |
+
+```sh
+proxy_run -e mpi -- ./myprogram      # MPI metrics only — essentially free
+proxy_run -- ./myprogram             # everything, including syscall tracing
+```
+
+**If you only need MPI-level metrics, use `-e mpi`.** On a syscall-heavy workload
+(100k `write` + 500k `getpid`): `-e mpi` 0.29 s vs untraced 0.30 s — free.
+
+#### Which syscalls get traced (`-T` / `--strace-trace`)
+
+When the strace exporter is active, `proxy_run` by default **skips syscalls that
+are hot but carry no useful metric** (MPI progress engines spin on these). The
+kernel filters them out via seccomp-BPF, so they never stop the application:
+
+```
+default: !getpid,gettid,futex,sched_yield,clock_gettime,clock_nanosleep,
+          nanosleep,rt_sigprocmask,rt_sigaction
+```
+
+Same workload as above:
+
+| Invocation | Wall time | Metrics |
+|---|---|---|
+| `proxy_run -T all -- app` (trace everything) | 23.0 s | 43 |
+| `proxy_run -- app` *(default denylist)* | **4.6 s** | 41 |
+| `proxy_run -e mpi -- app` (no `ptrace`) | 0.29 s | — |
+
+**This is a denylist, not an I/O allowlist.** File, network, memory, process and
+signal syscalls are all still traced — only the nine above are skipped.
+
+**What you lose, and how to get it back.** The nine denylisted syscalls produce no
+`strace___hits___*` or `strace___time___*` counters (up to 18 metrics; they are not
+I/O calls, so no `___size___` counter exists for them anyway). **All byte counters
+are unaffected and byte-for-byte identical.** To restore them:
+
+```sh
+# trace everything (previous behaviour: complete, but far slower)
+proxy_run -T all -- ./myprogram
+
+# keep futex (MPI sync/wait time) but drop the rest of the hot set
+proxy_run -T '!getpid,gettid,sched_yield,clock_gettime,nanosleep' -- ./myprogram
+
+# only file-descriptor and network syscalls
+proxy_run -T '%desc,%network' -- ./myprogram
+```
+
+`-T` takes any `strace -e trace=` expression. It can also be set with the
+`METRIC_PROXY_STRACE_TRACE` environment variable, which is handy when you do not
+control the `proxy_run` command line inside a batch script.
+
+Full details: [docs/strace_exporter.md](docs/strace_exporter.md).
+
+To measure what instrumentation costs *your* application on a real cluster, see
+[docs/cluster_benchmark.md](docs/cluster_benchmark.md) and the ready-made sweep
+job [`docs/sbatch_overhead_sweep.sh`](docs/sbatch_overhead_sweep.sh), which
+compares `plain` / `-e mpi` / `-T all` / default / keep-`futex` on the same nodes.
+
 ---
 
 ## HPC / SLURM Multi-Node Deployment

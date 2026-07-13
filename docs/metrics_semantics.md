@@ -4,6 +4,12 @@ What the proxy's numbers actually mean, and how they travel to FTIO.
 Everything here was established empirically on 2026-07-06 (HACC-IO on the DMR
 Docker cluster and on bare metal).
 
+> **Which syscalls exist as metrics at all** is controlled by `proxy_run -T`.
+> By default nine hot, uninformative syscalls (`futex`, `getpid`, …) are not
+> traced, so they produce no `strace___hits___*` / `strace___time___*` counters.
+> Byte counters are unaffected. See **[strace_exporter.md](strace_exporter.md)**
+> for the cost model, the exact list, and how to restore them (`-T all`).
+
 ## 1. Interception happens at call *return*
 
 The MPI wrapper (`exporters/mpi/mpi_wrappers.w`) timestamps around each MPI
