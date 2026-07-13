@@ -48,7 +48,18 @@ for arg in "$@"; do
 done
 
 if test -z "${PREFIX}"; then
-	error_out "Please provide an install prefix: $0 [PREFIX] [--strace-only]"
+	error_out "An install prefix is required.
+
+Usage: $0 <PREFIX> [--strace-only]
+
+  <PREFIX>         where to install (created if missing), e.g. \$HOME/metric-proxy
+                   binaries land in <PREFIX>/bin, libraries in <PREFIX>/lib
+  --strace-only    rebuild only the strace exporter (skips the Rust build)
+
+Example:
+  $0 \$HOME/metric-proxy
+  export PATH=\$HOME/metric-proxy/bin:\$PATH
+  export LD_LIBRARY_PATH=\$HOME/metric-proxy/lib:\$LD_LIBRARY_PATH"
 fi
 echo "Installing in ${PREFIX}"
 
