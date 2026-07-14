@@ -398,6 +398,10 @@ pub(crate) struct ExporterFactory {
     pub trace_store: Arc<TraceView>,
     /// Client to FTIO server
     pub ftio_client: Arc<FtioClient>,
+    /// False with --no-ftio: no server is started and no per-job analysis is
+    /// scheduled. Without this, a proxy with no reachable FTIO server retries on
+    /// every trace cycle and logs "FTIO client address not set" indefinitely.
+    pub ftio_enabled: bool,
     pub root_proxy: Arc<RwLock<Option<String>>>,
     pub web_url: Arc<RwLock<Option<String>>>,
     pub period: Arc<RwLock<u64>>,
@@ -702,6 +706,7 @@ impl ExporterFactory {
         period: u64,
         branches: u64,
         instrumentation: Arc<dyn Instrumentation>,
+        ftio_enabled: bool,
     ) -> Result<Arc<ExporterFactory>, Box<dyn Error>> {
         let main_jobdesc = JobDesc {
             jobid: "main".to_string(),
@@ -736,7 +741,7 @@ impl ExporterFactory {
             ftio_client.set_arguments(default_args);
         }
 
-        if which::which("admire_proxy_zmq").is_ok() {
+        if ftio_enabled && which::which("admire_proxy_zmq").is_ok() {
             log::info!("FTIO server not responding, attempting to start it...");
             let mut child = Command::new("admire_proxy_zmq")
                 .stdin(Stdio::null())
@@ -795,6 +800,7 @@ impl ExporterFactory {
             aggregator: aggregate,
             max_trace_size,
             ftio_client: ftio_client.clone(),
+            ftio_enabled,
             root_proxy: Arc::new(RwLock::new(None)),
             web_url: Arc::new(RwLock::new(None)),
             period: Arc::new(RwLock::new(period)),
@@ -944,7 +950,7 @@ impl ExporterFactory {
                 /* FTIO only for real user jobs — housekeeping traces ("main",
                  * "Node: <host>") exist on every proxy and analyzing them all
                  * multiplies FTIO load by the cluster size for no user value. */
-                if desc.jobid != "main" && !desc.jobid.starts_with("Node:") {
+                if self.ftio_enabled && desc.jobid != "main" && !desc.jobid.starts_with("Node:") {
                     self.insert_ftio_exporter(self.trace_store.clone(), &desc.jobid)
                         .unwrap_or(());
                 }

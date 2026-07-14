@@ -79,6 +79,12 @@ struct Args {
     /// Number of branches for the hierarchical aggregation, 0 = binomial tree, > 0 = k-ary tree
     #[arg(short, long, default_value_t = 2)]
     branches: u64,
+    /// Do not start or contact an FTIO server. Skips the startup probe for
+    /// `admire_proxy_zmq` and the per-job FTIO analysis. Use when you only want
+    /// metric collection: it removes the startup delay, the periodic
+    /// "FTIO client address not set" errors, and the analysis CPU cost.
+    #[arg(long, default_value_t = false)]
+    no_ftio: bool,
 
     /// Duration to run instrumentation in seconds (default 0 = disabled)
     #[arg(long, default_value_t = 0)]
@@ -146,7 +152,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         max_trace_size as usize,
         args.sampling_period,
         args.branches,
-        instrumentation.clone()
+        instrumentation.clone(),
+        !args.no_ftio,
     )?;
 
     if let Some(urls) = args.sub_proxies {
@@ -164,6 +171,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         get_proxy_path()
     };
+
+    /* Refuse to start if the HTTP port is taken, BEFORE binding the UNIX socket.
+     *
+     * UnixProxy::new unlinks any existing socket before binding it (proxy.rs).
+     * If a proxy is already running on this node (a leftover from a cancelled
+     * job, or a second proxy launched by mistake), starting another one would
+     * delete the live proxy's socket, bind its own, and only then die on
+     * AddrInUse -- leaving a stale socket with no listener. The running proxy
+     * keeps serving HTTP and looks healthy, while every exporter on the node
+     * gets ECONNREFUSED and its application silently runs UNINSTRUMENTED.
+     *
+     * Failing on the port first makes the doomed proxy exit harmlessly. */
+    if let Err(e) = std::net::TcpListener::bind(("0.0.0.0", args.port as u16)) {
+        log::error!(
+            "Cannot bind port {}: {}. Another proxy is probably already running \
+             on this node -- refusing to start, as continuing would unlink its \
+             UNIX socket and leave applications on this node uninstrumented.",
+            args.port,
+            e
+        );
+        exit(1);
+    }
 
     // Create the UNIX proxy with a reference to the exporter
     let proxy = UnixProxy::new(unix, factory.clone())?;

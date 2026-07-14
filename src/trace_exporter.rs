@@ -66,7 +66,16 @@ struct TraceExporter {
 
 impl TraceExporter {
     fn new(path: &Path) -> Result<TraceExporter, ProxyErr> {
-        let factory = ExporterFactory::new(path.to_path_buf(), false, 1024 * 1024 * 32, 1000, 2, Arc::new(NoInstrumentation))?;
+        /* Offline trace dump: never contact FTIO */
+        let factory = ExporterFactory::new(
+            path.to_path_buf(),
+            false,
+            1024 * 1024 * 32,
+            1000,
+            2,
+            Arc::new(NoInstrumentation),
+            false,
+        )?;
         Ok(TraceExporter { factory })
     }
 
