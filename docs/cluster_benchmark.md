@@ -31,33 +31,110 @@ Three questions:
 
 ---
 
-## 2. Prerequisites
+## 2. Step by step
 
-**A root proxy must be running on the login node** before you submit:
+Verified end to end on Lichtenberg (TU Darmstadt), 2026-07-14.
 
-```sh
-ssh <login_node>
-bash docs/start_root_proxy.sh
-curl http://localhost:1337/joblist     # should return JSON
-```
+### Step 0 — Build and install
 
-**The build must have the `-T` flag** (otherwise `strace_all` and `strace_futex`
-die on an unknown argument):
+Make sure a recent Rust toolchain is loaded (the *system* rustc may be too old and
+gets picked up first; that produces a confusing "rustc 1.86 is not supported by
+`home`/`time`" error). Then:
 
 ```sh
-proxy_run --help | grep strace-trace
+cd ~/github/proxy_v2
+git pull
+./install.sh $TOOLS_PREFIX          # such that $TOOLS_BIN = $TOOLS_PREFIX/bin
 ```
+
+`install.sh` skips the strace build if `proxy_exporter_strace` already exists in
+the prefix, so a re-install takes about a minute.
+
+### Step 1 — Put the tools on your PATH
+
+This is the **only** environment setup needed; the job script handles the rest.
+
+```sh
+export PATH=$TOOLS_BIN:$PATH
+export LD_LIBRARY_PATH=$TOOLS_LIB:$LD_LIBRARY_PATH
+```
+
+### Step 2 — Check the build has the new flags
+
+```sh
+proxy_v2  --help | grep -c no-ftio        # must be 1
+proxy_run --help | grep -c strace-trace   # must be 1
+```
+
+If `--strace-trace` is missing, `strace_all` and `strace_futex` will die on an
+unknown argument.
+
+### Step 3 — Check seccomp-BPF actually engages
+
+**Do not skip this.** If the kernel filter is silently inert you pay the full
+ptrace cost while believing you are filtered, `strace_default` comes back
+identical to `strace_all`, and the whole sweep is meaningless. The sweep itself
+cannot detect this.
+
+First, the negative check — this must print **nothing**:
+
+```sh
+proxy_exporter_strace -c -f --seccomp-bpf -e trace=%desc -- /bin/true 2>&1 | grep -i seccomp
+```
+
+(A warning here usually means `--seccomp-bpf` was used without `-f`, which makes
+strace disable it silently.)
+
+Then the positive check — trace a workload made almost entirely of syscalls the
+filter excludes, and compare:
+
+```sh
+time proxy_exporter_strace -c -- \
+     python3 -c "import os
+for _ in range(200000): os.getpid()"
+
+time proxy_exporter_strace -c -f --seccomp-bpf -e trace=%desc -- \
+     python3 -c "import os
+for _ in range(200000): os.getpid()"
+```
+
+Measured on Lichtenberg:
+
+| invocation | wall | syscalls trapped |
+|---|---|---|
+| `-c` (trace everything) | 2.043 s | 201,990 |
+| `-c -f --seccomp-bpf -e trace=%desc` | **0.119 s** | **1,881** |
+
+**17× faster, and `getpid` disappears from the summary table entirely** — those
+200,000 calls never trapped into the tracer; the kernel dropped them. That is the
+mechanism the whole sweep depends on. If the two runs take the same time, stop:
+seccomp is not working.
+
+### Step 4 — Start the root proxy on the login node
+
+Leave it running for the duration of the experiments. `--no-ftio` avoids a ~5 s
+startup probe for an FTIO server and a periodic "FTIO client address not set"
+error on every trace cycle; the sweep only needs metric collection.
+
+```sh
+proxy_v2 -t $HOME/proxy_traces -S 1000 -m 128 --no-ftio
+
+# in another shell:
+curl http://localhost:1337/job/list        # must return JSON
+```
+
+Note the endpoint is `/job/list`, **not** `/joblist`.
 
 ---
 
-## 3. Running it
+## 3. Step 5 — Submit
 
 ```sh
 sbatch sbatch_overhead_sweep.sh
 
 # knobs (all optional)
-REPS=5            sbatch sbatch_overhead_sweep.sh   # more repetitions
-PARTICLES=5000000 sbatch sbatch_overhead_sweep.sh   # larger problem
+REPS=5             sbatch sbatch_overhead_sweep.sh   # more repetitions
+PARTICLES=20000000 sbatch sbatch_overhead_sweep.sh   # larger problem (see below)
 ROOT_PROXY=<host> sbatch sbatch_overhead_sweep.sh   # different login node
 ROOT_ON_ALLOC=1   sbatch sbatch_overhead_sweep.sh   # root on a compute node
 ```
@@ -65,10 +142,29 @@ ROOT_ON_ALLOC=1   sbatch sbatch_overhead_sweep.sh   # root on a compute node
 Edit the placeholders at the top first: `YOUR_ACCOUNT`, `YOUR_CONSTRAINT`,
 `LOGIN_NODE`, `YOUR_APPLICATION`, and the scratch path.
 
+**Size the problem so the run is long enough to measure.** With HACC-IO at
+`PARTICLES=1000000` over 64 ranks the application finishes in ~3 s — far too short
+to separate instrumentation cost from startup noise. Start at `PARTICLES=20000000`
+and adjust so an uninstrumented run takes at least a minute.
+
 Output:
 
 - `overhead_sweep_<jobid>.csv` — one row per run
 - a summary table with `vs plain` ratios at the end of the job's `.out`
+
+### Reading the CSV — check this before anything else
+
+```
+config,rep,tag,wall_s,local_ok,remote_ok,instrumented,app_out
+```
+
+**Only trust rows where `local_ok=yes` AND `remote_ok=yes`.** Anything else means
+the run was not properly instrumented and its wall time is fiction; those rows are
+marked `NO-UNINSTRUMENTED` and excluded from the summary averages.
+
+- `local_ok=NO` — the exporter could not reach the proxy **on its own node**.
+- `remote_ok=NO` — the exporter connected locally, but the data never reached the
+  root (a leaf alive but not relaying).
 
 ---
 
@@ -88,18 +184,40 @@ You record a beautiful number and conclude the exporter is cheap. Nothing warns
 you. **An uninstrumented run is fast, so this failure looks exactly like a win.**
 
 A stale measurement in this project's own history — *"strace with no proxy
-running: 18.6 s, free"* — is almost certainly this artefact: it was not measuring
-cheap tracing, it was measuring **no tracing**.
+running: 18.6 s, free"* — is this artefact. Confirmed on the cluster: a tracer
+with no proxy still traces every syscall (200,000 `getpid` calls, `Not Connected
+to Metric Proxy`), so that row was never measuring cheap tracing — it was
+measuring an application that was not instrumented at all.
 
-The script therefore checks three times:
+There is a second way to get here, and it is subtle: **two proxies on one node.**
+A leftover proxy from a cancelled job, or (with `ROOT_ON_ALLOC=1`) the per-node
+leaf landing on the node that already hosts the root. The second proxy unlinks the
+live one's UNIX socket, binds its own, and only then dies on `AddrInUse` — leaving
+a stale socket with no listener. The survivor keeps serving HTTP and looks
+perfectly healthy while every exporter on that node gets `ECONNREFUSED`.
+`proxy_v2` now refuses to start if its port is taken, before touching the socket,
+so this cannot happen — but a proxy built before 2026-07-14 will still do it.
 
-1. **Pre-flight** — is the root answering at all? If not, abort with instructions.
-2. **After launching leaves** — did any leaf register with the root? Zero ⇒ abort.
-3. **After every run** — did the root actually *see* this job id? If not, the row
-   is marked `NO-UNINSTRUMENTED` and **excluded from the averages**.
+The script therefore checks four times:
 
-If you write your own script, keep check 3. It is the only one that catches a
-mid-sweep proxy death.
+1. **Kill stray proxies** on every node before starting.
+2. **Pre-flight** — is the root answering at `/job/list`? If not, abort.
+3. **Every node** — does each allocated node have a live proxy? If not, abort.
+4. **After every run** — two independent checks, both must pass:
+   - **LOCAL**: the application's output contains no `Not Connected to Metric
+     Proxy` (the exporter reached the proxy on its own node).
+   - **REMOTE**: the root's `/metrics` counter sum for that exporter *increased*
+     (the data actually travelled leaf → root). This catches a leaf that is alive
+     but not relaying, which LOCAL cannot see.
+
+   Rows failing either check are marked `NO-UNINSTRUMENTED` and **excluded from
+   the averages**.
+
+**If you write your own script, do NOT use `/job/list` to check whether a run was
+instrumented.** It lists only *live* jobs, so it is always empty by the time a run
+has finished. (An earlier version of the sweep did exactly this — against the
+nonexistent `/joblist` endpoint, no less — and flagged every single run as
+uninstrumented.)
 
 ### Related trap: `-i` means "persist nothing"
 
