@@ -25,6 +25,9 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
  * WEBSERVER *
  *************/
 
+/// Fallback scrape period when a node cannot be asked for its own.
+const DEFAULT_PERIOD_MS: u64 = 1000;
+
 struct ClientPivot {
     url: String,
     refcount: u32,
@@ -545,7 +548,7 @@ impl Web {
             return true;
         }
         let me = self.url();
-        let clients = self.known_client.lock().unwrap();
+        let clients = self.known_client.lock().unwrap_or_else(|e| e.into_inner());
         clients
             .iter()
             .any(|c| c.url != me && c.child.iter().any(|ch| ch == hostport))
@@ -564,7 +567,7 @@ impl Web {
 
         /* Record the manual join in the pivot bookkeeping so later
          * /pivot placements and duplicate /join calls see it */
-        let mut clients = self.known_client.lock().unwrap();
+        let mut clients = self.known_client.lock().unwrap_or_else(|e| e.into_inner());
         let mut nc = ClientPivot::new(to.clone());
         nc.set_depth(1);
         clients.push(nc);
@@ -741,7 +744,7 @@ impl Web {
 
         let max_branches = self.factory.branches;
 
-        let mut clients = self.known_client.lock().unwrap();
+        let mut clients = self.known_client.lock().unwrap_or_else(|e| e.into_inner());
 
         /* Idempotence: if this proxy already registered (e.g. it was joined
          * manually or it re-pivots after a reconnect), return its existing
@@ -789,7 +792,7 @@ impl Web {
     fn handle_topo(&self, _req: &Request) -> WebResponse {
         let mut resp: Vec<(String, String)> = Vec::new();
 
-        for c in self.known_client.lock().unwrap().iter() {
+        for c in self.known_client.lock().unwrap_or_else(|e| e.into_inner()).iter() {
             for t in &c.child {
                 resp.push((c.url.clone(), t.clone()))
             }
@@ -827,7 +830,7 @@ impl Web {
             );
         }
 
-        let mut clients = self.known_client.lock().unwrap();
+        let mut clients = self.known_client.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(from_client) = clients.iter().position(|v| v.url == from_url) {
             // Remove the failed node from the notifying client
@@ -904,13 +907,30 @@ impl Web {
             clients.retain(|x| x.url != target_url);
 
             // Get period of the replacement node
-            let request_url = format!("http://{}/period", replacement_url);
             if replacement_url.is_empty() {
                 return WebResponse::Success("Unresponsive node removed!".to_string());
-            }else {
-            let resp = ApiResponse::query(&request_url);
-            return WebResponse::Success(replacement_url + "&" + &resp.unwrap().operation);
             }
+
+            /* This is the node-failure path, so the replacement may itself be
+             * gone (a whole allocation tearing down takes every node with it).
+             * Unwrapping here panicked while holding `clients`, which POISONED
+             * known_client -- after that every /remove, /pivot and /join panicked
+             * on lock().unwrap() and the root could never repair its tree again.
+             * Fall back to the default period instead of dying. */
+            let request_url = format!("http://{}/period", replacement_url);
+            let period = match ApiResponse::query(&request_url) {
+                Ok(resp) => resp.operation,
+                Err(e) => {
+                    log::warn!(
+                        "Could not read period from replacement {}: {}. Using {} ms.",
+                        replacement_url,
+                        e,
+                        DEFAULT_PERIOD_MS
+                    );
+                    DEFAULT_PERIOD_MS.to_string()
+                }
+            };
+            return WebResponse::Success(replacement_url + "&" + &period);
         } else {
             return WebResponse::BadReq(format!("No such from client {}", from_url));
         }

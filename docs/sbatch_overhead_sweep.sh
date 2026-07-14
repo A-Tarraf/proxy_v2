@@ -59,6 +59,7 @@
 #SBATCH -A YOUR_ACCOUNT
 
 set -u
+export LC_ALL=C          # printf/awk must use "." decimals, not the locale's ","
 
 module purge
 source ~/loads                                  # your module/env setup
