@@ -1,0 +1,12 @@
+[2026-06-26T09:14:48Z INFO  proxy_v2] Max trace size is 32 MB
+[2026-06-26T09:14:48Z INFO  proxy_v2::scrapper] Creating a scrapper to /system for a period of 1000
+[2026-06-26T09:14:48Z INFO  proxy_v2::proxy] UNIX proxy listening on /tmp/metric-proxy-0.socket
+[2026-06-26T09:14:48Z INFO  proxy_v2::webserver] Proxy webserver listening on http://dmr02:1337
+[2026-06-26T09:14:51Z INFO  proxy_v2::exporter] Joining aggregating proxy dmr01:1337 with period 100
+[2026-06-26T09:14:52Z INFO  proxy_v2::scrapper] http://dmr04:1337 is a Proxy Exporter
+[2026-06-26T09:14:52Z INFO  proxy_v2::scrapper] Creating a scrapper to http://dmr04:1337/job for a period of 100
+[2026-06-26T09:15:02Z ERROR proxy_v2::exporter] Failed to scrape proxy http://dmr04:1337/job : error sending request for url (http://dmr04:1337/job): error trying to connect: tcp connect error: Connection refused (os error 111)! Notifying the root server.
+pivot_url: http://dmr01:1337/remove?from=dmr02:1337&target=dmr04:1337
+Notifying root server http://dmr01:1337 about failed proxy dmr04:1337, we are dmr02:1337
+[2026-06-26T09:15:03Z INFO  proxy_v2::exporter] Notified root server about failed proxy dmr04:1337
+[2026-06-26T09:15:10Z INFO  proxy_v2] Sending graceful leave to http://http://dmr01:1337/leave?from=dmr02:1337
