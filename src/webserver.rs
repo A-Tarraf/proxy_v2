@@ -1272,22 +1272,42 @@ impl Web {
         if req.method() != "POST" {
             return WebResponse::BadReq("POST required".to_string());
         }
-        if let Some(jobid) = req.get_param("jobid") {
-            match self
-                .factory
-                .trace_store
-                .generate_ftio_model(&jobid, self.factory.ftio_client.clone())
-            {
-                Ok(_) => {
-                    if let Some(models) = self.factory.trace_store.get_job_freq_model(jobid) {
-                        return WebResponse::Native(Response::json(&models));
-                    }
-                    WebResponse::BadReq("FTIO ran but no models were stored".to_string())
+        let jobid = match req.get_param("jobid") {
+            Some(j) => j,
+            None => return WebResponse::BadReq("jobid parameter required".to_string()),
+        };
+        // Only one FTIO analysis at a time per proxy process: the periodic
+        // background scrape (scrapper::scrape_ftio) uses this same guard, so an
+        // on-demand request that ignored it could race the ZMQ REQ/REP
+        // round-trip against a scrape already in flight and hit a send timeout.
+        use std::sync::atomic::Ordering;
+        if self
+            .factory
+            .ftio_client
+            .in_flight
+            .swap(true, Ordering::SeqCst)
+        {
+            return WebResponse::BadReq(
+                "An FTIO analysis is already running on this proxy — try again shortly"
+                    .to_string(),
+            );
+        }
+        let result = self
+            .factory
+            .trace_store
+            .generate_ftio_model(&jobid, self.factory.ftio_client.clone());
+        self.factory
+            .ftio_client
+            .in_flight
+            .store(false, Ordering::SeqCst);
+        match result {
+            Ok(_) => {
+                if let Some(models) = self.factory.trace_store.get_job_freq_model(jobid) {
+                    return WebResponse::Native(Response::json(&models));
                 }
-                Err(e) => WebResponse::BadReq(format!("FTIO analysis failed: {}", e)),
+                WebResponse::BadReq("FTIO ran but no models were stored".to_string())
             }
-        } else {
-            WebResponse::BadReq("jobid parameter required".to_string())
+            Err(e) => WebResponse::BadReq(format!("FTIO analysis failed: {}", e)),
         }
     }
 
@@ -1303,11 +1323,29 @@ impl Web {
             Some(m) => m,
             None => return WebResponse::BadReq("metric parameter required".to_string()),
         };
-        match self
+        // Same in-flight guard as handle_ftio_run_all — see comment there.
+        use std::sync::atomic::Ordering;
+        if self
             .factory
-            .trace_store
-            .generate_ftio_model_for_metric(&jobid, &metric, self.factory.ftio_client.clone())
+            .ftio_client
+            .in_flight
+            .swap(true, Ordering::SeqCst)
         {
+            return WebResponse::BadReq(
+                "An FTIO analysis is already running on this proxy — try again shortly"
+                    .to_string(),
+            );
+        }
+        let result = self.factory.trace_store.generate_ftio_model_for_metric(
+            &jobid,
+            &metric,
+            self.factory.ftio_client.clone(),
+        );
+        self.factory
+            .ftio_client
+            .in_flight
+            .store(false, Ordering::SeqCst);
+        match result {
             Ok(_) => WebResponse::Native(Response::json(
                 &serde_json::json!({"ok": true, "metric": metric}),
             )),

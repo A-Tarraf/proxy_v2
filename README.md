@@ -311,8 +311,11 @@ export PATH=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))
 |----------|-------------|
 | `GET /trace/list` | List stored trace jobs |
 | `POST /trace/plot` | Raw time-series data: `{"jobid":"...", "filter":"metric_name", "derivate":false}` |
-| `GET /ftio/run?jobid=JOBID` | Trigger FTIO analysis for all metrics of a job |
+| `POST /ftio/run_all?jobid=JOBID` | Run FTIO on every metric of a job; returns the models as JSON |
+| `POST /ftio/run_metric?jobid=JOBID&metric=METRIC` | Run FTIO on a single metric |
+| `GET /ftio/all_models?jobid=JOBID` | Return the models from the last analysis (run `run_all` first) |
 | `GET /ftio/progress?jobid=JOBID` | Analysis progress: `{"processed": N, "total": M}` |
+| `GET /ftio/logs` | Recent log lines from the `admire_proxy_zmq` backend |
 
 ### Alarms
 

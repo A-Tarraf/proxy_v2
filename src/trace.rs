@@ -1330,10 +1330,22 @@ impl TraceView {
         let output = cmd.wait_with_output()?;
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        let json_start = output_str
+        // admire_proxy_invoke_ftio can print progress/diagnostic lines to stdout
+        // before its result (e.g. "With Arguments: ['--freq', ...]", which itself
+        // contains a '['), and data_to_json() always ends with a single
+        // print(json.dumps(...)) call. Searching for the first '[' in the whole
+        // output can therefore match inside that diagnostic text and hand
+        // serde_json a non-JSON prefix. Prefer the last line that actually starts
+        // with '[' — the real result is always exactly one such line.
+        let candidate = output_str
+            .lines()
+            .rev()
+            .find(|line| line.trim_start().starts_with('['))
+            .unwrap_or(&output_str);
+        let json_start = candidate
             .find('[')
             .ok_or("JSON array not found in FTIO output")?;
-        let json_part = &output_str[json_start..];
+        let json_part = &candidate[json_start..];
 
         if output.status.success() {
             match serde_json::from_slice::<Vec<FtioModel>>(json_part.as_bytes()) {

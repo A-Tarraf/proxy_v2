@@ -67,6 +67,11 @@ if test ! -d "${PREFIX}"; then
 	mkdir "${PREFIX}" || error_out "Failed to create ${PREFIX} directory"
 fi
 
+# Root of Package (needed by both the full build and --strace-only)
+DIRNAME=$(dirname "$0")
+SOURCE_ROOT="$(readlink -f "${DIRNAME}")"
+export SOURCE_ROOT
+
 if test "${STRACE_ONLY}" = "0"; then
 
 header "Locate Rust Dependency"
@@ -84,12 +89,6 @@ else
 fi
 
 header "Build Project"
-
-
-# Root of Package
-DIRNAME=$(dirname "$0")
-SOURCE_ROOT="$(readlink -f "${DIRNAME}")"
-export SOURCE_ROOT
 
 cargo build --release || error_out "Failed to build package see previous errors"
 cargo install --path "${SOURCE_ROOT}" --root "${PREFIX}" || error_out "Failed to install rust package"
@@ -201,13 +200,8 @@ fi
 header "Compiling MPI Wrappers"
 
 MPI_WRAPPER_LIB="${PREFIX}/lib/libmetricproxy-exporter-mpi.so"
-"${MPICC}" "-I${PREFIX}/include/" "-I${SOURCE_ROOT}/exporters/mpi/" "-L${PREFIX}/lib" "-Wl,-rpath=${PREFIX}/lib" -shared -fpic "${MPI_WRAPPERS_C}" -lproxyclient -o "${MPI_WRAPPER_LIB}"
-
-if test -f "${MPI_WRAPPER_LIB}"; then
-	echo "Successfully generated MPI wrapper library"
-else
-	error_out "Failed to generate MPI wrappers library"
-fi
+"${MPICC}" "-I${PREFIX}/include/" "-I${SOURCE_ROOT}/exporters/mpi/" "-L${PREFIX}/lib" "-Wl,-rpath=${PREFIX}/lib" -shared -fpic "${MPI_WRAPPERS_C}" -lproxyclient -o "${MPI_WRAPPER_LIB}" || error_out "Failed to compile MPI wrappers library see previous errors"
+echo "Successfully generated MPI wrapper library"
 
 fi  # end if STRACE_ONLY = 0
 
@@ -222,11 +216,16 @@ fi  # end if STRACE_ONLY = 0
 	export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig/:$PKG_CONFIG_PATH"
 
 	cd "${SOURCE_ROOT}/exporters/strace/" || error_out "Failed to enter strace sourcedir"
-	./bootstrap || error_out "Failed to bootstrap strace"
+	# The vendored strace tree ships a generated ./configure. Only bootstrap
+	# when it is missing: ./bootstrap is not idempotent and re-running it over
+	# an already-generated tree fails (and dirties the checked-in autotools files).
+	if test ! -x ./configure; then
+		./bootstrap || error_out "Failed to bootstrap strace"
+	fi
 
 	cd "${BUILDTEMP}" || error_out "Failed to move to ${BUILDTEMP}"
 
-	${SOURCE_ROOT}/exporters/strace/configure --prefix=${PREFIX} --program-prefix=proxy_exporter_ --enable-mpers=no || error_out "Failed to configure strace"
+	${SOURCE_ROOT}/exporters/strace/configure --prefix=${PREFIX} --program-prefix=proxy_exporter_ --enable-mpers=no --enable-bundled=yes --disable-gcc-Werror || error_out "Failed to configure strace"
 
 	make install -j8 || error_out "Failed to install strace"
 

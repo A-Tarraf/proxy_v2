@@ -71,22 +71,18 @@
 
                 <br>
 
-                <label for="ftiocustombox">Modify FTIO parameters:</label>
-                <span class="info-symbol"
-                title="Temporarily modify parameters sent to Ftio for a single metric.">&#x1F6C8</span>
-                <input type="checkbox" id="ftiocustombox" name="ftiocustombox">
             </div>
-            <br><br>
 
-            <div id="ftio-container"
-                style="display: none; background-color: var(--sidebar-bg); border-radius: 12px; padding: 20px">
-
-                <div id="applyButtonGroup" class="ftio-params">
-                    <label for="applyBtn">Apply Parameters: </label>
-                    <input type="checkbox" id="applyBtn"></button>
+            <details id="ftioCustomDetails" style="margin-top: 12px;">
+                <summary style="cursor:pointer; font-weight:bold; padding:4px 0;">
+                    Modify FTIO parameters
+                    <span class="info-symbol"
+                        title="Temporarily override parameters sent to FTIO for this single metric. Edits apply automatically while this section is open; closing it reverts to the proxy's default parameters.">&#x1F6C8</span>
+                </summary>
+                <div id="ftio-container"
+                    style="background-color: var(--sidebar-bg); border-radius: 12px; padding: 20px; margin-top: 8px">
                 </div>
-            </div>
-
+            </details>
 
         </form>
     </section>
@@ -384,26 +380,49 @@
             const target = document.getElementById('target').value;
             const metric = document.getElementById('metric').value;
             const derivate = document.getElementById('derivatebox').checked;
+            if (!metric) return;
 
-            // Create the JSON request object
-            let request_ftio = {
-                jobid: target,
-                metricid: metric
+            const request_ftio = { jobid: target, metricid: metric };
+            if (derivate) request_ftio.derivate = "deriv__";
+
+            // The FTIO parameter form is injected and populated asynchronously by
+            // loadFTIOForm(); only send its values once it has actually loaded.
+            const freqField = document.getElementById('samplingRateField');
+            const formReady = !!freqField && freqField.value !== '';
+
+            // Recompute the model for this one metric on the FTIO server with the
+            // current parameter values (defaults unless the user edited them).
+            const computeOnDemand = () => {
+                const p = new URLSearchParams(request_ftio);
+                p.set('args', JSON.stringify(convertParameters()));
+                return fetch(`/ftio/modified_args?${p.toString()}`).then(r => r.json());
+            };
+
+            let pending;
+            if (applyCustomFTIO && formReady) {
+                // User changed parameters — always recompute with them, regardless
+                // of whether the "Modify FTIO parameters" panel is expanded.
+                pending = computeOnDemand();
+            } else {
+                // Default parameters — use the cached model, but if a background
+                // scrape has not produced one for this metric yet, compute it on
+                // demand so the trace tab does not silently show nothing.
+                const q = new URLSearchParams(request_ftio).toString();
+                pending = fetch(`/trace/ftio?${q}`).then(r => r.json()).then(data => {
+                    if ((data && data.amp !== undefined) || !formReady) return data;
+                    return computeOnDemand().catch(() => data);
+                });
             }
-            if (derivate) request_ftio.derivate = "deriv__"
-            if (applyCustomFTIO) request_ftio.args = JSON.stringify(convertParameters());
 
-            let query_params = new URLSearchParams(request_ftio).toString();
-
-            const server_url = applyCustomFTIO ? '/ftio/modified_args' : '/trace/ftio';
-
-            fetch(`${server_url}?${query_params}`, {
-                method: 'GET',
-            }).then(response => response.json())
+            pending
                 .then(data => {
-                    if (data.amp === undefined) {
-                        console.warn(data.operation);
-                        setFtioWarning('No dominant frequency — FTIO returned no result for this metric.', 'error');
+                    if (!data || data.amp === undefined) {
+                        console.warn(data && data.operation);
+                        setFtioWarning(
+                            'No dominant frequency — FTIO returned no result for this metric. ' +
+                            'Try increasing the sampling frequency (lower --sampling-period/-S) to resolve shorter periods.',
+                            'warn'
+                        );
                         chart._ftioParams = null;
                         return;
                     }
@@ -412,7 +431,11 @@
                     const topFreqs = data.top_freqs;
                     if (!topFreqs || !topFreqs.freq || !topFreqs.conf ||
                         topFreqs.freq.length === 0 || topFreqs.conf.length === 0) {
-                        setFtioWarning('No dominant frequency — no periodic pattern detected in this metric.', 'error');
+                        setFtioWarning(
+                            'No dominant frequency — no periodic pattern detected in this metric. ' +
+                            'Try increasing the sampling frequency (lower --sampling-period/-S) to resolve shorter periods.',
+                            'warn'
+                        );
                         chart._ftioParams = null;
                         return;
                     }
@@ -614,10 +637,8 @@
                 update_ftio();
             } else {
                 ftioOptions.style.display = 'none';
-                ftioSettings.style.display = 'none';
-                ftiocustombox.checked = false;
+                ftioCustomDetails.open = false;
                 setFtioWarning(null);
-                applyBtn.checked = false;
                 applyCustomFTIO = false;
                 chart._ftioHidden = {};
             }
@@ -729,15 +750,11 @@
         const ftiobox = document.getElementById('ftiobox');
         const ftioOptions = document.getElementById('ftioOptions');
         ftioOptions.style.display = ftiobox.checked ? "block" : "none";
-        const ftiocustombox = document.getElementById('ftiocustombox');
-        const ftioSettings = document.getElementById('ftio-container');
-        ftioSettings.style.display = ftiocustombox.checked ? "block" : "none";
+        const ftioCustomDetails = document.getElementById('ftioCustomDetails');
         const ftioDropdown = document.getElementById('ftioDropdown');
         let showFTIO = ftiobox.checked ? ftioDropdown.value : 0;
 
         let applyCustomFTIO = false;
-        const applyBtn = document.getElementById('applyBtn');
-        applyBtn.checked = false;
 
         // Create the JSON request object
         const request = {
@@ -893,20 +910,31 @@
         document.getElementById('ftioReconstruct').addEventListener('change', function () {
             chart.update();
         });
-        ftiocustombox.addEventListener('change', function () {
-            const ftioSettings = document.getElementById('ftio-container');
-            if (ftiocustombox.checked) {
-                applyBtn.checked = true;
-                applyCustomFTIO = true;
-            } else {
-                applyBtn.checked = false;
-                applyCustomFTIO = false;
-            }
-            ftioSettings.style.display = ftiocustombox.checked ? "block" : "none";
-        });
-        applyBtn.addEventListener('change', function () {
-            applyCustomFTIO = applyBtn.checked;
-            console.log(`Apply Custom FTIO Parameters: ${applyCustomFTIO}`);
+        // The <details> panel only shows/hides the parameter form — it does not
+        // gate whether the overrides are in effect. Editing any field applies
+        // the change automatically (debounced) and keeps it applied even after
+        // the panel is collapsed. "Restore" reverts to the proxy defaults.
+        let ftioParamsDebounce = null;
+        const ftioContainer = document.getElementById('ftio-container');
+        const scheduleFtioParamUpdate = function () {
+            applyCustomFTIO = true;
+            clearTimeout(ftioParamsDebounce);
+            ftioParamsDebounce = setTimeout(function () {
+                if (showFTIO) update_ftio();
+            }, 300);
+        };
+        ftioContainer.addEventListener('input', scheduleFtioParamUpdate);
+        ftioContainer.addEventListener('change', scheduleFtioParamUpdate);
+        ftioContainer.addEventListener('click', function (e) {
+            const btn = e.target.closest('#restoreBtn, #clearBtn');
+            if (!btn) return;
+            // Restore re-fetches the proxy defaults into the form; drop back to
+            // the default (cached) FTIO path once it has repopulated.
+            if (btn.id === 'restoreBtn') applyCustomFTIO = false;
+            clearTimeout(ftioParamsDebounce);
+            ftioParamsDebounce = setTimeout(function () {
+                if (showFTIO) update_ftio();
+            }, 300);
         });
 
         // Event listener to handle zooming with mouse wheel + shift key
