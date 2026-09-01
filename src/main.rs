@@ -283,9 +283,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     factory_sh.root_proxy.read().unwrap().clone(),
                     factory_sh.web_url.read().unwrap().clone(),
                 ) {
-                    // Only child proxies need to notify root (root_url != my_url)
+                    // Only child proxies need to notify root (root_url != my_url).
+                    // root_url is already normalized to "http://host:port" by
+                    // ExporterFactory::set_data — do not prepend the scheme again.
                     if root_url != my_url {
-                        let leave_url = format!("http://{}/leave?from={}", root_url, my_url);
+                        let base = root_url.trim_end_matches('/');
+                        let leave_url = if base.starts_with("http") {
+                            format!("{}/leave?from={}", base, my_url)
+                        } else {
+                            format!("http://{}/leave?from={}", base, my_url)
+                        };
                         log::info!("Sending graceful leave to {}", leave_url);
                         let _ = reqwest::blocking::get(&leave_url);
                     }
